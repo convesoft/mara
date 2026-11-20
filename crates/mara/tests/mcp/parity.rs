@@ -725,5 +725,49 @@ fn the_query_operations_through_mcp_as_through_the_cli() {
         "{broken}"
     );
     p.rejected(&["query", "gate", "passed"]);
+
+    // `query report` explains the failed item's row; `--complete` gave the leaf of
+    // `source_complete`, the candidate the leaf of `candidate`.
+    let report = p.expect(
+        &[
+            "query",
+            "report",
+            "passed",
+            "--id",
+            "REQ-COLD-READ-TIME",
+            "--input",
+            "candidate=abc",
+            "--input",
+            "result=@results.json",
+            "--complete",
+            "result",
+        ],
+        0,
+    );
+    assert_eq!(report["report"]["outcome"], "failed", "{report}");
+    let proof = report["rows"][0]["proof"].to_string();
+    for leaf in [
+        json!({"input": "source_complete", "values": ["result"]}),
+        json!({"input": "candidate", "values": ["abc"]}),
+    ] {
+        assert!(proof.contains(&leaf.to_string()), "{leaf} in {proof}");
+    }
+    let broken = p.expect(
+        &[
+            "query",
+            "report",
+            "broken-gate",
+            "--id",
+            "NEED-FAST-ANSWERS",
+        ],
+        1,
+    );
+    assert_eq!(broken["report"]["outcome"], "unavailable", "{broken}");
+    assert_eq!(broken["rows"], json!([]), "{broken}");
+    p.refused(
+        &["query", "report", "listed", "--id", "REQ-COLD-READ-TIME"],
+        "unknown-entry",
+    );
+    p.rejected(&["query", "report", "passed"]);
     p.finish();
 }

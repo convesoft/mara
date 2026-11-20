@@ -5,7 +5,7 @@ This project keeps Mara items in Markdown documents, checked against its schema.
 cli: Run `mara` for every operation's arguments. `--project <dir>` names the project root; without it, the nearest directory at or above the working directory that holds `.mara/config.toml` is the project. `--format json` prints one JSON object: the result, or `{"error": {"code", "message", "diagnostics"}}`. Exit status 0 is success or a valid result, 1 a failure or an invalid result, 2 rejected arguments.
 mcp: Each tool returns one JSON object: the result, or `{"error": {"code", "message", "diagnostics"}}`.
 mcp-bound: This server works on the one project it was started for; its tools take no `{{--project}}`.
-mcp-unbound: Each tool takes `{{--project}}`, the project root; without it, the project is found from where the server started. Pass it when you work in another checkout or worktree.
+mcp-unbound: Each tool takes `{{--project}}`, the project root, else found from where the server started. Pass it for another checkout or worktree.
 
 ## Find and read
 
@@ -14,7 +14,7 @@ mcp-unbound: Each tool takes `{{--project}}`, the project root; without it, the 
 - `{{search <query>}}` finds items and narrative by their words; `{{item list}}` lists items. Narrow both with `{{--type}}`, `{{--field}}` `key=value`, `{{--relation}}`, `{{--path}}` and `{{--id}}`.
 - `{{get <node>}}` reads an item with its path, line and MID, a whole document, or narrative. A node is an ID, a MID, a path from the project root, or `<path>:<line>`.
 - `{{relation list <node>}}` lists an item's relations both ways.
-- `{{query list}}` names the queries, views, invariants and gates; `{{query execute <name>}}`, `{{query view <name>}}` and `{{query gate <name>}}` run one.
+- `{{query list}}` names the queries, views, invariants and gates; `{{query execute <name>}}`, `{{query view <name>}}` and `{{query gate <name>}}` run one, and `{{query report <name>}}` explains an outcome.
 - A result cut short gives a cursor: pass it as `{{--cursor}}` for the next page. `{{--limit}}` sets the page size.
 
 ## Author
@@ -54,5 +54,5 @@ Users sign in with a passkey.
 ## Validate
 
 - `{{project validate}}` checks the project, or what `{{--path}}` names. `{{item validate <item>}}` checks one item and `{{schema validate}}` the schema file. Any error makes the result invalid.
-- After changing documents, run `{{project fix}}`, then `{{project validate}}`, and resolve every error before you finish.
+- After changing documents, run `{{project fix}}`, then `{{project validate}}`, and resolve every error.
 - `invalid-project` means the configuration or schema has an error: `{{project validate}}` reports where; fix it by hand.

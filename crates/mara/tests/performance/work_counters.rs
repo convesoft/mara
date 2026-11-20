@@ -159,9 +159,9 @@ fn check_cold(
             snapshot_builds: 1,
             ..WorkCounts::default()
         },
-        // `query execute`, `query view` and `query gate`: 1 program run, as 1 subprocess, and a
-        // read of each file that `--input` names, which is no input of the project and is not
-        // hashed.
+        // `query execute`, `query view`, `query gate` and `query report`, whose one run is in
+        // provenance mode: 1 program run, as 1 subprocess, and a read of each file that
+        // `--input` names, which is no input of the project and is not hashed.
         Reads::Evaluates { input_files } => WorkCounts {
             file_reads: read + input_files,
             hashes: read,

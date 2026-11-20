@@ -15,7 +15,7 @@ const NOT_TOOLS: [&str; 5] = [
 ];
 
 /// The document operations of DES-OPERATIONS, as tools.
-const TOOLS: [&str; 23] = [
+const TOOLS: [&str; 24] = [
     "project_init",
     "project_validate",
     "project_fix",
@@ -39,6 +39,7 @@ const TOOLS: [&str; 23] = [
     "query_execute",
     "query_view",
     "query_gate",
+    "query_report",
 ];
 
 #[test]
@@ -224,7 +225,7 @@ fn every_document_operation_is_a_tool_with_its_arguments_and_options() {
             .collect();
         let expected: Vec<&&str> = match name.as_str() {
             "item_create" => vec![&"title", &"body"],
-            "query_gate" => vec![&"id"],
+            "query_gate" | "query_report" => vec![&"id"],
             _ => Vec::new(),
         };
         assert_eq!(options_required, expected, "{name}");

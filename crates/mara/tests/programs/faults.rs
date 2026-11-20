@@ -1,6 +1,7 @@
 //! VER-PROGRAM-FAULTS: each faulty program is consumed by an invariant of each severity, a
 //! query and a gate that names two items. `project validate` reports the fault and is invalid,
-//! `query execute` fails with it, and the gate and both items are unavailable.
+//! `query execute` fails with it, the gate and both items are unavailable, and so is `query
+//! report` of the invariant, with no row and no explanation.
 
 use crate::{
     GATE, PROGRAMS_LINE, QUERY, Sandbox, assert_fault, assert_unavailable, both_severities,

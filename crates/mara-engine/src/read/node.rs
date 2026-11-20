@@ -56,7 +56,7 @@ pub enum NodeSummary {
 }
 
 impl ItemSummary {
-    pub(crate) fn of(snapshot: &Snapshot, item: usize) -> ItemSummary {
+    pub fn of(snapshot: &Snapshot, item: usize) -> ItemSummary {
         let entry = &snapshot.items()[item];
         let parsed = snapshot.item(item);
         ItemSummary {

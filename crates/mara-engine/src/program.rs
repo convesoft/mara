@@ -7,7 +7,7 @@
 //! symbols and numbers. Anything else is refused at the token where the reading stopped, like a
 //! compile error.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::diagnostic::Diagnostic;
 
@@ -42,6 +42,9 @@ pub struct Program {
     pub relations: BTreeMap<String, Relation>,
     /// Every `.include` that names one of its files, in the order they were read.
     pub includes: Vec<Include>,
+    /// Every fact the program states, a clause without a body, with components' facts under
+    /// their qualified relation names.
+    pub facts: Vec<Fact>,
     /// The text of each file and the offsets where its lines start.
     texts: Vec<(String, Vec<usize>)>,
 }
@@ -71,6 +74,14 @@ pub struct Column {
     pub name: String,
     pub kind: ColumnKind,
     /// Where its type is named.
+    pub place: Place,
+}
+
+/// A fact of a program: the relation of one head of a clause without a body, and where that
+/// head starts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fact {
+    pub relation: String,
     pub place: Place,
 }
 
@@ -153,6 +164,64 @@ impl Program {
     /// The text of the file at `file`, an index into `files`.
     pub fn text(&self, file: usize) -> &str {
         &self.texts[file].0
+    }
+
+    /// The values of `fact` as its text writes them, when each argument is a literal: a
+    /// string, decoded, or an integer, with an optional `-`. `None` for any other argument,
+    /// such as a variable of a component's parameter, a sum or a record.
+    pub fn fact_values(&self, fact: &Fact) -> Option<Vec<crate::facts::Value>> {
+        use crate::facts::Value;
+        use lexer::{Kind, Punct};
+        let text = &self.text(fact.place.file)[fact.place.offset..];
+        let tokens = lexer::tokens(text);
+        let mut kinds = tokens.iter().map(|token| &token.kind);
+        // The relation's name, qualified or not, then its arguments.
+        loop {
+            match kinds.next()? {
+                Kind::Ident(_) | Kind::Punct(Punct::Dot) => {}
+                Kind::Punct(Punct::LParen) => break,
+                _ => return None,
+            }
+        }
+        let mut values = Vec::new();
+        loop {
+            let negative = matches!(kinds.clone().next(), Some(Kind::Punct(Punct::Minus)));
+            if negative {
+                kinds.next();
+            }
+            let value = match kinds.next()? {
+                Kind::Str(text) if !negative => Value::Symbol(text.clone()),
+                Kind::Number { value, .. } => {
+                    let magnitude = i64::from(*value);
+                    let number = if negative { -magnitude } else { magnitude };
+                    Value::Number(i32::try_from(number).ok()?)
+                }
+                Kind::Punct(Punct::RParen) if values.is_empty() && !negative => {
+                    return Some(values);
+                }
+                _ => return None,
+            };
+            values.push(value);
+            match kinds.next()? {
+                Kind::Punct(Punct::Comma) => {}
+                Kind::Punct(Punct::RParen) => return Some(values),
+                _ => return None,
+            }
+        }
+    }
+
+    /// The value of every string literal in the program's files, as the lexer decodes its
+    /// escapes. Soufflé decodes them the same way and prints them so, without escapes.
+    pub fn string_constants(&self) -> BTreeSet<String> {
+        let mut constants = BTreeSet::new();
+        for (text, _) in &self.texts {
+            for token in lexer::tokens(text) {
+                if let lexer::Kind::Str(value) = token.kind {
+                    constants.insert(value);
+                }
+            }
+        }
+        constants
     }
 
     /// The location of byte `offset` of the file at index `file`.

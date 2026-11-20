@@ -780,3 +780,44 @@ fn programs_at_the_limits_fit_a_small_stack() {
         .join()
         .unwrap();
 }
+
+/// The facts a program states, with their values when every argument is a literal, and the
+/// decoded string constants: what `query report` reads Soufflé's proofs with.
+#[test]
+fn facts_and_string_constants_are_read_as_written() {
+    use crate::facts::Value;
+    let program = admitted(
+        ".decl a(x: symbol, n: number)\na(\"q\\\"z, y\", -7).\na(\"b\", 0x10). a(\"c\", 1 + 1).\n\
+         .comp C { .decl r(x: symbol) r(\"in\"). }\n.init c = C\n\
+         .decl s(x: symbol)\ns(x) :- a(x, _), x != \"t\\tu\".\n",
+    );
+    let mut facts: Vec<(String, Option<Vec<Value>>, usize)> = (program.facts.iter())
+        .map(|fact| {
+            let line = program.location(fact.place).line;
+            (fact.relation.clone(), program.fact_values(fact), line)
+        })
+        .collect();
+    facts.sort_by(|a, b| (&a.0, a.2, a.1.is_none()).cmp(&(&b.0, b.2, b.1.is_none())));
+    let symbol = |text: &str| Value::Symbol(text.to_owned());
+    assert_eq!(
+        facts,
+        [
+            (
+                "a".to_owned(),
+                Some(vec![symbol("q\"z, y"), Value::Number(-7)]),
+                2
+            ),
+            (
+                "a".to_owned(),
+                Some(vec![symbol("b"), Value::Number(16)]),
+                3
+            ),
+            ("a".to_owned(), None, 3),
+            ("c.r".to_owned(), Some(vec![symbol("in")]), 4),
+        ]
+    );
+    let constants = program.string_constants();
+    for constant in ["q\"z, y", "b", "c", "in", "t\tu"] {
+        assert!(constants.contains(constant), "{constant}: {constants:?}");
+    }
+}

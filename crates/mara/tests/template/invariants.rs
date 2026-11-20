@@ -74,6 +74,14 @@ fn check(breaks: &[Item], expected: &[(&str, &str)], keeps: &[Vec<Item>]) {
         expected,
         "breaks: {breaks:#?}"
     );
+    // `query report` explains each failing row of the template's invariants.
+    for (code, id) in &expected {
+        if INVARIANTS.contains(&code.as_str()) {
+            let (outcome, rows) = project.report(code, id, &[]);
+            assert_eq!(outcome, "failed", "{code} {id}");
+            assert_eq!(rows, ["proof"], "{code} {id}");
+        }
+    }
     let drafts: Vec<Item> = breaks.iter().map(Item::as_draft).collect();
     let others: BTreeSet<(String, String)> = expected
         .iter()

@@ -1,10 +1,11 @@
 //! The results of the `query` operations, in pages (DES-QUERY-RESULTS in `docs/rules/index.mara.md`):
-//! the entries `query list` shows, the rows of `query execute` and `query view`, and the items
-//! a gate judges.
+//! the entries `query list` shows, the rows of `query execute` and `query view`, the items a
+//! gate judges, and the rows `query report` explains.
 
 use crate::config::{CONFIG_PATH, Consumer, Entry, Rules};
 use crate::diagnostic::Diagnostic;
-use crate::evaluation::{GateOutcome, GateRow, Outcome, compare_rows};
+use crate::evaluation::explain::Explanation;
+use crate::evaluation::{GateOutcome, GateRow, Outcome, Role, compare_rows};
 use crate::facts::{Value, write_row};
 use crate::hash::Hash;
 use crate::json::Object;
@@ -275,4 +276,86 @@ fn gate_row_json(row: &GateRow) -> String {
     write_row(object.key("values"), &row.values);
     object.end();
     out
+}
+
+/// A row that `query report` explains: a row of an invariant's relation, or of a gate's
+/// relation with its role.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExplainedRow {
+    pub relation: String,
+    /// The relation's role in a gate; `None` for an invariant.
+    pub role: Option<Role>,
+    pub values: Vec<Value>,
+    pub explanation: Explanation,
+}
+
+/// What `query report` returns.
+#[derive(Clone, Copy, Debug)]
+pub struct ReportRequest<'a> {
+    /// An invariant or a gate.
+    pub entry: &'a Entry,
+    /// The item the report is about, by its index in the snapshot.
+    pub item: usize,
+    pub outcome: Outcome,
+    pub rows: &'a [ExplainedRow],
+    /// The key of the evaluation, or of the snapshot when nothing was evaluated.
+    pub layer: Hash,
+    /// The problems that left the evaluation without rows, as for a gate.
+    pub problems: &'a [Diagnostic],
+}
+
+/// The entry's outcome for the item and each row that caused it, with its proof or why it has
+/// none. The diagnostics are those of [`gate_page`].
+pub fn report_page(
+    documents: &Documents<'_>,
+    request: &ReportRequest<'_>,
+    paging: &Paging<'_>,
+) -> Result<Page<ExplainedRow>, ReadError> {
+    let snapshot = documents.snapshot;
+    let mut diagnostics = request.problems.to_vec();
+    diagnostics.extend(documents.diagnostics.iter().cloned());
+    let item = ItemSummary::of(snapshot, request.item);
+    let parts = [request.entry.name.as_str(), item.mid.as_str()];
+    let key = result_key(request.layer, "query report", parts, &diagnostics);
+    let mut head = String::new();
+    let mut object = Object::new(&mut head);
+    object.string("name", &request.entry.name);
+    object.string("kind", request.entry.kind.name());
+    object.key("item").push_str(&item.json());
+    object.string("outcome", request.outcome.name());
+    object.end();
+    let envelope = Envelope {
+        head: Some(Head {
+            name: "report",
+            json: head,
+            path: CONFIG_PATH.to_owned(),
+            line: request.entry.line,
+        }),
+        records: "rows",
+        diagnostics: &diagnostics,
+        kept: request.problems.len(),
+    };
+    page::list(
+        key,
+        paging,
+        request.rows.len(),
+        &envelope,
+        |index| {
+            let row = &request.rows[index];
+            let mut out = String::new();
+            let mut object = Object::new(&mut out);
+            object.string("relation", &row.relation);
+            if let Some(role) = row.role {
+                object.string("role", role.name());
+            }
+            write_row(object.key("values"), &row.values);
+            match &row.explanation {
+                Ok(proof) => object.key("proof").push_str(&proof.json()),
+                Err(reason) => object.string("unexplained", reason),
+            }
+            object.end();
+            (row.clone(), out)
+        },
+        |_| page::too_large("a row about this item", &item.path, item.line),
+    )
 }

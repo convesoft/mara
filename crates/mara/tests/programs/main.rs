@@ -2,13 +2,14 @@
 //! `docs/rules/verification.mara.md` and `docs/rules/verification.mara.md`): the invariant
 //! side and the query, view and gate cases of VER-PROGRAM-CONSUMERS, VER-REQUEST-INPUTS through
 //! the CLI, VER-PROGRAM-FAULTS, VER-EVALUATION-TIME-LIMIT and VER-PROGRAM-REACH-CASES for
-//! validation, `query execute` and `query gate`, and VER-ADMITTED-LANGUAGE's compile check of
-//! the fixtures.
+//! validation, `query execute`, `query gate` and `query report`, VER-EXPLANATIONS, and
+//! VER-ADMITTED-LANGUAGE's compile check of the fixtures.
 //!
 //! The binary runs with an environment of only `HOME` and `TMPDIR`, both inside the test's
 //! temporary directory; it finds the pinned `souffle` beside its own `target/` directory.
 
 mod consumers;
+mod explain;
 mod faults;
 mod fixtures;
 mod inputs;
@@ -99,6 +100,8 @@ pub const QUERY: [&str; 3] = ["query", "execute", "as-query"];
 pub const GATE: [&str; 7] = [
     "query", "gate", "as-gate", "--id", "REQ-A", "--id", "NEED-ONE",
 ];
+/// `query report as-error` of [`both_severities`], about one item.
+pub const REPORT: [&str; 5] = ["query", "report", "as-error", "--id", "REQ-A"];
 
 /// A sandbox: `home/`, `tmp/` (the binary's `TMPDIR`) and a project in `project/` with three
 /// items in `docs/a.mara.md`: `REQ-A` (MID 1, accepted, owner `abc`), `REQ-B` (MID 2, draft,
@@ -288,9 +291,10 @@ pub fn assert_fault(run: &Run, code: &str, path: &str, line: u64, parts: &[&str]
     assert_diagnostic(run.diagnostics(), code, path, line, parts);
 }
 
-/// Requires `query execute as-query` to fail and `query gate as-gate` to be unavailable, with
-/// both items, each with the program's fault reported as [`assert_fault`] requires: never a
-/// row, never a passing outcome. Returns the two runs.
+/// Requires `query execute as-query` to fail, and `query gate as-gate` and `query report
+/// as-error` to be unavailable, the gate with both items and the report without rows, each with
+/// the program's fault reported as [`assert_fault`] requires: never a row, never a passing
+/// outcome, never an explanation. Returns the three runs.
 #[track_caller]
 pub fn assert_unavailable(
     sandbox: &Sandbox,
@@ -298,7 +302,7 @@ pub fn assert_unavailable(
     path: &str,
     line: u64,
     parts: &[&str],
-) -> [Run; 2] {
+) -> [Run; 3] {
     let query = sandbox.mara(&QUERY);
     assert_eq!(query.status, 1, "{query:#?}");
     assert_eq!(query.json["error"]["code"], "program-failed", "{query:#?}");
@@ -314,7 +318,15 @@ pub fn assert_unavailable(
         assert_eq!(item["rows"], serde_json::json!([]), "{gate:#?}");
     }
     assert_diagnostic(gate.diagnostics(), code, path, line, parts);
-    [query, gate]
+    let report = sandbox.mara(&REPORT);
+    assert_eq!(report.status, 1, "{report:#?}");
+    assert_eq!(
+        report.json["report"]["outcome"], "unavailable",
+        "{report:#?}"
+    );
+    assert_eq!(report.json["rows"], serde_json::json!([]), "{report:#?}");
+    assert_diagnostic(report.diagnostics(), code, path, line, parts);
+    [query, gate, report]
 }
 
 /// Requires an error with `code` at `path` and `line`, any line for 0, whose message contains

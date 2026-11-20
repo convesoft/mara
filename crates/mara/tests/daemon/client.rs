@@ -218,7 +218,8 @@ fn wait_for_daemon_of(test: &Test, binary: &Path) -> u32 {
 }
 
 /// `--project` and `--input <name>=@<file>` are resolved from the client's directory, never
-/// from the daemon's, which runs elsewhere; the result is that of direct mode.
+/// from the daemon's, which runs elsewhere; the result is that of direct mode, for `query
+/// execute` and for `query report`, whose proof names the input the client's file supplied.
 #[test]
 fn the_daemon_resolves_paths_from_the_clients_directory() {
     let test = Test::new();
@@ -227,13 +228,16 @@ fn the_daemon_resolves_paths_from_the_clients_directory() {
     fs::write(
         project.join(".mara/rules/notes.dl"),
         ".include \"mara.dl\"\n.decl note(text: symbol)\n.decl r_note(text: symbol)\n\
-         r_note(t) :- note(t).\n",
+         r_note(t) :- note(t).\n.decl noted(m: Mid, t: symbol)\n\
+         noted(m, t) :- item(m, _, _, _, _, _), note(t).\n",
     )
     .unwrap();
     let config = format!(
         "{}\n[rules]\nprograms = [\".mara/rules/*.dl\"]\n\n[queries.notes]\n\
          program = \".mara/rules/notes.dl\"\nrelation = \"r_note\"\n\
-         description = \"The notes\"\ninputs = [\"note\"]\n",
+         description = \"The notes\"\ninputs = [\"note\"]\n\n[gates.noted]\n\
+         program = \".mara/rules/notes.dl\"\ndescription = \"Items without notes\"\n\
+         subjects = [\"noted\"]\nconditions = [\"noted\"]\ninputs = [\"note\"]\n",
         crate::CONFIG
     );
     fs::write(project.join(".mara/config.toml"), config).unwrap();
@@ -265,6 +269,42 @@ fn the_daemon_resolves_paths_from_the_clients_directory() {
             "note=@missing.json",
         ],
         &["--debug-stats", "--project", "../project", "search", "Two"],
+        &[
+            "--debug-stats",
+            "--format",
+            "json",
+            "--project",
+            "../project",
+            "query",
+            "report",
+            "noted",
+            "--id",
+            "REQ-ONE",
+            "--input",
+            "note=@note.json",
+        ],
+        &[
+            "--project",
+            "../project",
+            "query",
+            "report",
+            "noted",
+            "--id",
+            "REQ-ONE",
+            "--input",
+            "note=@note.json",
+        ],
+        &[
+            "--project",
+            "../project",
+            "query",
+            "report",
+            "noted",
+            "--id",
+            "REQ-ONE",
+            "--input",
+            "note=@missing.json",
+        ],
     ] {
         let direct = test.direct(&client, args);
         let served = test.served_by(pid, &client, args);
@@ -286,6 +326,30 @@ fn the_daemon_resolves_paths_from_the_clients_directory() {
     );
     let rows: Value = serde_json::from_str(&run.stdout).unwrap();
     assert_eq!(rows["rows"][0]["values"][0], "from the client", "{rows}");
+    let run = test.direct(
+        &client,
+        &[
+            "--format",
+            "json",
+            "--project",
+            "../project",
+            "query",
+            "report",
+            "noted",
+            "--id",
+            "REQ-ONE",
+            "--input",
+            "note=@note.json",
+        ],
+    );
+    let report: Value = serde_json::from_str(&run.stdout).unwrap();
+    assert_eq!(report["report"]["outcome"], "failed", "{report}");
+    let leaf = &report["rows"][0]["proof"]["children"][1];
+    assert_eq!(
+        *leaf,
+        serde_json::json!({"input": "note", "values": ["from the client"]}),
+        "{report}"
+    );
 }
 
 /// A read dispatched to a daemon that is killed before it answers fails with `daemon-lost`

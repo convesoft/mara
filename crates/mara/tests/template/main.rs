@@ -2,8 +2,9 @@
 
 //! The `engineering` template's programs through the real `mara` binary, on disposable projects
 //! that `project init` creates: VER-TEMPLATE-CASES in `docs/template/index.mara.md`. The cases
-//! that need code links wait for mara-hk2arx; those that need explanations wait for `query
-//! report`.
+//! that need code links wait for mara-hk2arx. Each failing row of an invariant, and each row
+//! that makes a gate's item failed or unavailable, is also given to `query report`, which must
+//! explain it.
 //!
 //! The binary runs in direct mode (`MARA_NO_DAEMON=1`) with an environment of only `HOME` and
 //! `TMPDIR`, both inside the test's temporary directory; it finds the pinned `souffle` beside its
@@ -284,6 +285,34 @@ impl Project {
             .collect()
     }
 
+    /// `query report <name> --id <id>` with `args`: the item's outcome, and for each row that
+    /// caused it either `proof` or `unexplained: <reason>`. Requires one run and every row to
+    /// have one or the other, and exit status 0 only when every row is explained.
+    #[track_caller]
+    pub fn report(&self, name: &str, id: &str, args: &[&str]) -> (String, Vec<String>) {
+        let mut command = vec!["query", "report", name, "--id", id, "--limit", "100"];
+        command.extend_from_slice(args);
+        let run = self.mara(&command);
+        let outcome = run.json["report"]["outcome"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no report: {run:#?}"))
+            .to_owned();
+        let rows: Vec<String> = (run.json["rows"].as_array().unwrap().iter())
+            .map(|row| match row.get("proof") {
+                Some(_) => "proof".to_owned(),
+                None => {
+                    let reason = row["unexplained"].as_str().unwrap_or_else(|| {
+                        panic!("a row with neither a proof nor a reason: {run:#?}")
+                    });
+                    format!("unexplained: {reason}")
+                }
+            })
+            .collect();
+        let explained = rows.iter().all(|row| row == "proof");
+        assert_eq!(run.status, i32::from(!explained), "{run:#?}");
+        (outcome, rows)
+    }
+
     /// `query gate <name>` with `args`: the gate's outcome, and each item's ID, outcome and rows
     /// as `role relation(values)` with MIDs named by ID.
     #[track_caller]
@@ -327,7 +356,29 @@ impl Project {
                 }
             })
             .collect();
-        Gate { outcome, items }
+        let gate = Gate { outcome, items };
+        // `query report` gives each failed or unavailable item the same outcome and rows, and
+        // explains each row.
+        let mut inputs = Vec::new();
+        let mut rest = args.iter();
+        while let Some(arg) = rest.next() {
+            match *arg {
+                "--id" => {
+                    rest.next();
+                }
+                other => inputs.push(other),
+            }
+        }
+        for item in &gate.items {
+            if matches!(item.outcome.as_str(), "failed" | "unavailable") {
+                let (outcome, rows) = self.report(name, &item.id, &inputs);
+                assert_eq!(outcome, item.outcome, "{name} {}", item.id);
+                assert_eq!(rows.len(), item.rows.len(), "{name} {}: {rows:?}", item.id);
+                let explained = rows.iter().all(|row| row == "proof");
+                assert!(explained, "{name} {}: {rows:?}", item.id);
+            }
+        }
+        gate
     }
 }
 

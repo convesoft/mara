@@ -1,4 +1,4 @@
-//! VER-EVALUATION-TIME-LIMIT for validation, `query execute` and `query gate`.
+//! VER-EVALUATION-TIME-LIMIT for validation, `query execute`, `query gate` and `query report`.
 
 use std::fs;
 use std::time::Duration;
@@ -56,7 +56,7 @@ fn a_configured_limit_stops_the_evaluation() {
     let parts = ["time limit of 1 s"];
     let config = ".mara/config.toml";
     let consumers = assert_unavailable(&sandbox, "program-fault", config, PROGRAMS_LINE, &parts);
-    for run in [&run, &consumers[0], &consumers[1]] {
+    for run in [&run, &consumers[0], &consumers[1], &consumers[2]] {
         assert!(run.elapsed >= Duration::from_secs(1), "{:?}", run.elapsed);
         assert!(run.elapsed < Duration::from_secs(10), "{:?}", run.elapsed);
     }
@@ -79,7 +79,7 @@ fn the_default_limit_is_10_s() {
     let parts = ["time limit of 10 s"];
     let config = ".mara/config.toml";
     let consumers = assert_unavailable(&sandbox, "program-fault", config, PROGRAMS_LINE, &parts);
-    for run in [&run, &consumers[0], &consumers[1]] {
+    for run in [&run, &consumers[0], &consumers[1], &consumers[2]] {
         assert!(run.elapsed >= Duration::from_secs(10), "{:?}", run.elapsed);
         assert!(run.elapsed < Duration::from_secs(20), "{:?}", run.elapsed);
     }
@@ -115,7 +115,7 @@ fn programs_that_never_end_are_stopped_by_a_limit() {
         let config = ".mara/config.toml";
         let consumers =
             assert_unavailable(&sandbox, "program-fault", config, PROGRAMS_LINE, &["limit"]);
-        for run in [&run, &consumers[0], &consumers[1]] {
+        for run in [&run, &consumers[0], &consumers[1], &consumers[2]] {
             assert!(run.elapsed < Duration::from_secs(10), "{:?}", run.elapsed);
         }
         assert_no_souffle_left(&sandbox);

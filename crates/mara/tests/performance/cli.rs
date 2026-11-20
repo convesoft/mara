@@ -126,6 +126,18 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
                 Reads::Evaluates { input_files: 1 },
             )
         },
+        // Explains the failing row of a retired requirement, `not_accepted`: 1 run, in
+        // provenance mode.
+        case(
+            &[
+                "query",
+                "report",
+                "implementation-ready",
+                "--id",
+                &corpus.retired_requirement,
+            ],
+            Reads::Evaluates { input_files: 0 },
+        ),
         case(
             &["item", "move", &corpus.first_id, "docs/moved/first.mara.md"],
             Reads::Writes,

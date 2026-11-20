@@ -65,6 +65,7 @@ const OPERATIONS: &[Operation] = &[
     query::EXECUTE,
     query::VIEW,
     query::GATE,
+    query::REPORT,
     daemon::STATUS,
     daemon::START,
     daemon::STOP,

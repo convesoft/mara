@@ -107,7 +107,7 @@ In the setup of [VER-PROGRAM-CONSUMERS](#01M7HZYK9DYQDY8XFKWZES1ZB6), `query rep
 | Rows whose value holds a newline from a supplied input, a quote or a backslash, or is a negative number | Test | Cannot explain; never a proof of another row |
 | A row whose proof passes an aggregate | Test | Cannot explain |
 | Each case | Test | `project validate` and the gate return the same result as without the report |
-| The check that a returned proof is for the requested row, and the handling of a reply that is not JSON and of an aborted provenance run | Inspection | Review of mara-bx82k0 finds each; no admitted program is known to reach them ([EVD-SOUFFLE-PROGRAM-REACH](evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)) |
+| The check that a returned proof is for the requested row, and the handling of a reply that is not JSON and of an aborted provenance run | Inspection | Review of mara-jm5ecb finds each; no admitted program is known to reach them ([EVD-SOUFFLE-PROGRAM-REACH](evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)) |
 | From 0.4.0-alpha.6 (mara-xsm8w6), the test cases in the browser | Test | The same proofs |
 
 ---
@@ -228,6 +228,7 @@ The unit tests in `crates/mara/src/rules/sandbox/tests.rs` plant the way past th
 | The helper attempts nothing; the program it would execute, run outside the sandbox | Empty rows; the program runs |
 | A program with one output row | Its row |
 | The ABI capped at 0, as without Landlock | A fault that names Landlock; 0 subprocess spawns |
+| The helper's read, write, execute, network and signal attempts and its run without an attempt, each started as the run in provenance mode of `query report`, with pipes for its standard input and output | Each attempt stopped; the run without an attempt a fault for ending without answering |
 
 Every case of [VER-PROGRAM-REACH-CASES](#01M7HZYKCS3TN1SR30YSN69SED), [VER-PROGRAM-FAULTS](#01M7HZYKB4R632Q63YWS8CY1FJ) and [VER-EVALUATION-TIME-LIMIT](#01M7HZYKBNDY3ZA77JMB0VD06H), and the interruption tests of [DES-RULE-EXECUTION](evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH), run with the sandbox.
 

@@ -27,7 +27,8 @@ pub use node::{ItemSummary, NodeSummary, Portion, RowPart, get, get_code};
 pub(crate) use node::{Named, resolve};
 pub use page::{DIAGNOSTIC_BYTES, shown_diagnostics};
 pub use query::{
-    GateRequest, JudgedItem, QueryRow, RowsRequest, gate_page, query_list, query_rows,
+    ExplainedRow, GateRequest, JudgedItem, QueryRow, ReportRequest, RowsRequest, gate_page,
+    query_list, query_rows, report_page,
 };
 pub use relations::{
     Connection, ConnectionKind, Direction, Location, Neighbour, RelationPage, relation_list,

@@ -4,6 +4,7 @@
 //! evaluation by the pinned Soufflé (DES-RULE-EXECUTION in `docs/rules/evaluation.mara.md`).
 
 mod consumer;
+mod explain;
 mod invariants;
 #[cfg(target_os = "linux")]
 mod sandbox;
@@ -107,7 +108,8 @@ pub struct Run<'a> {
     pub limits: Limits,
 }
 
-pub use consumer::{Consumed, consume};
+pub use consumer::{Consumed, consume, consume_explained};
+pub use explain::{Explained, explain};
 pub use invariants::{Invariants, Scope, invariants};
 
 /// The evaluations of one request by their key ([`evaluation::key`]): every consumer of a
@@ -134,23 +136,16 @@ impl Evaluations {
 /// the limits (DES-RULE-EXECUTION). Returns the rows of every output relation, or the fault
 /// that makes the outcome unavailable. Counts one subprocess spawn and one program run.
 pub fn evaluate(run: &Run, work: &mut WorkCounts) -> Result<Rows, Fault> {
-    let host = |what: &str, error: &dyn std::fmt::Display| Fault::Host(format!("{what}: {error}"));
     // Declared before the directory, so it ends Mara for a deferred signal only after the
     // directory is removed.
     let _interrupts = interrupt::Deferred::begin();
-    let dir = caller::tempdir("mara-evaluation-")
-        .map_err(|error| host("cannot create the evaluation's private directory", &error))?;
-    let read = evaluation::read_relations(run.program, run.relations);
-    let inputs: Vec<&str> = read.iter().map(|relation| relation.name.as_str()).collect();
-    prepare(dir.path(), run, &read, &inputs)
-        .map_err(|error| host("cannot write the evaluation's private directory", &error))?;
+    let dir = private_dir(run)?;
     run_in(run, dir.path(), work)
 }
 
 /// Runs Soufflé on the prepared private directory `dir` and reads its outcome.
 fn run_in(run: &Run, dir: &Path, work: &mut WorkCounts) -> Result<Rows, Fault> {
-    let host = |what: &str, error: &dyn std::fmt::Display| Fault::Host(format!("{what}: {error}"));
-    let exit = spawn_and_wait(run.souffle, dir, run.limits, work)
+    let exit = spawn_and_wait(run.souffle, dir, run.limits, None, work)
         .map_err(|error| host("cannot run Soufflé", &error))?;
     let printed = |name: &str| bounded_read(&dir.join(name));
     let stderr = printed(evaluation::STDERR);
@@ -167,6 +162,27 @@ fn run_in(run: &Run, dir: &Path, work: &mut WorkCounts) -> Result<Rows, Fault> {
         &stderr,
         run.limits,
     )?;
+    read_rows(dir, run)
+}
+
+/// A fault of the host, from `error` while doing `what`.
+fn host(what: &str, error: &dyn std::fmt::Display) -> Fault {
+    Fault::Host(format!("{what}: {error}"))
+}
+
+/// A new private directory, prepared for a run of `run.program`.
+fn private_dir(run: &Run) -> Result<tempfile::TempDir, Fault> {
+    let dir = caller::tempdir("mara-evaluation-")
+        .map_err(|error| host("cannot create the evaluation's private directory", &error))?;
+    let read = evaluation::read_relations(run.program, run.relations);
+    let inputs: Vec<&str> = read.iter().map(|relation| relation.name.as_str()).collect();
+    prepare(dir.path(), run, &read, &inputs)
+        .map_err(|error| host("cannot write the evaluation's private directory", &error))?;
+    Ok(dir)
+}
+
+/// The rows of each output relation of `run`, from the files Soufflé wrote in `dir`.
+fn read_rows(dir: &Path, run: &Run) -> Result<Rows, Fault> {
     let mut rows = Rows::default();
     for relation in run.outputs {
         let path = dir.join(evaluation::output_file(relation));
@@ -204,22 +220,34 @@ fn bounded_read(path: &Path) -> Vec<u8> {
 }
 
 /// Starts Soufflé on the wrapper in `dir` and waits for it, at most the time limit: the one
-/// place where Mara starts a process. Its standard output and error go to files in `dir`. On
-/// Linux it runs in its sandbox; where that cannot be built, it does not start.
+/// place where Mara starts a process. Its standard error goes to a file in `dir`. Without a
+/// console, so does its standard output, and its standard input is empty; with one, Soufflé
+/// runs in provenance mode, the console's commands on its standard input and its replies read
+/// from its standard output, both bounded ([`explain::Exchange`]). On Linux it runs in its
+/// sandbox; where that cannot be built, it does not start.
 fn spawn_and_wait(
     souffle: &Path,
     dir: &Path,
     limits: Limits,
+    console: Option<&mut dyn explain::Console>,
     work: &mut WorkCounts,
 ) -> io::Result<Exit> {
     let mut command = Command::new(souffle);
+    command.args(["--no-preprocessor", "-l", ""]);
+    if console.is_some() {
+        command.args(["-t", "explain"]);
+    }
     command
-        .args(["--no-preprocessor", "-l", "", evaluation::WRAPPER])
+        .arg(evaluation::WRAPPER)
         .current_dir(dir)
         .env_clear()
-        .stdin(Stdio::null())
-        .stdout(caller::create_new(&dir.join(evaluation::STDOUT))?)
         .stderr(caller::create_new(&dir.join(evaluation::STDERR))?);
+    match console {
+        Some(_) => command.stdin(Stdio::piped()).stdout(Stdio::piped()),
+        None => command
+            .stdin(Stdio::null())
+            .stdout(caller::create_new(&dir.join(evaluation::STDOUT))?),
+    };
     limit(&mut command, limits);
     #[cfg(target_os = "linux")]
     let sandbox = sandbox::Sandbox::new(souffle, dir)?;
@@ -234,6 +262,7 @@ fn spawn_and_wait(
     drop(sandbox);
     work.subprocess_spawns += 1;
     work.program_runs += 1;
+    let mut exchange = console.map(|console| explain::Exchange::start(&mut child, console));
     let started = Instant::now();
     let deadline = Duration::from_secs(limits.time_seconds.into());
     let mut pause = Duration::from_micros(50);
@@ -257,7 +286,11 @@ fn spawn_and_wait(
                 limit: Some(Limit::Time),
             });
         }
-        std::thread::sleep(pause.min(deadline.saturating_sub(started.elapsed())));
+        let wait = pause.min(deadline.saturating_sub(started.elapsed()));
+        match &mut exchange {
+            Some(exchange) => exchange.wait(wait),
+            None => std::thread::sleep(wait),
+        }
         pause = (pause * 2).min(Duration::from_millis(2));
     };
     Ok(Exit {

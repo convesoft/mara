@@ -20,7 +20,7 @@ use mara_engine::facts::MARA_DL;
 use mara_engine::program::{Files, Program, admit};
 use mara_engine::work::WorkCounts;
 
-use super::super::{Run, evaluate, prepare, run_in};
+use super::super::{Run, evaluate, explain, prepare, run_in};
 use super::ABI_CAP;
 
 const SECRET: &str = "SECRET-MARKER-5d1e";
@@ -479,6 +479,41 @@ fn the_child_cannot_open_a_network_connection() {
 #[test]
 fn the_child_cannot_signal_another_process() {
     reach("SIGNAL");
+}
+
+/// The run in provenance mode of `query report` starts through the same `spawn_and_wait`, with
+/// pipes for its standard input and output: each way out is stopped there too, a runtime fault
+/// with the helper's report. A helper that reached what it tried would end with status 0
+/// without answering, another fault.
+#[test]
+fn the_provenance_run_is_sandboxed_alike() {
+    for mode in ["READ", "WRITE", "EXECUTE", "NETWORK", "SIGNAL", "NOTHING"] {
+        let outside = Outside::new();
+        let helper = helper(&outside, mode);
+        let program = program();
+        let run = Run {
+            souffle: &helper,
+            program: &program,
+            relations: &[],
+            outputs: &[],
+            limits: limits(),
+        };
+        for abi in ABIS {
+            let case = format!("{mode} {abi:?} in provenance mode");
+            ABI_CAP.with(|cap| cap.set(abi));
+            let mut work = WorkCounts::default();
+            let result = explain(&run, &mut |_| Vec::new(), &mut work);
+            ABI_CAP.with(|cap| cap.set(None));
+            assert_eq!(work.subprocess_spawns, 1, "{case}");
+            let Err(Fault::Runtime { message, .. }) = &result else {
+                panic!("{case}: not a runtime fault: {result:?}");
+            };
+            assert!(!message.contains(SECRET), "{case}: {message}");
+            let unanswered = message.contains("without answering");
+            assert_eq!(unanswered, mode == "NOTHING", "{case}: {message}");
+            outside.untouched(&case);
+        }
+    }
 }
 
 /// Without any attempt the helper passes, so the cases above fail only for what the sandbox

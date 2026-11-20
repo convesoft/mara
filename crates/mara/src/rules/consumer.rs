@@ -12,19 +12,22 @@ use mara_engine::hash::Hash;
 use mara_engine::program::{Column, Files};
 use mara_engine::work::WorkCounts;
 
-use super::{Evaluations, Run};
+use mara_engine::evaluation::explain::Target;
+
+use super::{Evaluations, Explained, Run};
 use crate::inputs::Generation;
 
-/// The evaluation of one entry.
+/// The evaluation of one entry: its rows, or with [`consume_explained`] its rows and their
+/// explanations.
 #[derive(Debug)]
-pub struct Consumed {
+pub struct Consumed<T = Rows> {
     /// The columns of each relation the entry reads, as its program declares them; empty when
     /// the program could not be admitted.
     pub columns: BTreeMap<String, Vec<Column>>,
     /// The rows of the run, or the problems that leave it without rows: a missing or refused
     /// program, an entry that does not fit its program, a compile error or a fault. Each makes
     /// the outcome unavailable, never passed.
-    pub outcome: Result<Rows, Vec<Diagnostic>>,
+    pub outcome: Result<T, Vec<Diagnostic>>,
     /// The key of the evaluation, when one was run or found.
     pub key: Option<Hash>,
 }
@@ -43,6 +46,36 @@ pub fn consume(
     evaluations: &mut Evaluations,
     work: &mut WorkCounts,
 ) -> Result<Consumed, InputError> {
+    let evaluate =
+        |run: &Run, key, work: &mut WorkCounts| evaluations.evaluate(key, run, work).clone();
+    consume_with(generation, entry, supplied, complete, work, evaluate)
+}
+
+/// The entry evaluated as [`consume`] does, but in one run in provenance mode, which also
+/// explains the rows that `select` chooses from its outputs ([`super::explain`]). It is no
+/// evaluation that another consumer reads.
+pub fn consume_explained(
+    generation: &Generation,
+    entry: usize,
+    supplied: Vec<(String, Supplied)>,
+    complete: &[String],
+    select: &mut dyn FnMut(&Rows) -> Vec<Target>,
+    work: &mut WorkCounts,
+) -> Result<Consumed<Explained>, InputError> {
+    let explain = |run: &Run, _, work: &mut WorkCounts| super::explain(run, select, work);
+    consume_with(generation, entry, supplied, complete, work, explain)
+}
+
+/// The entry's program planned and its inputs checked as [`consume`] says, then run by `run`
+/// with the evaluation's key.
+fn consume_with<T>(
+    generation: &Generation,
+    entry: usize,
+    supplied: Vec<(String, Supplied)>,
+    complete: &[String],
+    work: &mut WorkCounts,
+    run: impl FnOnce(&Run, Hash, &mut WorkCounts) -> Result<T, Fault>,
+) -> Result<Consumed<T>, InputError> {
     let rules = (generation.project.config.rules.as_ref())
         .expect("the request names an entry of the configuration");
     let files = Files {
@@ -97,14 +130,14 @@ pub fn consume(
     let outcome = match super::souffle() {
         Err(problem) => Err(Fault::Host(problem)),
         Ok(souffle) => {
-            let run = Run {
+            let souffle_run = Run {
                 souffle: &souffle,
                 program,
                 relations: &relations,
                 outputs: &outputs,
                 limits,
             };
-            evaluations.evaluate(key, &run, work).clone()
+            run(&souffle_run, key, work)
         }
     };
     Ok(Consumed {

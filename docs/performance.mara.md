@@ -100,7 +100,7 @@ Corpus generator:
 - Accepted items obey the engineering template's acceptance and lifecycle rules, and no built-in check fails.
 - The configuration is the example of [DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27). The schema is the engineering vocabulary, written with only the keys that [DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G) shows, so each Verification and Validation has one method and each Term one alias.
 - It also declares Rust at the basic level in `src/**/*.rs` and `tests/**/*.rs` with the prefix `//` ([DES-CODE-MARKERS](code/index.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)), so the corpus's markers are code links; none names the Verification that the delete case removes. It declares the `engineering` template's programs and entries ([DES-PROJECT-INIT](project.mara.md#01M7FVWHVXW71CWC0HJ52NTEQJ)).
-- `query gate` and `query report` name one requirement of the last cluster. The gate request supplies a candidate and a complete `verification_result` file with one `pass` row, at the items' current revisions, per `Verifies` edge, `results.json` in the corpus root; `query report` explains one failing row of that gate.
+- `query gate` names one accepted requirement of the last cluster and supplies a candidate and a complete `verification_result` file with one `pass` row, at the items' current revisions, per `Verifies` edge, `results.json` in the corpus root. `query report` names the retired requirement of the last cluster and explains its failing row of `implementation-ready`, `not_accepted`.
 - Each corpus also holds a `.git` directory, a `.gitignore`, ignored build output, an ignored document, a document outside the include patterns and a README.
 
 Tests:

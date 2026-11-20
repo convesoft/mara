@@ -125,6 +125,9 @@ pub struct Corpus {
     pub untargeted: usize,
     /// The ID of an accepted requirement of the last cluster, which `query gate` judges.
     pub gate_requirement: String,
+    /// The ID of the retired requirement of the last cluster, whose `implementation-ready` row
+    /// `query report` explains.
+    pub retired_requirement: String,
     /// Declared code files, by path.
     pub code_files: Vec<String>,
     /// Distinct contents among them.
@@ -239,6 +242,7 @@ impl Corpus {
                 .collect(),
             untargeted,
             gate_requirement: items[(clusters - 1) * CLUSTER_ITEMS + 5].id.clone(),
+            retired_requirement: items[(clusters - 1) * CLUSTER_ITEMS + 11].id.clone(),
             code_contents: code_contents.len(),
             code_files,
         }

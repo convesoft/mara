@@ -11,7 +11,7 @@ use super::syntax::{
     self, Aggregator, Clause, Component, Expr, Functor, Item, QualifiedName, Term,
 };
 use super::{
-    Column, ColumnKind, DECLARATIONS, Files, Include, Place, Program, Refusal, Relation,
+    Column, ColumnKind, DECLARATIONS, Fact, Files, Include, Place, Program, Refusal, Relation,
     line_starts, locate, parser,
 };
 
@@ -237,10 +237,26 @@ pub(super) fn resolve(root: &str, files: &Files) -> Result<Program, Refusal> {
     let kinds = resolver.kinds()?;
     let relations = resolver.relations(&kinds);
     resolver.check_clauses(&relations, &kinds)?;
+    let mut facts = Vec::new();
+    for &(clause, source, ns) in &resolver.clauses {
+        if clause.body.is_some() {
+            continue;
+        }
+        for head in &clause.heads {
+            if let Some(relation) = resolver.relation_name(&head.name, ns) {
+                let place = Place {
+                    file: source,
+                    offset: head.name.at as usize,
+                };
+                facts.push(Fact { relation, place });
+            }
+        }
+    }
     Ok(Program {
         files: sources.iter().map(|source| source.path.clone()).collect(),
         relations,
         includes,
+        facts,
         texts: sources
             .iter()
             .map(|source| (source.text.to_owned(), source.lines.clone()))

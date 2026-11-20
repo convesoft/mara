@@ -4,6 +4,7 @@
 //! diagnostics and output files into rows or a fault. The host writes the files, runs Soufflé
 //! and hands back what it printed and wrote.
 
+pub mod explain;
 mod gate;
 mod invariants;
 mod plan;
