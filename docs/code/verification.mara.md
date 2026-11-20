@@ -50,7 +50,7 @@ Rust integration tests run the real CLI on a disposable project initialized from
 | Verifies | [REQ-CODE-MARKER-LINKS](index.mara.md#01M7BF6GPD85NN3TCFJE7RCKWB) |
 | Verifies | [REQ-ONLY-CODE-ADD-DOWNLOADS](index.mara.md#01M7BF6GPR0B36WAK7ESQH41WM) |
 
-In the setup of [VER-CODE-MARKERS](#01M7JKT47QKGBA9KQYFWDE21Q9), the test's fixtures hold the official release files, the `.wasm` and `queries/tags.scm`, of the tree-sitter grammars for Rust and Python, at the versions of the built-in catalog. The test installs them in the per-user cache under its own `HOME` and pins them in the configuration, as `code add` stores and pins them ([DES-GRAMMAR-ASSETS](index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)); mara-s9gak4 defines that place and the pin.
+In the setup of [VER-CODE-MARKERS](#01M7JKT47QKGBA9KQYFWDE21Q9), the test's fixtures hold the official release files, the `.wasm` and `queries/tags.scm`, of the tree-sitter grammars for Rust and Python, at the versions of the built-in catalog. The test installs them in the per-user cache under its own `HOME` and pins them in the configuration, as `code add` stores and pins them ([DES-GRAMMAR-ASSETS](index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
 
 | Case | Expectation |
 | --- | --- |

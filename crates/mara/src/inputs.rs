@@ -5,7 +5,9 @@
 //!
 //! Code files are inputs too, read only by a request that reads code (DES-CODE-READERS in
 //! `docs/code/index.mara.md`): each is read and hashed only when its stat changed, and scanned for
-//! markers only when its contents or its language's comment prefixes changed.
+//! markers only when its contents, its language's comment prefixes or its grammar changed. A
+//! language's pinned grammar is loaded once per process, again only when its files' stats change
+//! ([`crate::grammar`]).
 //!
 //! The CLI starts each request with a new [`Inputs`], so it reads everything once. A host that
 //! keeps one between requests does work only for what changed.
@@ -21,7 +23,7 @@ use std::time::SystemTime;
 use ignore::Match;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use mara_engine::code::{CodeFile, CodeLayer, LanguageKey, MarkerKey, ScannedFile};
-use mara_engine::config::Config;
+use mara_engine::config::{Config, Language};
 use mara_engine::diagnostic::Diagnostic;
 use mara_engine::document::DocumentKey;
 use mara_engine::hash::Hash;
@@ -29,6 +31,7 @@ use mara_engine::pattern::{Patterns, Positions};
 use mara_engine::snapshot::{DocumentInput, ParsedFile, Snapshot, SnapshotInputs};
 use mara_engine::work::WorkCounts;
 
+use crate::grammar::{self, Grammar, ParseFailure};
 use crate::project::{Project, ProjectFiles, SYMBOLIC_LINK, SelectError, recognize};
 use crate::tracked::{self, Check, Kind, Listing, Reads, Tracked};
 use crate::write::{Basis, TEMPORARY_PREFIX, Version};
@@ -95,8 +98,9 @@ pub struct Generation {
     pub programs: BTreeMap<String, Vec<u8>>,
     /// Every code file read and scanned, with [`CodeReads::Scan`].
     pub code: Option<Arc<CodeLayer>>,
-    /// The paths of the code files listed, in path order, with [`CodeReads::List`].
-    pub code_paths: Vec<String>,
+    /// The paths of the code files listed, in path order, each with the index of its language
+    /// in the configuration, with [`CodeReads::List`].
+    pub code_paths: Vec<(String, usize)>,
 }
 
 impl Inputs {
@@ -168,6 +172,56 @@ impl Inputs {
         }
     }
 
+    /// Scans `contents`, the code file at `path` of the language at index `language`, which the
+    /// last request listed ([`CodeReads::List`]) and [`Inputs::read_code`] read with hash `hash`,
+    /// when its language pins a grammar: what `get` of a code location reads at the grammar
+    /// level. `None` at the basic level, which needs no scan, with the diagnostics of a grammar
+    /// that cannot be used or could not scan the file. The key is the scan's.
+    pub fn scan_code(
+        &mut self,
+        path: &str,
+        language: usize,
+        hash: Hash,
+        contents: &[u8],
+        work: &mut WorkCounts,
+    ) -> (Option<(MarkerKey, Arc<ScannedFile>)>, Vec<Diagnostic>) {
+        let Some((_, project)) = &self.project else {
+            return (None, Vec::new());
+        };
+        let Some(language) = project.config.code.get(language) else {
+            return (None, Vec::new());
+        };
+        let grammar = match grammar::get(language) {
+            None => return (None, Vec::new()),
+            Some(Err(diagnostic)) => return (None, vec![diagnostic]),
+            Some(Ok(grammar)) => grammar,
+        };
+        let key = MarkerKey::new(key_of(language, true), hash);
+        let kept = self.state.code.get(path).map(|tracked| &tracked.value);
+        let scanned = match kept.filter(|scan| scan.key == key) {
+            Some(scan) => Arc::clone(&scan.file),
+            None => {
+                let prefixes = &language.prefixes;
+                match grammar.parse(contents, path) {
+                    Ok(syntax) => {
+                        Arc::new(ScannedFile::scan_syntax(contents, prefixes, &syntax, work))
+                    }
+                    Err(ParseFailure::File(reason)) => {
+                        Arc::new(ScannedFile::fallback(contents, prefixes, reason, work))
+                    }
+                    Err(ParseFailure::Abandoned) => {
+                        let reason = grammar.abandoned().unwrap_or_default();
+                        return (None, vec![grammar::unavailable(language, &reason)]);
+                    }
+                }
+            }
+        };
+        let diagnostics = (scanned.fallback.iter())
+            .map(|reason| grammar::fallback(language, path, reason))
+            .collect();
+        (Some((key, scanned)), diagnostics)
+    }
+
     /// Lists the inputs in the request that began at `now`, reads and hashes those whose stat
     /// changed, parses the documents whose contents changed, and builds the snapshot when its
     /// key changed. A project whose configuration or schema has errors still gets a snapshot,
@@ -187,7 +241,10 @@ impl Inputs {
         let previous = std::mem::take(&mut self.state);
         let reads = &mut self.reads;
         let config = &project.config;
+        let mut grammar_problems = Vec::new();
+        let code = Code::new(config, code, &previous, &mut grammar_problems);
         let mut walk = Walk::new(&self.root, config, code, previous, now, work, reads);
+        walk.diagnostics.extend(grammar_problems);
         walk.run();
         let Walk {
             mut next,
@@ -198,7 +255,7 @@ impl Inputs {
             code: found,
             ..
         } = walk;
-        if code != CodeReads::Scan {
+        if found.reads != Some(CodeReads::Scan) {
             // Code tracked by an earlier request stays for the next one that reads code.
             next.code = std::mem::take(&mut previous.code);
         }
@@ -218,8 +275,8 @@ impl Inputs {
         self.snapshot = Some(Arc::clone(&snapshot));
         let mut code_paths = found.paths;
         code_paths.sort_unstable();
-        let layer =
-            (code == CodeReads::Scan).then(|| Arc::new(CodeLayer::new(found.files, found.unread)));
+        let layer = (found.reads == Some(CodeReads::Scan))
+            .then(|| Arc::new(CodeLayer::new(found.files, found.unread)));
         Generation {
             project,
             diagnostics,
@@ -241,20 +298,46 @@ struct Code {
     languages: Vec<usize>,
     keys: Vec<LanguageKey>,
     prefixes: Vec<Vec<String>>,
+    /// The languages, in the configuration's order, and the grammar that scans each one's files
+    /// at the grammar level.
+    configured: Vec<Language>,
+    grammars: Vec<Option<Arc<Grammar>>>,
     /// The scans of the last request and of this one, by key, so that two files with the same
     /// contents and language are scanned once.
     scanned: HashMap<MarkerKey, Arc<ScannedFile>>,
     files: Vec<CodeFile>,
-    paths: Vec<String>,
+    /// The language of each of `files`.
+    file_languages: Vec<usize>,
+    paths: Vec<(String, usize)>,
     /// Problems that may hide code.
     unread: Vec<Diagnostic>,
 }
 
 impl Code {
-    fn new(config: &Config, reads: CodeReads, previous: &State) -> Code {
+    /// What a walk does with code files. With [`CodeReads::Scan`], loads the grammar of each
+    /// language that pins one, and puts the `unavailable-grammar` diagnostic of each that cannot
+    /// be used into `problems`.
+    fn new(
+        config: &Config,
+        reads: CodeReads,
+        previous: &State,
+        problems: &mut Vec<Diagnostic>,
+    ) -> Code {
         if reads == CodeReads::None {
             return Code::default();
         }
+        let loaded: Vec<Option<Arc<Grammar>>> = match reads {
+            CodeReads::Scan => (config.code.iter())
+                .map(|language| match grammar::get(language)? {
+                    Ok(grammar) => Some(grammar),
+                    Err(diagnostic) => {
+                        problems.push(diagnostic);
+                        None
+                    }
+                })
+                .collect(),
+            _ => vec![None; config.code.len()],
+        };
         let mut patterns = Vec::new();
         let mut languages = Vec::new();
         for (index, language) in config.code.iter().enumerate() {
@@ -268,13 +351,18 @@ impl Code {
             .values()
             .map(|tracked| (tracked.value.key, Arc::clone(&tracked.value.file)))
             .collect();
+        let keys = (config.code.iter().zip(&loaded))
+            .map(|(language, grammar)| key_of(language, grammar.is_some()))
+            .collect();
         Code {
             reads: Some(reads),
             patterns: Patterns::new(patterns),
             languages,
-            keys: config.code.iter().map(LanguageKey::new).collect(),
+            keys,
             prefixes: config.code.iter().map(|l| l.prefixes.clone()).collect(),
             scanned,
+            configured: config.code.clone(),
+            grammars: loaded,
             ..Code::default()
         }
     }
@@ -322,7 +410,7 @@ impl<'w> Walk<'w> {
     fn new(
         root: &'w Path,
         config: &Config,
-        code: CodeReads,
+        code: Code,
         previous: State,
         now: SystemTime,
         work: &'w mut WorkCounts,
@@ -332,7 +420,6 @@ impl<'w> Walk<'w> {
         let programs = config.rules.iter().flat_map(|rules| &rules.programs);
         let document_patterns = documents.clone().count();
         let patterns = documents.chain(programs);
-        let code = Code::new(config, code, &previous);
         let parsed = previous
             .documents
             .values()
@@ -520,19 +607,17 @@ impl<'w> Walk<'w> {
     }
 
     /// Adds the code file at `path`, of the language at index `language`: listed, or read when
-    /// its stat changed and scanned when its contents or its language's prefixes changed.
+    /// its stat changed and scanned when its contents, its language's prefixes or its grammar
+    /// changed.
     fn code_file(&mut self, path: String, language: usize) {
         if self.code.reads == Some(CodeReads::List) {
-            self.code.paths.push(path);
+            self.code.paths.push((path, language));
             return;
         }
         let absolute = self.root.join(&path);
-        let language_key = self.code.keys[language];
-        let previous = self
-            .previous
-            .code
-            .remove(&path)
-            .filter(|tracked| tracked.value.key == MarkerKey::new(language_key, tracked.hash));
+        let previous = self.previous.code.remove(&path).filter(|tracked| {
+            tracked.value.key == MarkerKey::new(self.code.keys[language], tracked.hash)
+        });
         let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
             let (now, work, reads) = (self.now, &mut *self.work, &mut *self.reads);
             tracked::check(&absolute, &metadata, previous, now, work, reads, false)
@@ -540,16 +625,7 @@ impl<'w> Walk<'w> {
         let tracked = match checked {
             Ok(Check::Kept(tracked)) => tracked,
             Ok(Check::Read(read)) => {
-                let key = MarkerKey::new(language_key, read.hash);
-                let file = match self.code.scanned.get(&key) {
-                    Some(file) => Arc::clone(file),
-                    None => {
-                        let prefixes = &self.code.prefixes[language];
-                        let file = Arc::new(ScannedFile::scan(&read.contents, prefixes, self.work));
-                        self.code.scanned.insert(key, Arc::clone(&file));
-                        file
-                    }
-                };
+                let (key, file) = self.scan(&path, language, read.hash, &read.contents);
                 read.with(Scan { key, file })
             }
             Err(error) => {
@@ -557,13 +633,101 @@ impl<'w> Walk<'w> {
                 return self.hiding(true, "io-error", path, 1, message);
             }
         };
+        if let Some(reason) = &tracked.value.file.fallback {
+            let diagnostic = grammar::fallback(&self.code.configured[language], &path, reason);
+            self.diagnostics.push(diagnostic);
+        }
         self.code.files.push(CodeFile {
             path: path.clone(),
             key: tracked.value.key,
             hash: tracked.hash,
             scanned: Arc::clone(&tracked.value.file),
         });
+        self.code.file_languages.push(language);
         self.next.code.insert(path, tracked);
+    }
+
+    /// Reads and scans again, at the basic level, each file of the language at index
+    /// `language` that this request scanned with its grammar, once that grammar is dropped: a
+    /// request reads all of a language's files at one level.
+    fn rescan(&mut self, language: usize) {
+        let mut index = 0;
+        while index < self.code.files.len() {
+            let file = &self.code.files[index];
+            if self.code.file_languages[index] != language || file.scanned.outline.is_none() {
+                index += 1;
+                continue;
+            }
+            let path = file.path.clone();
+            let absolute = self.root.join(&path);
+            let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
+                let (now, work, reads) = (self.now, &mut *self.work, &mut *self.reads);
+                tracked::check::<Scan>(&absolute, &metadata, None, now, work, reads, false)
+            });
+            match checked {
+                Ok(Check::Read(read)) => {
+                    let (key, file) = self.scan(&path, language, read.hash, &read.contents);
+                    self.code.files[index] = CodeFile {
+                        path: path.clone(),
+                        key,
+                        hash: read.hash,
+                        scanned: Arc::clone(&file),
+                    };
+                    self.next.code.insert(path, read.with(Scan { key, file }));
+                    index += 1;
+                }
+                Ok(Check::Kept(_)) => unreachable!("a check without a previous value reads"),
+                Err(error) => {
+                    self.code.files.remove(index);
+                    self.code.file_languages.remove(index);
+                    self.next.code.remove(&path);
+                    let message = format!("cannot read {path}: {error}");
+                    self.hiding(true, "io-error", path, 1, message);
+                }
+            }
+        }
+    }
+
+    /// The markers of `contents`, the file at `path` of the language at index `language`, with
+    /// their key: scanned at its language's level unless another file had the same key. A
+    /// grammar that is abandoned meanwhile leaves the language at the basic level, for the files
+    /// scanned before too.
+    fn scan(
+        &mut self,
+        path: &str,
+        language: usize,
+        hash: Hash,
+        contents: &[u8],
+    ) -> (MarkerKey, Arc<ScannedFile>) {
+        loop {
+            let key = MarkerKey::new(self.code.keys[language], hash);
+            if let Some(file) = self.code.scanned.get(&key) {
+                return (key, Arc::clone(file));
+            }
+            let prefixes = &self.code.prefixes[language];
+            let file = match &self.code.grammars[language] {
+                None => ScannedFile::scan(contents, prefixes, self.work),
+                Some(grammar) => match grammar.parse(contents, path) {
+                    Ok(syntax) => ScannedFile::scan_syntax(contents, prefixes, &syntax, self.work),
+                    Err(ParseFailure::File(reason)) => {
+                        ScannedFile::fallback(contents, prefixes, reason, self.work)
+                    }
+                    Err(ParseFailure::Abandoned) => {
+                        let reason = grammar.abandoned().unwrap_or_default();
+                        let configured = &self.code.configured[language];
+                        self.diagnostics
+                            .push(grammar::unavailable(configured, &reason));
+                        self.code.grammars[language] = None;
+                        self.code.keys[language] = key_of(configured, false);
+                        self.rescan(language);
+                        continue;
+                    }
+                },
+            };
+            let file = Arc::new(file);
+            self.code.scanned.insert(key, Arc::clone(&file));
+            return (key, file);
+        }
     }
 
     /// The `.gitignore` file of the directory at `directory`, read and compiled only when it
@@ -696,6 +860,12 @@ impl<'w> Walk<'w> {
         }
         self.diagnostics.push(diagnostic);
     }
+}
+
+/// The key of `language`'s scans, at the grammar level when `grammar` is set.
+fn key_of(language: &Language, grammar: bool) -> LanguageKey {
+    let checksum = language.grammar.as_ref().map(|pin| &pin.checksum);
+    LanguageKey::new(language, checksum.filter(|_| grammar))
 }
 
 /// `name` in the directory at `directory`, the project root when empty.

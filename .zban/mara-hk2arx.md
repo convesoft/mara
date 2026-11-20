@@ -18,3 +18,5 @@ Context: DES-CODE-READERS and DES-CODE-MARKERS in docs/code.mara.md; the code in
 - [ ] Code links as an input relation for programs, and `source_complete("code")` (DES-CODE-READERS): VER-CODE-FACTS passes at the basic level
 - [ ] The code-dependent cases of VER-TEMPLATE-CASES pass: `implemented`, `verified`, `release-ready`
 - [ ] The rows of VER-CODE-WORK-COUNTERS for `query execute`, `query view`, `query gate` and `query report` of programs that use code links, and of programs that do not, pass
+
+- [ ] The grammar-level run of VER-CODE-FACTS, with the fixture grammars of VER-GRAMMAR-MARKERS (`Project::install_grammar` in `crates/mara/tests/code/main.rs`): mara-s9gak4 ran none of its cases, since each needs code links as program input. A row's location line and declaration name come from `CodeLinks::location`; a grammar that fell back still reads all code, so `source_complete("code")` holds

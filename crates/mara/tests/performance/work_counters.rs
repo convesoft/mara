@@ -102,6 +102,61 @@ fn cold_counts_at(size: usize) {
     }
 }
 
+/// `get` of a code location with the corpus's Rust grammar pinned and cached: the counts of the
+/// same request at the basic level and 1 code scan, of that file (VER-CODE-WORK-COUNTERS).
+#[test]
+fn grammar_get_counts() {
+    let corpus = Corpus::generate(1, SEED);
+    let path = &corpus.code_files[0];
+    let code = fs::read_to_string(corpus.root().join(path)).unwrap();
+    let inside = code
+        .lines()
+        .position(|line| line.starts_with("    let mut value"));
+    let line = format!("{path}:{}", inside.expect("a function body") + 1);
+    let basic = cli::run(corpus.root(), &["--format", "json", "get", &line], 0);
+    assert_eq!(basic.work.code_scans, 0, "get at the basic level");
+
+    let home = install_rust_grammar(corpus.root());
+    let env = [("HOME", home.path())];
+    let grammar = cli::run_with(corpus.root(), &["--format", "json", "get", &line], &env, 0);
+    let mut expected = basic.work;
+    expected.code_scans = 1;
+    assert_eq!(grammar.work, expected, "get at the grammar level");
+    let result: serde_json::Value = serde_json::from_slice(&grammar.output.stdout).unwrap();
+    assert!(result["node"]["declaration"].is_string(), "{result}");
+}
+
+/// Installs the fixture grammar of Rust (VER-GRAMMAR-MARKERS) in the per-user cache of a new
+/// `HOME`, which it returns, and pins it in the `[code.languages.rust]` of the project at
+/// `root`.
+pub fn install_rust_grammar(root: &std::path::Path) -> tempfile::TempDir {
+    let home = tempfile::Builder::new()
+        .prefix("mara-home-")
+        .tempdir()
+        .expect("create a temporary directory");
+    let fixtures =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/grammars/rust");
+    let wasm = fs::read(fixtures.join("tree-sitter-rust.wasm")).unwrap();
+    let tags = fs::read(fixtures.join("tags.scm")).unwrap();
+    let checksum = mara::grammar::checksum(&wasm, &tags);
+    let cache = home.path().join(".cache/mara/grammars/rust/0.24.2");
+    let cache = cache.join(checksum.to_string());
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(cache.join(mara::grammar::WASM_FILE), wasm).unwrap();
+    fs::write(cache.join(mara::grammar::TAGS_FILE), tags).unwrap();
+    let config_path = root.join(".mara/config.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    let pin = format!("grammar = {{ version = \"0.24.2\", checksum = \"blake3:{checksum}\" }}\n");
+    let header = "[code.languages.rust]\n";
+    assert!(config.contains(header), "no Rust in {config}");
+    fs::write(
+        &config_path,
+        config.replacen(header, &format!("{header}{pin}"), 1),
+    )
+    .unwrap();
+    home
+}
+
 /// The documents of a corpus, and its code files with their distinct contents.
 #[derive(Clone, Copy)]
 struct Totals {

@@ -154,6 +154,66 @@ fn growth_per_doubling() {
     });
 }
 
+/// At the grammar level: a marker before a long run of comments, whose owner, the declaration
+/// after the run, is found with work linear in the run (VER-CODE-WORK-COUNTERS).
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "times a release build: cargo test --release --package mara --test performance"
+)]
+fn grammar_growth_per_doubling() {
+    if cfg!(debug_assertions) {
+        panic!("VER-SCALING times a release build");
+    }
+    let documented: Vec<(usize, Documented)> = PULL_REQUEST_SIZES
+        .iter()
+        .map(|&size| (size, Documented::generate(size)))
+        .collect();
+    check_growth(
+        &documented,
+        "mara relation list of a documented function at the grammar level",
+        |_, project| {
+            let env = [("HOME", project.home.path())];
+            let args = ["relation", "list", "src/documented.rs:1"];
+            cli::run_with(project.dir.path(), &args, &env, 0);
+        },
+    );
+}
+
+/// A project whose one Rust file holds a marker, 1,000 × size lines of documentation and the
+/// function they document, with the Rust grammar pinned and cached under its own `HOME`.
+struct Documented {
+    dir: tempfile::TempDir,
+    home: tempfile::TempDir,
+}
+
+impl Documented {
+    fn generate(size: usize) -> Documented {
+        let dir = tempfile::Builder::new()
+            .prefix("mara-documented-")
+            .tempdir()
+            .expect("create a temporary directory");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".mara")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let config = "format_version = 1\nschema = \".mara/schema.toml\"\n\n[documents]\n\
+                      format_version = 1\ninclude = [\"docs/**/*.mara.md\"]\n\n[code]\n\
+                      format_version = 1\n\n[code.languages.rust]\ninclude = [\"src/**/*.rs\"]\n\
+                      comment_prefixes = [\"//\", \"///\"]\n";
+        std::fs::write(root.join(".mara/config.toml"), config).unwrap();
+        let schema = "format_version = 1\nstatuses = [\"draft\"]\n\n[types.requirement]\n\
+                      id_prefix = \"REQ-\"\ndescription = \"A requirement.\"\n";
+        std::fs::write(root.join(".mara/schema.toml"), schema).unwrap();
+        let code = format!(
+            "// @mara implements REQ-DOCUMENTED\n{}pub fn documented() {{}}\n",
+            "/// A line of the function's documentation.\n".repeat(1000 * size)
+        );
+        std::fs::write(root.join("src/documented.rs"), code).unwrap();
+        let home = crate::work_counters::install_rust_grammar(root);
+        Documented { dir, home }
+    }
+}
+
 /// Work per row, holder or finding, which the item-and-edge check steps do not measure, so
 /// that no change makes it grow faster than the project (DES-PERFORMANCE-HARNESS).
 #[test]

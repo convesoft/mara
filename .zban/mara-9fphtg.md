@@ -18,3 +18,5 @@ Context: DES-CODE-READERS in docs/code.mara.md; DES-INPUTS-AND-KEYS in docs/engi
 - [ ] The daemon watches declared code files; a request after a code file changed re-scans that file only
 - [ ] The daemon cases of VER-CODE-MARKERS and VER-CODE-EDITS (mara-yhxq5x ran them through the CLI and `mara mcp`), and the warm code rows of VER-CODE-WORK-COUNTERS and VER-WORK-COUNTERS pass
 - [ ] The daemon case of VER-HOST-COMPARISON covers the operations that read code
+
+- [ ] The daemon cases of VER-GRAMMAR-MARKERS and of VER-CODE-EDITS with grammars installed (mara-s9gak4 ran them through the CLI and `mara mcp`, in `crates/mara/tests/code/grammar.rs` and `edits.rs`); the daemon keeps a loaded grammar in its `Inputs` (`mara::grammar::Grammars`) and reloads it only when its cached files' stats change

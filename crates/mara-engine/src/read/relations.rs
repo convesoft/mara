@@ -103,13 +103,22 @@ pub fn relation_list(
     };
     let summary = match found {
         Some((code, (file, line))) => {
+            let scanned = &code.layer.files()[file].scanned;
+            let owner = line.map(|line| scanned.owner(line));
             for link in code.in_file(file) {
-                if line.is_none_or(|line| line == link.line) {
+                if owner.is_none_or(|owner| owner == link.owner) {
                     outgoing_code(snapshot, summaries, code, link, &mut connections);
                 }
             }
             let path = code.layer.files()[file].path.clone();
-            NodeSummary::Code { path, line }
+            match owner {
+                Some(owner) => NodeSummary::code(path, scanned.location(owner)),
+                None => NodeSummary::Code {
+                    path,
+                    line: None,
+                    declaration: None,
+                },
+            }
         }
         None => {
             let named = resolve(snapshot, address)?;
@@ -142,7 +151,8 @@ pub fn relation_list(
 }
 
 /// The code file, by its index in the layer, and the line that `address` names, as
-/// `<path>` or `<path>:<line>`; `None` when it names no code file.
+/// `<path>` or `<path>:<line>`; `None` when it names no code file. The line names the location
+/// that holds it (DES-CODE-MARKERS).
 fn code_node(code: &CodeLinks, address: &str) -> Result<Option<(usize, Option<usize>)>, ReadError> {
     let layer = &code.layer;
     if let Some(file) = layer.file(address) {
@@ -326,6 +336,7 @@ fn outgoing_code(
 /// The connection of a code link that targets the item being read, from its code location.
 fn incoming_code(snapshot: &Snapshot, code: &CodeLinks, link: &CodeLink) -> Connection {
     let path = code.path(link).to_owned();
+    let location = code.location(link);
     let relation = snapshot
         .schema()
         .and_then(|schema| schema.relations.get(&link.relation))
@@ -335,10 +346,7 @@ fn incoming_code(snapshot: &Snapshot, code: &CodeLinks, link: &CodeLink) -> Conn
         kind: ConnectionKind::Relation,
         relation: Some(relation),
         direction: Direction::Incoming,
-        neighbour: Neighbour::Node(NodeSummary::Code {
-            path: path.clone(),
-            line: Some(link.line),
-        }),
+        neighbour: Neighbour::Node(NodeSummary::code(path.clone(), location)),
         source: Location {
             path,
             line: link.line,

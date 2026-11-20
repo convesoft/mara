@@ -159,6 +159,125 @@ fn renames_markers_and_nothing_else_in_code() {
     }
 }
 
+/// Rust raw strings holding code examples with marker-like lines that name REQ-LOGIN: no
+/// marker at the grammar level.
+const RAW: &[u8] = b"/// Docs.\npub fn example() -> &'static str {\n    r#\"\n// @mara implements REQ-LOGIN\n\
+                     fn shown() {}\n\"#\n}\n\nconst TOO: &str = r\"\n  /// @mara implements REQ-LOGIN\n\";\n";
+
+/// The code links of `id`, as `<path>:<line>` of each marker, the source, in path and line
+/// order.
+fn sources(project: &Project, id: &str) -> Vec<String> {
+    let args = [
+        "relation",
+        "list",
+        id,
+        "--relation",
+        "implemented_by",
+        "--limit",
+        "100",
+    ];
+    let result = project.json(&args, 0);
+    let connections = result["connections"].as_array().unwrap();
+    let mut sources: Vec<String> = connections
+        .iter()
+        .map(|c| {
+            format!(
+                "{}:{}",
+                c["source"]["path"].as_str().unwrap(),
+                c["source"]["line"]
+            )
+        })
+        .collect();
+    sources.sort();
+    sources
+}
+
+#[test]
+fn renames_markers_and_nothing_else_with_grammars() {
+    let installed = || {
+        let mut project = renamed();
+        project.write("src/raw.rs", RAW);
+        project.install_grammar("rust");
+        project.install_grammar("python");
+        project
+    };
+    let project = installed();
+    assert_eq!(project.problems(), []);
+    let before = project.tree();
+    let markers = sources(&project, "REQ-LOGIN");
+    assert_eq!(
+        markers,
+        [
+            "scripts/tool.py:2",
+            "src/crlf.rs:1",
+            "src/latin1.rs:2",
+            "src/nofinal.rs:1",
+            "src/one/a.rs:1",
+            "src/one/a.rs:3",
+            "src/two/b.rs:2",
+            "web/app.ts:3"
+        ]
+    );
+    // Each marker before a declaration, or after code in one, is owned by it.
+    let owners = project.json(&["relation", "list", "src/one/a.rs:3"], 0);
+    assert_eq!(owners["node"]["declaration"], "login");
+    assert_eq!(owners["connections"].as_array().unwrap().len(), 2);
+
+    let result = project.json(&["item", "rename", "REQ-LOGIN", "REQ-SIGN-IN"], 0);
+    assert_eq!(
+        result["files"],
+        json!([
+            "docs/design.mara.md",
+            "scripts/tool.py",
+            "src/crlf.rs",
+            "src/latin1.rs",
+            "src/nofinal.rs",
+            "src/one/a.rs",
+            "src/two/b.rs",
+            "web/app.ts",
+            "docs/req.mara.md"
+        ])
+    );
+    for (path, template) in CODE {
+        assert!(
+            project.bytes(path) == with_id(template, "REQ-SIGN-IN"),
+            "{path}"
+        );
+    }
+    let after = project.tree();
+    for path in [
+        "src/raw.rs",
+        "src/notes.txt",
+        "src/ignored.rs",
+        "src/nested/inner.rs",
+        "src/link.rs",
+        "extern/real.rs",
+    ] {
+        assert_eq!(before[path], after[path], "{path}");
+    }
+    let mode = fs::metadata(project.path("scripts/tool.py"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o7777, 0o755);
+    assert_eq!(project.problems(), []);
+    assert_eq!(sources(&project, "REQ-SIGN-IN"), markers);
+
+    // Through `mara mcp`: the same files and the CLI's JSON result.
+    let other = installed();
+    let mut mcp = other.mcp();
+    let answer = mcp.call(
+        "item_rename",
+        json!({"id-or-mid": "REQ-LOGIN", "new-id": "REQ-SIGN-IN"}),
+    );
+    drop(mcp);
+    assert_eq!(answer, result);
+    for (path, _) in CODE {
+        assert!(other.bytes(path) == project.bytes(path), "{path}");
+    }
+    assert!(other.bytes("src/raw.rs") == RAW);
+}
+
 #[test]
 fn refuses_a_rename_while_a_code_file_cannot_be_read() {
     let project = renamed();

@@ -383,3 +383,81 @@ fn a_read_whose_daemon_is_killed_fails_with_daemon_lost() {
         "{stats}"
     );
 }
+
+/// The operations that read code give through the daemon what they give in direct mode, at the
+/// grammar level too (DES-CODE-READERS): the daemon finds the grammar cache from its own
+/// environment, which here has the client's `HOME`.
+#[test]
+fn code_operations_through_the_daemon_match_direct_mode() {
+    let test = Test::new();
+    let project = test.project();
+    let schema = format!(
+        "{}\n[relations.implements]\ninverse = \"implemented_by\"\n\
+         description = \"The code realizes the target.\"\n\
+         targets = {{ code = [\"requirement\"] }}\n",
+        crate::SCHEMA
+    );
+    fs::write(project.join(".mara/schema.toml"), schema).unwrap();
+    // The Rust grammar of VER-GRAMMAR-MARKERS in the per-user cache of `home/`, and pinned.
+    let home = test.path().join("home");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/grammars/rust");
+    let wasm = fs::read(fixtures.join("tree-sitter-rust.wasm")).unwrap();
+    let tags = fs::read(fixtures.join("tags.scm")).unwrap();
+    let checksum = mara::grammar::checksum(&wasm, &tags);
+    let cache = home
+        .join(".cache/mara/grammars/rust/0.24.2")
+        .join(checksum.to_string());
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(cache.join(mara::grammar::WASM_FILE), wasm).unwrap();
+    fs::write(cache.join(mara::grammar::TAGS_FILE), tags).unwrap();
+    let config = format!(
+        "{}\n[code]\nformat_version = 1\n\n[code.languages.rust]\ninclude = [\"src/**/*.rs\"]\n\
+         comment_prefixes = [\"//\"]\n\
+         grammar = {{ version = \"0.24.2\", checksum = \"blake3:{checksum}\" }}\n",
+        crate::CONFIG
+    );
+    fs::write(project.join(".mara/config.toml"), config).unwrap();
+    fs::create_dir(project.join("src")).unwrap();
+    fs::write(
+        project.join("src/lib.rs"),
+        "// @mara implements REQ-ONE\npub fn one() {\n    two(); // @mara implements REQ-TWO\n}\n",
+    )
+    .unwrap();
+    let home = home.to_str().unwrap();
+    let (_, pid) = test.start_of(&mara(), &[("HOME", home)]);
+    let cases: [&[&str]; 6] = [
+        &["--debug-stats", "--format", "json", "get", "src/lib.rs:3"],
+        &["--debug-stats", "--format", "json", "get", "src/lib.rs"],
+        &[
+            "--debug-stats",
+            "--format",
+            "json",
+            "relation",
+            "list",
+            "REQ-ONE",
+        ],
+        &[
+            "--debug-stats",
+            "--format",
+            "json",
+            "relation",
+            "list",
+            "src/lib.rs:3",
+        ],
+        &["--debug-stats", "--format", "json", "project", "validate"],
+        &["--debug-stats", "get", "src/lib.rs:2"],
+    ];
+    for args in cases {
+        let env = [("MARA_NO_DAEMON", "1"), ("HOME", home)];
+        let direct = test.run_in(&project, args, &env).succeeded();
+        let client = test.command_in(&project, &mara(), args, &[("HOME", home)]);
+        let served = crate::served_by(pid, client);
+        assert_eq!(served, direct, "{args:?}");
+    }
+    let got = test.run_in(
+        &project,
+        &["--format", "json", "get", "src/lib.rs:3"],
+        &[("HOME", home)],
+    );
+    assert_eq!(got.json()["node"]["declaration"], "one", "{got:?}");
+}

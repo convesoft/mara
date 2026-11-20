@@ -1,11 +1,12 @@
-//! Code markers at the basic level through the real `mara` binary and `mara mcp`, on disposable
-//! projects initialized from `engineering`: VER-CODE-MARKERS in
-//! `docs/code/verification.mara.md`, VER-CODE-EDITS in `docs/code/verification.mara.md`,
-//! and the code rows of VER-DELETE-ITEM and VER-INTERRUPTED-EDITS.
+//! Code markers through the real `mara` binary and `mara mcp`, on disposable projects
+//! initialized from `engineering`: VER-CODE-MARKERS, VER-GRAMMAR-MARKERS and VER-CODE-EDITS in
+//! `docs/code/verification.mara.md`, and the code rows of VER-DELETE-ITEM and
+//! VER-INTERRUPTED-EDITS.
 
 #![cfg(unix)]
 
 mod edits;
+mod grammar;
 mod markers;
 
 use std::collections::BTreeMap;
@@ -53,9 +54,19 @@ pub fn item(n: u32, kind: &str, id: &str, rows: &str, body: &str) -> String {
 /// Files with their bytes and mtimes.
 pub type Tree = BTreeMap<String, (Vec<u8>, SystemTime)>;
 
+/// The official release files of the grammars that the tests install (VER-GRAMMAR-MARKERS):
+/// language, version, and the `.wasm` file's name in its fixture directory.
+pub const GRAMMARS: [(&str, &str, &str); 2] = [
+    ("rust", "0.24.2", "tree-sitter-rust.wasm"),
+    ("python", "0.25.0", "tree-sitter-python.wasm"),
+];
+
 /// A disposable project, removed on drop.
 pub struct Project {
     dir: TempDir,
+    /// The `HOME` of its runs, which holds the per-user grammar cache, once a grammar is
+    /// installed.
+    home: Option<TempDir>,
 }
 
 impl Project {
@@ -89,7 +100,52 @@ impl Project {
             .prefix("mara-code-")
             .tempdir()
             .expect("create a temporary directory");
-        Project { dir }
+        Project { dir, home: None }
+    }
+
+    /// The `HOME` of the runs: the per-user grammar cache is `.cache/mara/grammars` in it.
+    pub fn home(&mut self) -> PathBuf {
+        let home = self.home.get_or_insert_with(|| {
+            tempfile::Builder::new()
+                .prefix("mara-home-")
+                .tempdir()
+                .expect("create a temporary directory")
+        });
+        home.path().to_owned()
+    }
+
+    /// Installs the fixture grammar of `language` in the per-user cache, as `code add` stores it,
+    /// and pins it in the configuration's `[code.languages.<language>]` (DES-GRAMMAR-ASSETS).
+    /// Returns the cache directory and the configuration line of the pin.
+    pub fn install_grammar(&mut self, language: &str) -> (PathBuf, u64) {
+        let (_, version, wasm) = GRAMMARS
+            .iter()
+            .find(|(name, ..)| *name == language)
+            .expect("a fixture grammar");
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/grammars");
+        let wasm = fs::read(fixtures.join(language).join(wasm)).unwrap();
+        let tags = fs::read(fixtures.join(language).join("tags.scm")).unwrap();
+        let checksum = mara::grammar::checksum(&wasm, &tags);
+        let directory = self
+            .home()
+            .join(".cache/mara/grammars")
+            .join(language)
+            .join(version)
+            .join(checksum.to_string());
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join(mara::grammar::WASM_FILE), wasm).unwrap();
+        fs::write(directory.join(mara::grammar::TAGS_FILE), tags).unwrap();
+        let config = self.read(".mara/config.toml");
+        let header = format!("[code.languages.{language}]\n");
+        let at = config.find(&header).expect("the language is declared") + header.len();
+        let pin =
+            format!("grammar = {{ version = \"{version}\", checksum = \"blake3:{checksum}\" }}\n");
+        self.write(
+            ".mara/config.toml",
+            format!("{}{pin}{}", &config[..at], &config[at..]),
+        );
+        let line = config[..at].lines().count() as u64 + 1;
+        (directory, line)
     }
 
     pub fn root(&self) -> PathBuf {
@@ -122,6 +178,9 @@ impl Project {
             .current_dir(self.root())
             .env_clear()
             .env("MARA_NO_DAEMON", "1");
+        if let Some(home) = &self.home {
+            command.env("HOME", home.path());
+        }
         for (name, value) in env {
             command.env(name, value);
         }
@@ -229,7 +288,12 @@ impl Project {
 
     /// A running `mara mcp` in the project root.
     pub fn mcp(&self) -> Mcp {
-        Mcp::start(&self.root())
+        self.mcp_with(&[])
+    }
+
+    /// A running `mara mcp` in the project root, its environment holding `env` too.
+    pub fn mcp_with(&self, env: &[(&str, &Path)]) -> Mcp {
+        Mcp::start(&self.root(), self.home.as_ref().map(TempDir::path), env)
     }
 }
 
@@ -300,12 +364,18 @@ pub struct Mcp {
 }
 
 impl Mcp {
-    fn start(directory: &Path) -> Mcp {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_mara"))
+    fn start(directory: &Path, home: Option<&Path>, env: &[(&str, &Path)]) -> Mcp {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mara"));
+        command
             .arg("mcp")
             .current_dir(directory)
             .env_clear()
-            .env("MARA_NO_DAEMON", "1")
+            .env("MARA_NO_DAEMON", "1");
+        if let Some(home) = home {
+            command.env("HOME", home);
+        }
+        command.envs(env.iter().copied());
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -346,6 +416,11 @@ impl Mcp {
         let response: Value = serde_json::from_str(&line).expect("one JSON line");
         assert_eq!(response["id"], id, "{response}");
         response
+    }
+
+    /// The process ID of the server.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
     }
 
     /// The JSON result of `tool` with `arguments`.

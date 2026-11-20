@@ -4,6 +4,7 @@
 pub mod caller;
 pub mod convert;
 pub mod daemon;
+pub mod grammar;
 pub mod inputs;
 pub mod project;
 pub mod rules;

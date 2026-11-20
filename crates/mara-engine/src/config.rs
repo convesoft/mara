@@ -4,6 +4,7 @@
 mod rules;
 
 use crate::diagnostic::Diagnostic;
+use crate::hash::Hash;
 use crate::schema::is_name;
 use crate::toml_file::{Table, TomlFile, Value};
 
@@ -52,7 +53,7 @@ pub struct Config {
     pub code: Vec<Language>,
 }
 
-/// A code language at the basic level: the files it covers and its comment prefixes.
+/// A code language: the files it covers, its comment prefixes and the grammar it pins.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Language {
     pub name: String,
@@ -60,7 +61,25 @@ pub struct Language {
     pub include: Vec<PathSetting>,
     /// Comment prefixes, as written.
     pub prefixes: Vec<String>,
+    /// The grammar of the grammar level (DES-GRAMMAR-ASSETS); `None` at the basic level, also
+    /// when the pin is invalid.
+    pub grammar: Option<GrammarPin>,
 }
+
+/// The version and checksum of a grammar that `code add` stored in the per-user cache
+/// (DES-GRAMMAR-ASSETS).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GrammarPin {
+    /// Letters, digits, `.`, `-`, `_` and `+`, not starting with `.`.
+    pub version: String,
+    /// The BLAKE3 hash of the BLAKE3 hashes of the `.wasm` file and of `tags.scm`, in that order.
+    pub checksum: Hash,
+    /// The configuration line of `grammar`, where its problems are reported.
+    pub line: usize,
+}
+
+/// The prefix of a grammar checksum's text.
+pub const CHECKSUM_PREFIX: &str = "blake3:";
 
 /// A path or pattern relative to the project root, with the configuration line that sets it,
 /// where a problem with it is reported.
@@ -153,7 +172,11 @@ fn languages(file: &mut TomlFile, at: std::ops::Range<usize>, code: &Table) -> V
                 ),
             );
         }
-        file.unknown_keys(settings, &["include", "comment_prefixes"], &place);
+        file.unknown_keys(
+            settings,
+            &["include", "comment_prefixes", "grammar"],
+            &place,
+        );
         let include = file
             .required(settings, "include", key.span(), &place)
             .and_then(|value| file.array("include", value))
@@ -166,11 +189,15 @@ fn languages(file: &mut TomlFile, at: std::ops::Range<usize>, code: &Table) -> V
         let prefixes = file
             .required(settings, "comment_prefixes", key.span(), &place)
             .and_then(|value| prefixes(file, value));
+        let grammar = settings
+            .get_key_value("grammar")
+            .and_then(|(key, value)| grammar(file, key.span(), value));
         if let (true, Some(include), Some(prefixes)) = (named, include, prefixes) {
             languages.push(Language {
                 name: name.to_owned(),
                 include,
                 prefixes,
+                grammar,
             });
         }
     }
@@ -209,6 +236,48 @@ fn prefixes(file: &mut TomlFile, value: &Value) -> Option<Vec<String>> {
         }
     }
     valid.then_some(prefixes)
+}
+
+/// A language's grammar pin, `{ version = "…", checksum = "blake3:…" }`, whose key is at `at`.
+/// `None` when it is invalid: the language is then read at the basic level.
+fn grammar(file: &mut TomlFile, at: std::ops::Range<usize>, value: &Value) -> Option<GrammarPin> {
+    const PLACE: &str = "`grammar`";
+    let table = file.table("grammar", value)?;
+    file.unknown_keys(table, &["version", "checksum"], PLACE);
+    let version = file
+        .required(table, "version", at.clone(), PLACE)
+        .and_then(|value| {
+            let version = file.string("version", value)?;
+            let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+');
+            if version.is_empty() || version.starts_with('.') || !version.chars().all(allowed) {
+                let message = format!(
+                    "a grammar version is letters, digits, `.`, `-`, `_` and `+`, not starting \
+                     with `.`: `{version}`"
+                );
+                file.error("invalid-value", value.span(), message);
+                return None;
+            }
+            Some(version.to_owned())
+        });
+    let checksum = file
+        .required(table, "checksum", at.clone(), PLACE)
+        .and_then(|value| {
+            let text = file.string("checksum", value)?;
+            let hash = text.strip_prefix(CHECKSUM_PREFIX).and_then(Hash::from_hex);
+            if hash.is_none() {
+                let message = format!(
+                    "a grammar checksum is `{CHECKSUM_PREFIX}` and 64 lowercase hexadecimal \
+                     digits: `{text}`"
+                );
+                file.error("invalid-value", value.span(), message);
+            }
+            hash
+        });
+    Some(GrammarPin {
+        version: version?,
+        checksum: checksum?,
+        line: file.line(at.start),
+    })
 }
 
 fn path(file: &mut TomlFile, key: &str, value: &Value) -> Option<PathSetting> {
@@ -365,7 +434,7 @@ mod tests {
                 (19, "invalid-value"),
                 (19, "duplicate-name"),
                 (22, "invalid-value"),
-                (23, "unknown-key"),
+                (23, "invalid-value"),
                 (24, "missing-key"),
                 (24, "missing-key"),
             ]
@@ -379,6 +448,54 @@ mod tests {
         assert_eq!(
             (config.code.len(), codes(&diagnostics)),
             (0, vec![(7, "unsupported-format-version")])
+        );
+    }
+
+    #[test]
+    fn reads_grammar_pins_and_reads_a_language_with_an_invalid_one_at_the_basic_level() {
+        let base = "format_version = 1\nschema = \"s.toml\"\n[documents]\nformat_version = 1\ninclude = []\n[code]\nformat_version = 1\n";
+        let hex = "ab".repeat(32);
+        let languages = [
+            format!("grammar = {{ version = \"0.24.2\", checksum = \"blake3:{hex}\" }}"),
+            format!("grammar = {{ version = \"../x\", checksum = \"blake3:{hex}\" }}"),
+            "grammar = { version = \"1\", checksum = \"sha256:00\" }".to_owned(),
+            "grammar = { version = \"1\", extra = 1 }".to_owned(),
+            "[code.languages.e.grammar]\nversion = \"1\"".to_owned(),
+        ];
+        let code: String = ["a", "b", "c", "d", "e"]
+            .iter()
+            .zip(&languages)
+            .map(|(name, grammar)| {
+                format!(
+                    "[code.languages.{name}]\ninclude = []\ncomment_prefixes = [\"//\"]\n{grammar}\n"
+                )
+            })
+            .collect();
+        let (config, diagnostics) = parse_config(format!("{base}{code}").as_bytes());
+        let pins: Vec<_> = config.code.iter().map(|l| l.grammar.clone()).collect();
+        assert_eq!(
+            pins,
+            [
+                Some(GrammarPin {
+                    version: "0.24.2".to_owned(),
+                    checksum: Hash::from_hex(&hex).unwrap(),
+                    line: 11,
+                }),
+                None,
+                None,
+                None,
+                None,
+            ]
+        );
+        assert_eq!(
+            codes(&diagnostics),
+            [
+                (15, "invalid-value"),
+                (19, "invalid-value"),
+                (23, "unknown-key"),
+                (23, "missing-key"),
+                (27, "missing-key"),
+            ]
         );
     }
 

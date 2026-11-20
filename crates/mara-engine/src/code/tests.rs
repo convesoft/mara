@@ -76,10 +76,18 @@ fn keys_markers_by_prefixes_and_contents() {
         name: "rust".to_owned(),
         include: Vec::new(),
         prefixes: prefixes(list),
+        grammar: None,
     };
-    let rust = LanguageKey::new(&language(&["//"]));
-    assert_eq!(rust, LanguageKey::new(&language(&["//"])));
-    assert_ne!(rust, LanguageKey::new(&language(&["//", "*"])));
+    let rust = LanguageKey::new(&language(&["//"]), None);
+    assert_eq!(rust, LanguageKey::new(&language(&["//"]), None));
+    assert_ne!(rust, LanguageKey::new(&language(&["//", "*"]), None));
+    let grammar = Hash::of_bytes(b"grammar");
+    let with_grammar = LanguageKey::new(&language(&["//"]), Some(&grammar));
+    assert_ne!(rust, with_grammar);
+    assert_ne!(
+        with_grammar,
+        LanguageKey::new(&language(&["//"]), Some(&Hash::of_bytes(b"other")))
+    );
     assert_ne!(
         MarkerKey::new(rust, file),
         MarkerKey::new(rust, Hash::of_bytes(b"y"))
@@ -120,4 +128,150 @@ fn renames_only_the_bytes_of_the_old_id_in_markers() {
         rename(&layer, "REQ-A", "not an id"),
         Err("src/a.rs".to_owned())
     );
+}
+
+/// The range of the `n`th occurrence of `needle` in `text`, from its start to `end`'s end after
+/// it.
+fn span(text: &[u8], needle: &str, end: &str) -> std::ops::Range<usize> {
+    let start = find(text, needle.as_bytes()).unwrap();
+    let length = find(&text[start..], end.as_bytes()).unwrap() + end.len();
+    start..start + length
+}
+
+fn declaration(
+    name: &str,
+    range: std::ops::Range<usize>,
+    parent: Option<usize>,
+) -> SyntaxDeclaration {
+    SyntaxDeclaration {
+        name: name.to_owned(),
+        range,
+        parent_start: parent,
+    }
+}
+
+/// Each marker of `scanned` as (line, ID, location line, declaration).
+fn owned(scanned: &ScannedFile) -> Vec<(usize, String, usize, Option<String>)> {
+    (scanned.markers.iter())
+        .map(|marker| {
+            let location = scanned.location(marker.owner);
+            let id = marker
+                .link
+                .as_ref()
+                .map_or("?".to_owned(), |l| l.id.clone());
+            (
+                marker.line,
+                id,
+                location.line,
+                location.declaration.map(str::to_owned),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn owns_markers_by_the_declaration_they_precede_or_stand_in() {
+    let text: &[u8] =
+        b"// @mara implements REQ-A\nexport function f() {\n  g(); // @mara implements REQ-B\n}\n\
+                        mod m {\n    struct S; // @mara implements REQ-C\n}\n\
+                        /*\n * @mara implements REQ-D\n */\n#[a]\n\nfn h() {}\n\
+                        // @mara implements REQ-E\nlet x = 1;\n// @mara implements REQ-F";
+    let export = span(text, "export", "}\n");
+    let function = span(text, "function f", "}\n");
+    let module = span(text, "mod m", "}\n");
+    let structure = span(text, "struct S", ";");
+    let h = span(text, "fn h", "}");
+    let syntax = Syntax {
+        comments: vec![
+            span(text, "// @mara implements REQ-A", "A"),
+            span(text, "// @mara implements REQ-B", "B"),
+            span(text, "// @mara implements REQ-C", "C"),
+            span(text, "/*", "*/"),
+            span(text, "// @mara implements REQ-E", "E"),
+            span(text, "// @mara implements REQ-F", "F"),
+        ],
+        attributes: vec![span(text, "#[a]", "]")],
+        declarations: vec![
+            declaration("f", function, Some(export.start)),
+            declaration("m", module.clone(), Some(0)),
+            declaration("S", structure, Some(module.start)),
+            declaration("h", h, Some(0)),
+            // Out of the file: cut to it, then dropped as empty.
+            declaration("gone", 10_000..10_010, None),
+        ],
+    };
+    let mut work = WorkCounts::default();
+    let scanned = ScannedFile::scan_syntax(text, &prefixes(&["//", "*"]), &syntax, &mut work);
+    assert_eq!(work.code_scans, 1);
+    let at = |line, id: &str, location, name: Option<&str>| {
+        (line, id.to_owned(), location, name.map(str::to_owned))
+    };
+    assert_eq!(
+        owned(&scanned),
+        [
+            // The function of the `export` statement on the next line.
+            at(1, "REQ-A", 2, Some("f")),
+            at(3, "REQ-B", 2, Some("f")),
+            // After code on an indented line: that code's declaration.
+            at(6, "REQ-C", 6, Some("S")),
+            // A block comment's later line, then an attribute and a blank line before `h`.
+            at(9, "REQ-D", 13, Some("h")),
+            // Before a statement that is no declaration, and at the end of the file.
+            at(14, "REQ-E", 1, None),
+            at(16, "REQ-F", 1, None),
+        ]
+    );
+    let lines: Vec<Owner> = (1..=16).map(|line| scanned.owner(line)).collect();
+    let d = Owner::Declaration;
+    assert_eq!(
+        lines,
+        [
+            d(0),
+            d(0),
+            d(0),
+            d(0),
+            d(1),
+            d(2),
+            d(1),
+            d(3),
+            d(3),
+            d(3),
+            d(3),
+            Owner::File,
+            d(3),
+            Owner::File,
+            Owner::File,
+            Owner::File,
+        ]
+    );
+    let function = scanned.location(d(0));
+    assert_eq!((function.line, function.last_line), (2, Some(4)));
+}
+
+#[test]
+fn reads_markers_only_in_comment_nodes_at_the_grammar_level() {
+    let text: &[u8] = b"let s = \"// @mara implements REQ-A\";\n/* @mara implements REQ-B */\n\
+                        // @mara implements\n/// @mara implements REQ-C\n";
+    let syntax = Syntax {
+        comments: vec![
+            span(text, "/* @mara", "*/"),
+            span(text, "// @mara implements\n", "\n"),
+            span(text, "/// @mara", "C"),
+        ],
+        ..Syntax::default()
+    };
+    let mut work = WorkCounts::default();
+    let scanned = ScannedFile::scan_syntax(text, &prefixes(&["//", "///"]), &syntax, &mut work);
+    let found: Vec<(usize, Option<String>)> = (scanned.markers.iter())
+        .map(|marker| (marker.line, marker.link.as_ref().map(|l| l.id.clone())))
+        .collect();
+    // The string holds none; `/*` is no prefix; an invalid marker is one.
+    assert_eq!(found, [(3, None), (4, Some("REQ-C".to_owned()))]);
+    let renamed = scanned.markers[1].link.as_ref().unwrap();
+    assert_eq!(&text[renamed.id_start..renamed.id_start + 5], b"REQ-C");
+    // At the basic level the string's prefix after a space is no comment start, as its quote
+    // precedes it, and the location is the marker's line.
+    let basic = ScannedFile::scan(text, &prefixes(&["//", "///"]), &mut work);
+    assert_eq!(basic.markers.len(), 2);
+    assert_eq!(basic.location(basic.owner(4)).line, 4);
 }

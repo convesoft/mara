@@ -107,7 +107,7 @@ Parsing reports the Document structure failures and the malformed metadata rows 
 | `disallowed-target` | The relation does not lead from the source's type, or from `code`, to the target's | The link or marker |
 | `invalid-marker` | A line that starts as a marker but is not one | The line |
 | `unresolved-marker` | No item has the marker's ID | The marker |
-| `unavailable-grammar` | A pinned grammar is not cached, does not match its pin or cannot be loaded | The configuration line that pins it |
+| `unavailable-grammar` | A pinned grammar is not cached, does not match its pin, cannot be loaded, or could not parse a code file in time ([DES-GRAMMAR-ASSETS](code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)) | The configuration line that pins it |
 | `relation-cycle` | Links of an acyclic relation form a cycle | Its first link |
 
 - Earlier and first are in path and line order. A problem that several items share, a repeated MID or ID or a cycle, is reported once to the project and to the validation of each item it concerns, there at that item's own anchor, row or link.

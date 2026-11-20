@@ -319,11 +319,9 @@ fn get(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     if let Some(path) = code_path(address) {
         let (mut inputs, _) = open(context)?;
         let generation = inputs.generation(context.now, context.work, CodeReads::List);
-        if generation
-            .code_paths
-            .binary_search_by(|p| p.as_str().cmp(path))
-            .is_ok()
-        {
+        let listed = (generation.code_paths).binary_search_by(|(p, _)| p.as_str().cmp(path));
+        if let Ok(index) = listed {
+            let language = generation.code_paths[index].1;
             let (hash, contents) =
                 inputs
                     .read_code(path, context.now, context.work)
@@ -336,16 +334,26 @@ fn get(context: &mut Context, args: &Args) -> Result<Response, Failure> {
                 true => Some(address[path.len() + 1..].parse().unwrap_or(usize::MAX)),
                 false => None,
             };
-            let node = NodeSummary::Code {
-                path: path.to_owned(),
+            let (scanned, problems) =
+                inputs.scan_code(path, language, hash, &contents, context.work);
+            let mut diagnostics = generation.diagnostics.clone();
+            diagnostics.extend(problems);
+            diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+            let key = scanned.as_ref().map_or(hash, |(key, _)| key.0);
+            let scanned = scanned.as_ref().map(|(_, scanned)| &**scanned);
+            let portion = read::get_code(
+                path,
                 line,
-            };
-            let diagnostics = &generation.diagnostics;
-            let portion = read::get_code(node, hash, &contents, cursor.as_ref(), diagnostics)
-                .map_err(failure)?;
+                scanned,
+                key,
+                &contents,
+                cursor.as_ref(),
+                &diagnostics,
+            )
+            .map_err(failure)?;
             let human = |out: &mut String| portion_lines(out, &portion);
             let next = portion.next_cursor;
-            return Ok(respond(portion.json.clone(), human, diagnostics, next));
+            return Ok(respond(portion.json.clone(), human, &diagnostics, next));
         }
         let documents = Documents {
             snapshot: &generation.snapshot,
@@ -451,8 +459,14 @@ fn node_line(node: &NodeSummary) -> String {
         NodeSummary::Code {
             path,
             line: Some(line),
-        } => format!("{path}:{line}: (code)"),
-        NodeSummary::Code { path, line: None } => format!("{path} (code)"),
+            declaration,
+        } => match declaration {
+            Some(declaration) => format!("{path}:{line}: {declaration} (code)"),
+            None => format!("{path}:{line}: (code)"),
+        },
+        NodeSummary::Code {
+            path, line: None, ..
+        } => format!("{path} (code)"),
     }
 }
 

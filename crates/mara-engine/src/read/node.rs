@@ -3,6 +3,7 @@
 
 use std::ops::Range;
 
+use crate::code::{Owner, ScannedFile};
 use crate::diagnostic::Diagnostic;
 use crate::document::{Node, is_mid, label_name};
 use crate::hash::Hash;
@@ -47,11 +48,12 @@ pub enum NodeSummary {
     Document {
         path: String,
     },
-    /// A code location at the basic level, `<path>:<line>`, or a whole code file
-    /// (DES-CODE-MARKERS).
+    /// A code location, `<path>:<line>` with its declaration's name at the grammar level, or
+    /// a whole code file (DES-CODE-MARKERS).
     Code {
         path: String,
         line: Option<usize>,
+        declaration: Option<String>,
     },
 }
 
@@ -86,6 +88,15 @@ impl ItemSummary {
 }
 
 impl NodeSummary {
+    /// The node of the code location `location` in the file at `path`.
+    pub fn code(path: String, location: crate::code::Location<'_>) -> NodeSummary {
+        NodeSummary::Code {
+            path,
+            line: Some(location.line),
+            declaration: location.declaration.map(str::to_owned),
+        }
+    }
+
     pub(crate) fn of(snapshot: &Snapshot, named: Named) -> NodeSummary {
         match named {
             Named::Node(Node::Item(item)) => NodeSummary::Item(ItemSummary::of(snapshot, item)),
@@ -124,14 +135,18 @@ impl NodeSummary {
                 object.string("kind", "document");
                 object.string("path", path);
             }
-            NodeSummary::Code { path, line } => {
+            NodeSummary::Code {
+                path,
+                line,
+                declaration,
+            } => {
                 object.string("kind", "code");
                 object.string("path", path);
                 match line {
                     Some(line) => object.number("line", *line as u64),
                     None => object.key("line").push_str("null"),
                 }
-                object.optional_string("declaration", None);
+                object.optional_string("declaration", declaration.as_deref());
             }
         }
         members(&mut object);
@@ -145,7 +160,7 @@ impl NodeSummary {
             NodeSummary::Item(item) => (&item.path, item.line),
             NodeSummary::Unit { path, line, .. } => (path, *line),
             NodeSummary::Document { path } => (path, 1),
-            NodeSummary::Code { path, line } => (path, line.unwrap_or(1)),
+            NodeSummary::Code { path, line, .. } => (path, line.unwrap_or(1)),
         }
     }
 }
@@ -359,32 +374,57 @@ pub fn get(
     )
 }
 
-/// `get` of a code location or file at the basic level (DES-CODE-MARKERS): `node` names the
-/// code file whose contents are `contents`, with hash `hash`; the content is the file from the
-/// node's line to its end, in pages as [`get`] gives them.
+/// `get` of a code location or file (DES-CODE-MARKERS): `line` in the code file at `path`, or
+/// the whole file, whose contents are `contents`. At the basic level (`scanned` is `None` or has
+/// no outline) the content is the file from that line to its end; at the grammar level, the
+/// declaration that owns the line, from its first line to its last, or the file. `key` is the
+/// key of what the result depends on: the file's hash, and its grammar at the grammar level. The
+/// content comes in pages as [`get`] gives them.
+#[allow(clippy::too_many_arguments)]
 pub fn get_code(
-    node: NodeSummary,
-    hash: Hash,
+    path: &str,
+    line: Option<usize>,
+    scanned: Option<&ScannedFile>,
+    key: Hash,
     contents: &[u8],
     cursor: Option<&Cursor>,
     diagnostics: &[Diagnostic],
 ) -> Result<Portion, ReadError> {
-    let NodeSummary::Code { path, line } = &node else {
-        unreachable!("get_code takes a code node");
-    };
     let text = text(contents, path)?;
-    let start = match line {
+    let (node, start, end) = match line {
         Some(line) => {
-            line_starts(text.as_bytes(), *line).ok_or_else(|| missing_line(path, *line))?
+            line_starts(text.as_bytes(), line).ok_or_else(|| missing_line(path, line))?;
+            let owner = scanned.map_or(Owner::Line(line), |scanned| scanned.owner(line));
+            let location = match scanned {
+                Some(scanned) => scanned.location(owner),
+                None => crate::code::Location {
+                    line,
+                    declaration: None,
+                    last_line: None,
+                },
+            };
+            let start = line_starts(text.as_bytes(), location.line).unwrap_or(0);
+            let end = location
+                .last_line
+                .and_then(|last| line_starts(text.as_bytes(), last + 1))
+                .unwrap_or(text.len());
+            (NodeSummary::code(path.to_owned(), location), start, end)
         }
-        None => 0,
+        None => {
+            let node = NodeSummary::Code {
+                path: path.to_owned(),
+                line: None,
+                declaration: None,
+            };
+            (node, 0, text.len())
+        }
     };
     let address = match line {
         Some(line) => format!("{path}:{line}"),
-        None => path.clone(),
+        None => path.to_owned(),
     };
-    let key = result_key(hash, "get", [address.as_str()], diagnostics);
-    page_of(node, None, &[], &text[start..], key, cursor, diagnostics)
+    let key = result_key(key, "get", [address.as_str()], diagnostics);
+    page_of(node, None, &[], &text[start..end], key, cursor, diagnostics)
 }
 
 /// The failure of a line that a code file lacks.

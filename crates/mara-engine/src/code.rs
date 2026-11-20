@@ -1,10 +1,14 @@
-//! Code markers at the basic level (DES-CODE-MARKERS and DES-CODE-READERS in
-//! `docs/code/index.mara.md`): the scan of one code file, keyed by its contents and its language's
-//! comment prefixes, the code layer of every scanned file, and the code links that its markers
-//! make with a snapshot's items.
+//! Code markers (DES-CODE-MARKERS and DES-CODE-READERS in `docs/code/index.mara.md`): the scan
+//! of one code file, keyed by its contents, its language's comment prefixes and grammar, the code
+//! layer of every scanned file, and the code links that its markers make with a snapshot's items.
+//! At the grammar level the host parses the file and the scan reads what the grammar found
+//! ([`Syntax`]).
 
+mod outline;
 #[cfg(test)]
 mod tests;
+
+pub use outline::{Declaration, Outline, Owner, Syntax, SyntaxDeclaration};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,7 +22,7 @@ use crate::validation::{is_id, list};
 use crate::work::WorkCounts;
 
 /// The version of the scan, part of every [`MarkerKey`].
-pub const SCANNER_VERSION: u32 = 1;
+pub const SCANNER_VERSION: u32 = 2;
 /// The version of the code layer's key.
 const LAYER_VERSION: u32 = 1;
 
@@ -30,21 +34,26 @@ pub const DISALLOWED_TARGET: &str = "disallowed-target";
 /// What starts a marker after its comment start.
 const MARA: &[u8] = b"@mara";
 
-/// The key of one file's markers: scanner version, the language's comment prefixes and the
-/// file's hash (DES-INPUTS-AND-KEYS). The basic level has no grammar.
+/// The key of one file's markers: scanner version, the language's comment prefixes, its
+/// grammar's checksum at the grammar level and the file's hash (DES-INPUTS-AND-KEYS).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MarkerKey(pub Hash);
 
-/// The hash of what a language's scan depends on: its comment prefixes.
+/// The hash of what a language's scan depends on: its comment prefixes, and the checksum of the
+/// grammar that scans its files, `None` at the basic level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LanguageKey(Hash);
 
 impl LanguageKey {
-    pub fn new(language: &Language) -> LanguageKey {
+    pub fn new(language: &Language, grammar: Option<&Hash>) -> LanguageKey {
         let mut key = KeyHasher::new("mara code language", SCANNER_VERSION);
         key.u32(language.prefixes.len() as u32);
         for prefix in &language.prefixes {
             key.bytes(prefix.as_bytes());
+        }
+        key.u32(u32::from(grammar.is_some()));
+        if let Some(grammar) = grammar {
+            key.hash(grammar);
         }
         LanguageKey(key.finish())
     }
@@ -67,6 +76,8 @@ pub struct Marker {
     /// The relation and the ID it names, or `None` when its words are not one name and one
     /// word of the form of an ID.
     pub link: Option<MarkerLink>,
+    /// Its line at the basic level; its declaration or the file at the grammar level.
+    pub owner: Owner,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,11 +97,27 @@ pub struct ScannedFile {
     pub contents: Option<Arc<[u8]>>,
     /// How many lines the file has: a last line without a line feed counts.
     pub lines: usize,
+    /// At the grammar level, the file's declarations and the owner of each line.
+    pub outline: Option<Outline>,
+    /// Why the grammar of the file's language did not scan it, which was then scanned at the
+    /// basic level (DES-GRAMMAR-ASSETS).
+    pub fallback: Option<String>,
+}
+
+/// A code location (DES-CODE-MARKERS): its first line, and its declaration's name at the
+/// grammar level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Location<'a> {
+    pub line: usize,
+    pub declaration: Option<&'a str>,
+    /// The location's last line when it ends before the file does: a declaration's.
+    pub last_line: Option<usize>,
 }
 
 impl ScannedFile {
-    /// Scans `contents` for markers with the comment prefixes `prefixes`, and counts one code
-    /// scan in `work`. The file is read as bytes in lines that end at a line feed.
+    /// Scans `contents` at the basic level for markers with the comment prefixes `prefixes`,
+    /// and counts one code scan in `work`. The file is read as bytes in lines that end at a line
+    /// feed.
     pub fn scan(contents: &[u8], prefixes: &[String], work: &mut WorkCounts) -> ScannedFile {
         work.code_scans += 1;
         let mut markers = Vec::new();
@@ -98,16 +125,13 @@ impl ScannedFile {
             let mut start = 0;
             for (index, line) in contents.split(|&byte| byte == b'\n').enumerate() {
                 if find(line, MARA).is_some()
-                    && let Some(link) = marker(line, prefixes)
+                    && let Some(after) = comment_start(line, prefixes)
+                    && let Some(link) = marker(line, after, start)
                 {
-                    let link = link.map(|(relation, id, offset)| MarkerLink {
-                        relation,
-                        id,
-                        id_start: start + offset,
-                    });
                     markers.push(Marker {
                         line: index + 1,
                         link,
+                        owner: Owner::Line(index + 1),
                     });
                 }
                 start += line.len() + 1;
@@ -115,21 +139,131 @@ impl ScannedFile {
         }
         let feeds = contents.iter().filter(|&&byte| byte == b'\n').count();
         let lines = feeds + usize::from(!contents.is_empty() && !contents.ends_with(b"\n"));
+        ScannedFile::new(contents, markers, lines, None, None)
+    }
+
+    /// [`ScannedFile::scan`] of a file that its language's grammar could not scan, for the
+    /// reason `fallback`.
+    pub fn fallback(
+        contents: &[u8],
+        prefixes: &[String],
+        fallback: String,
+        work: &mut WorkCounts,
+    ) -> ScannedFile {
+        let mut scanned = ScannedFile::scan(contents, prefixes, work);
+        scanned.fallback = Some(fallback);
+        scanned
+    }
+
+    /// Scans `contents` at the grammar level, from what its grammar found in it (`syntax`), and
+    /// counts one code scan in `work`. A comment starts where its node starts, and on each later
+    /// line of the node at the line's first text: a marker there starts with one of `prefixes`,
+    /// the longest one where several do. Text outside comment nodes holds no marker.
+    pub fn scan_syntax(
+        contents: &[u8],
+        prefixes: &[String],
+        syntax: &Syntax,
+        work: &mut WorkCounts,
+    ) -> ScannedFile {
+        work.code_scans += 1;
+        let starts = outline::line_starts(contents);
+        let outline = Outline::new(contents, &starts, syntax);
+        let line_of = |at: usize| starts.partition_point(|&start| start <= at).max(1);
+        let line_text = |line: usize| {
+            let start = starts[line - 1];
+            let rest = &contents[start..];
+            let end = rest.iter().position(|&b| b == b'\n').unwrap_or(rest.len());
+            (start, &rest[..end])
+        };
+        let mut markers = Vec::new();
+        let mut comments: Vec<&std::ops::Range<usize>> = syntax.comments.iter().collect();
+        comments.sort_by_key(|range| range.start);
+        for range in comments {
+            let range = range.start.min(contents.len())..range.end.min(contents.len());
+            if range.is_empty() || find(&contents[range.clone()], MARA).is_none() {
+                continue;
+            }
+            let owner = outline.comment_owner(range.start);
+            let (first, last) = (line_of(range.start), line_of(range.end - 1));
+            for line in first..=last {
+                let (start, text) = line_text(line);
+                let at = match line == first {
+                    true => range.start - start,
+                    false => match text.iter().position(|&b| !matches!(b, b' ' | b'\t')) {
+                        Some(at) => at,
+                        None => continue,
+                    },
+                };
+                let prefix = (prefixes.iter().map(String::as_bytes))
+                    .filter(|prefix| text[at..].starts_with(prefix))
+                    .map(<[u8]>::len)
+                    .max();
+                if let Some(prefix) = prefix
+                    && let Some(link) = marker(text, at + prefix, start)
+                {
+                    markers.push(Marker { line, link, owner });
+                }
+            }
+        }
+        ScannedFile::new(contents, markers, starts.len(), Some(outline), None)
+    }
+
+    fn new(
+        contents: &[u8],
+        markers: Vec<Marker>,
+        lines: usize,
+        outline: Option<Outline>,
+        fallback: Option<String>,
+    ) -> ScannedFile {
         let contents = (!markers.is_empty()).then(|| Arc::from(contents));
         ScannedFile {
             markers,
             contents,
             lines,
+            outline,
+            fallback,
+        }
+    }
+
+    /// The owner of line `line`, 1-based: that line at the basic level, at the grammar level
+    /// the declaration that owns it, else the file (DES-CODE-MARKERS).
+    pub fn owner(&self, line: usize) -> Owner {
+        match &self.outline {
+            Some(outline) => outline.owner(line),
+            None => Owner::Line(line),
+        }
+    }
+
+    /// The code location of `owner`.
+    pub fn location(&self, owner: Owner) -> Location<'_> {
+        let declaration = match (owner, &self.outline) {
+            (Owner::Declaration(index), Some(outline)) => outline.declarations.get(index),
+            _ => None,
+        };
+        match (owner, declaration) {
+            (_, Some(declaration)) => Location {
+                line: declaration.first_line,
+                declaration: Some(&declaration.name),
+                last_line: Some(declaration.last_line),
+            },
+            (Owner::Line(line), None) => Location {
+                line,
+                declaration: None,
+                last_line: None,
+            },
+            (_, None) => Location {
+                line: 1,
+                declaration: None,
+                last_line: None,
+            },
         }
     }
 }
 
-/// The marker on `line`, if its comment is one: `None` when it holds none, `Some(None)` when its
-/// words after `@mara` are not one name and one ID, else the relation, the ID and the ID's
-/// offset in the line.
-#[allow(clippy::type_complexity)]
-fn marker(line: &[u8], prefixes: &[String]) -> Option<Option<(String, String, usize)>> {
-    let after = comment_start(line, prefixes)?;
+/// The marker that starts after the comment start that ends at `after` in `line`, which starts
+/// at offset `start` of its file: `None` when it holds none, `Some(None)` when its words after
+/// `@mara` are not one name and one ID, else its link.
+fn marker(line: &[u8], after: usize, start: usize) -> Option<Option<MarkerLink>> {
     let mut at = after;
     while matches!(line.get(at), Some(b' ' | b'\t')) {
         at += 1;
@@ -167,7 +301,11 @@ fn marker(line: &[u8], prefixes: &[String]) -> Option<Option<(String, String, us
     if !is_id(id) {
         return Some(None);
     }
-    Some(Some((relation.to_owned(), id.to_owned(), base + offset)))
+    Some(Some(MarkerLink {
+        relation: relation.to_owned(),
+        id: id.to_owned(),
+        id_start: start + base + offset,
+    }))
 }
 
 /// Where the comment on `line` starts its text: after the first of `prefixes` that stands at
@@ -257,6 +395,8 @@ pub struct CodeLink {
     pub marker: usize,
     /// The marker's line.
     pub line: usize,
+    /// What owns the marker, which names its code location.
+    pub owner: Owner,
     /// The relation's forward name.
     pub relation: String,
     /// The snapshot indices of the items whose ID the marker names.
@@ -368,6 +508,7 @@ impl CodeLinks {
                     file: index,
                     marker: number,
                     line: marker.line,
+                    owner: marker.owner,
                     relation: link.relation.clone(),
                     items: items.to_vec(),
                 });
@@ -410,6 +551,11 @@ impl CodeLinks {
     /// The path of the file that holds `link`.
     pub fn path(&self, link: &CodeLink) -> &str {
         &self.layer.files()[link.file].path
+    }
+
+    /// The code location of `link`.
+    pub fn location(&self, link: &CodeLink) -> Location<'_> {
+        self.layer.files()[link.file].scanned.location(link.owner)
     }
 
     /// The links whose marker is in the file at layer index `file`, in line order.
