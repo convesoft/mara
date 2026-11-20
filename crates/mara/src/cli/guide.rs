@@ -123,12 +123,7 @@ fn name_for(name: &str, surface: Surface) -> String {
 
 /// Prints the guide for the project of the working directory or `--project`.
 fn prime(context: &mut Context, _: &Args) -> Result<Response, Failure> {
-    let start = std::env::current_dir().map_err(|error| {
-        Failure::new(
-            "io-error",
-            format!("cannot read the working directory: {error}"),
-        )
-    })?;
+    let start = context.cwd()?.to_owned();
     let text = render(Surface::Cli, &start, context.project.as_deref())?;
     let mut json = String::new();
     let mut object = Object::new(&mut json);

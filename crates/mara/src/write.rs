@@ -7,7 +7,7 @@
 //! with the [`Basis`] of each file, and passes them to [`apply`].
 
 use std::fmt::Write as _;
-use std::fs::{self, File, Metadata, OpenOptions, Permissions};
+use std::fs::{self, File, Metadata, Permissions};
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,6 +16,7 @@ use mara_engine::config::CONFIG_PATH;
 use mara_engine::diagnostic::Diagnostic;
 use mara_engine::work::WorkCounts;
 
+use crate::caller;
 use crate::project::SYMBOLIC_LINK;
 use crate::tracked::{self, Check, Reads, Tracked};
 
@@ -432,7 +433,7 @@ impl<'r> Target<'r> {
         for (index, part) in parts[..parts.len() - 1].iter().enumerate() {
             let parent = path.clone();
             path.push(part);
-            match fs::create_dir(&path) {
+            match caller::create_dir(&path) {
                 Ok(()) => sync_directory(&parent).map_err(Refusal::Io)?,
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     let shown = || parts[..=index].join("/");
@@ -459,7 +460,7 @@ fn temporary_file(directory: &Path) -> Result<(PathBuf, File), Refusal> {
     let mut attempt = 0;
     loop {
         let path = directory.join(format!("{TEMPORARY_PREFIX}{process}-{attempt}"));
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
+        match caller::create_new(&path) {
             Ok(file) => return Ok((path, file)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists && attempt < 100 => {
                 attempt += 1;

@@ -55,6 +55,7 @@ fn command(directory: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(directory)
         .env_clear()
+        .env("MARA_NO_DAEMON", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

@@ -91,7 +91,11 @@ impl Project {
     /// Runs `mara <args>` in the project root with an empty environment and `env`.
     pub fn mara(&self, args: &[&str], env: &[(&str, &Path)]) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_mara"));
-        command.args(args).current_dir(self.root()).env_clear();
+        command
+            .args(args)
+            .current_dir(self.root())
+            .env_clear()
+            .env("MARA_NO_DAEMON", "1");
         for (name, value) in env {
             command.env(name, value);
         }

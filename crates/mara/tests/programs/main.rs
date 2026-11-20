@@ -211,6 +211,7 @@ impl Sandbox {
             .args(args)
             .current_dir(self.project())
             .env_clear()
+            .env("MARA_NO_DAEMON", "1")
             .env("HOME", self.root().join("home"))
             .env("TMPDIR", self.tmp());
         command

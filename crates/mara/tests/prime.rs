@@ -80,6 +80,7 @@ fn run_any(directory: &Path, args: &[&str]) -> (i32, String, String) {
         .args(args)
         .current_dir(directory)
         .env_clear()
+        .env("MARA_NO_DAEMON", "1")
         .stdin(Stdio::null())
         .output()
         .expect("run mara");

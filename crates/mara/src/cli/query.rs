@@ -227,10 +227,8 @@ fn prepare(context: &mut Context, args: &Args, kind: EntryKind) -> Result<Reques
 /// The inputs the request supplies, then the entry evaluated with them.
 fn evaluate(context: &mut Context, args: &Args, request: &Request) -> Result<Consumed, Failure> {
     let refuse = |error: InputError| Failure::new(error.code(), error.to_string());
-    let base = std::env::current_dir().map_err(|error| {
-        let message = format!("cannot read the working directory: {error}");
-        Failure::new("io-error", message)
-    })?;
+    // The client's directory: a file an argument names is the client's (DES-DAEMON-LIFECYCLE).
+    let base = context.cwd()?.to_owned();
     let mut supplied: Vec<(String, Supplied)> = Vec::new();
     for argument in args.values(INPUT.name) {
         supplied.push(rules::supplied_input(argument, &base, context.work).map_err(refuse)?);

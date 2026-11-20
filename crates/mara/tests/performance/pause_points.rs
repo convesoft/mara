@@ -29,6 +29,7 @@ fn a_release_build_has_no_pause_points() {
         .args(&case.args)
         .current_dir(corpus.root())
         .env_clear()
+        .env("MARA_NO_DAEMON", "1")
         .env("MARA_TEST_PAUSE", pauses.path())
         .stdin(Stdio::null())
         .stdout(Stdio::null())

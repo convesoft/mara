@@ -1,8 +1,9 @@
 //! The daemon process (DES-DAEMON-LIFECYCLE in `docs/daemon/index.mara.md`).
 //!
 //! `daemon start` forks it while holding the build's lock, which the daemon keeps until it
-//! exits. It leaves the caller's session and standard streams, binds the build's socket and
-//! answers each connection on a thread of its own ([`Daemon::answer`]). It ends on a `stop`
+//! exits. It leaves the caller's session, standard streams and working directory, binds the
+//! build's socket and answers each connection on a thread of its own ([`Daemon::answer`]): an
+//! `operation` request runs a document operation for a client ([`client::answer`]). It ends on a `stop`
 //! request, on SIGTERM, SIGINT or SIGHUP, and after the idle period without a request when it
 //! has no session ([`idle_period`]); then it removes its socket, lets the requests it runs
 //! finish and exits.
@@ -12,12 +13,15 @@ use std::io::{self, PipeWriter, Read, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use mara::daemon::{self, Build, PROTOCOL_VERSION, Runtime};
 use serde_json::{Value, json};
+
+use crate::cli::client;
 
 /// How long the daemon runs without a request while it has no session (DES-IDLE-SESSIONS).
 const IDLE_PERIOD: Duration = Duration::from_secs(30 * 60);
@@ -123,9 +127,12 @@ fn listen(runtime: &Runtime, lock: &File, ready: RawFd) -> Result<(UnixListener,
     Ok((listener, signals))
 }
 
-/// Starts a new session without a terminal, points the standard streams at `/dev/null` and
-/// closes every other descriptor but `keep`, so that the caller's pipes end when it exits.
+/// Starts a new session without a terminal, points the standard streams at `/dev/null`, closes
+/// every other descriptor but `keep`, so that the caller's pipes end when it exits, and moves to
+/// `/`, so that it keeps no directory of the caller's in use. A request names the client's
+/// directory.
 fn detach(keep: &[RawFd]) -> io::Result<()> {
+    std::env::set_current_dir("/")?;
     // SAFETY: setsid takes no pointer; the forked child leads no process group yet.
     if unsafe { libc::setsid() } == -1 {
         return Err(io::Error::last_os_error());
@@ -220,6 +227,13 @@ impl Daemon {
         self.changed.notify_all();
     }
 
+    /// Records a request that counts as activity, at its start and its end, so that the idle
+    /// period runs from the last one.
+    fn touch(&self) {
+        self.state().last_request = Instant::now();
+        self.changed.notify_all();
+    }
+
     /// The answer to one request. `stop` makes the daemon stop.
     fn answer(&self, frame: &[u8]) -> Value {
         let request: Value = match serde_json::from_slice(frame) {
@@ -241,6 +255,19 @@ impl Daemon {
             Some("stop") => {
                 self.stop();
                 json!({"version": PROTOCOL_VERSION, "pid": self.pid, "stopping": true})
+            }
+            Some("operation") => {
+                self.touch();
+                let answer = client::answer(&request);
+                self.touch();
+                match answer {
+                    Ok(mut answer) => {
+                        answer["version"] = json!(PROTOCOL_VERSION);
+                        answer["pid"] = json!(self.pid);
+                        answer
+                    }
+                    Err(message) => self.refuse("malformed-request", &message),
+                }
             }
             _ => self.refuse("unknown-request", "the daemon knows no such request"),
         }
@@ -374,10 +401,18 @@ fn connection(daemon: &Daemon, mut stream: UnixStream) {
             }
             continue;
         }
-        let answer = daemon.answer(&frame);
-        let written = daemon::write_frame(&mut stream, answer.to_string().as_bytes());
+        // A panic is a defect: the connection closes without an answer, and the client reports
+        // `daemon-lost`, but the daemon still counts the request as finished.
+        let answer = panic::catch_unwind(AssertUnwindSafe(|| daemon.answer(&frame)));
+        let written = match &answer {
+            Ok(answer) => daemon::write_frame(&mut stream, answer.to_string().as_bytes()),
+            Err(_) => Err(io::ErrorKind::Other.into()),
+        };
         daemon.state().active -= 1;
         daemon.changed.notify_all();
+        let Ok(answer) = answer else {
+            return;
+        };
         if answer["stopping"] == true {
             loop {
                 thread::park();

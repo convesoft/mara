@@ -3,8 +3,10 @@
 //!
 //! `rmcp` speaks the protocol (ADR-RMCP-SERVER). A tool call builds its operation's [`Args`]
 //! from the call's arguments and runs the operation's function, as the CLI does; the tool's text
-//! is the JSON form that `--format json` prints. The server keeps nothing between calls, so each
-//! call is a cold request. Only this command starts an async runtime.
+//! is the JSON form that `--format json` prints. The server is a client of the daemon, as the CLI
+//! is ([`client`]): each call goes to the daemon of its build, or runs in-process when none runs,
+//! which then starts one. The server itself keeps nothing between calls. Only this command starts
+//! an async runtime.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -20,10 +22,13 @@ use rmcp::service::{RequestContext, ServerInitializeError};
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{Value, json};
 
+use mara::caller::Caller;
+
+use super::client::{self, add};
 use super::guide::{self, Surface};
 use super::{
-    Args, Context, FAILURE, Failure, Kind, OPERATIONS, Operation, Opt, PROJECT, REJECTED, Response,
-    Run, SUCCESS,
+    Args, Context, FAILURE, Failure, Kind, OPERATIONS, Operation, Opt, PROJECT, REJECTED, Reply,
+    Response, Run, SUCCESS, working_directory,
 };
 
 pub const MCP: Operation = Operation {
@@ -61,6 +66,8 @@ fn serve(context: &mut Context) -> u8 {
     let server = Server {
         bound: context.project.clone(),
         work: Arc::clone(&work),
+        direct: context.direct,
+        caller: context.caller.clone(),
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -94,6 +101,10 @@ struct Server {
     bound: Option<PathBuf>,
     /// The work of every call so far.
     work: Arc<Mutex<WorkCounts>>,
+    /// Whether the server runs in direct mode: every call in-process, no daemon reached or started.
+    direct: bool,
+    /// The server's umask and temporary directory, read before its runtime started threads.
+    caller: Caller,
 }
 
 impl ServerHandler for Server {
@@ -134,41 +145,38 @@ impl ServerHandler for Server {
         let given = request.arguments.unwrap_or_default();
         let bound = self.bound.clone();
         let work = Arc::clone(&self.work);
-        let outcome = tokio::task::spawn_blocking(move || {
-            let (args, project) = args(operation, &given, bound)?;
+        let direct = self.direct;
+        let caller = self.caller.clone();
+        let reply = tokio::task::spawn_blocking(move || {
+            let (args, project) = match args(operation, &given, bound) {
+                Ok(parsed) => parsed,
+                Err(failure) => return Reply::new(Err(failure), true),
+            };
             let mut counts = WorkCounts::default();
             let mut context = Context {
                 work: &mut counts,
                 now: SystemTime::now(),
                 project,
+                cwd: working_directory(),
+                direct,
+                caller,
             };
-            let outcome = run(&mut context, &args);
+            let reply = client::request(operation, run, &mut context, &args, true);
             add(
                 &mut work.lock().unwrap_or_else(PoisonError::into_inner),
                 &counts,
             );
-            outcome
+            reply
         })
         .await
         .map_err(|error| ErrorData::internal_error(format!("the tool stopped: {error}"), None))?;
-        let result = match outcome {
-            Ok(response) => CallToolResult::success(vec![ContentBlock::text(response.json)]),
-            Err(failure) => CallToolResult::error(vec![ContentBlock::text(failure.json())]),
+        let content = vec![ContentBlock::text(reply.text)];
+        let result = match reply.failed {
+            false => CallToolResult::success(content),
+            true => CallToolResult::error(content),
         };
         Ok(result.into())
     }
-}
-
-/// Adds the work of one call to `total`.
-fn add(total: &mut WorkCounts, call: &WorkCounts) {
-    total.file_reads += call.file_reads;
-    total.hashes += call.hashes;
-    total.parses += call.parses;
-    total.snapshot_builds += call.snapshot_builds;
-    total.code_scans += call.code_scans;
-    total.subprocess_spawns += call.subprocess_spawns;
-    total.check_steps += call.check_steps;
-    total.program_runs += call.program_runs;
 }
 
 /// An operation's tool name: its words joined by `_`.

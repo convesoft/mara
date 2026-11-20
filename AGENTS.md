@@ -27,7 +27,7 @@ For every document in this repository, this file included:
 - `Accepted` means decided, not built. `Draft` marks a proposal or a provisional number.
 - Add only relations that carry meaning. Never add an item or a link just to complete a chain.
 - Update the affected items in the same change as the code.
-- Read and change `docs/` with the binary built in your worktree, as `cargo run --quiet --bin mara -- <operation>`. When your context lacks its guide, headed `# Mara workflow`, run `cargo run --quiet --bin mara -- prime` first.
+- Read and change `docs/` with the binary built in your worktree, in direct mode, as `cargo run --quiet --bin mara -- --no-daemon <operation>`. When your context lacks its guide, headed `# Mara workflow`, run `cargo run --quiet --bin mara -- prime` first.
 - A requirement is Accepted together with its Verification item. The rewrite is the exception: until 0.4.0 ships, a slice's Verification items are written before its work starts, by the issue that blocks the slice's epic.
 - Ask before deciding anything that changes user-visible behaviour, a persisted format, data safety or scope. Small reversible choices need no question. Until 0.4.0 is published, [Deciding during the rewrite](#deciding-during-the-rewrite) replaces this rule.
 
@@ -69,7 +69,7 @@ Run `scripts/build-souffle.sh` once in a fresh worktree first: `cargo test` need
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked --config 'build.warnings="deny"'
 cargo test --workspace --locked
-cargo run --package mara --locked --quiet -- project validate
+cargo run --package mara --locked --quiet -- --no-daemon project validate
 cargo test --package mara --test performance --release --locked
 cargo build --package mara-engine --target wasm32-unknown-unknown --locked
 zban check

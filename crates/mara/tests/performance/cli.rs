@@ -180,14 +180,15 @@ pub struct Run {
     pub work: WorkCounts,
 }
 
-/// Runs `mara --debug-stats <args>` in `directory` with an empty environment, so it reaches no
-/// user configuration or daemon. Requires exit status `status`, then reads the stats line that
+/// Runs `mara --debug-stats <args>` in `directory` with an empty environment but for
+/// `MARA_NO_DAEMON=1`, so it reaches no user configuration or daemon and starts none. Requires exit status `status`, then reads the stats line that
 /// the process writes last on stderr. The process's CPU time counts in [`cpu_time::now`].
 pub fn run(directory: &Path, args: &[impl AsRef<std::ffi::OsStr>], status: i32) -> Run {
     run_with(directory, args, &[], status)
 }
 
-/// [`run`] with the environment holding only `env`.
+/// [`run`] with the environment holding only `env`, and `MARA_NO_DAEMON=1` unless `env` names a
+/// runtime directory of the test as `XDG_RUNTIME_DIR` (DES-PERFORMANCE-HARNESS).
 pub fn run_with(
     directory: &Path,
     args: &[impl AsRef<std::ffi::OsStr>],
@@ -199,6 +200,10 @@ pub fn run_with(
         .args(args)
         .current_dir(directory)
         .env_clear()
+        .envs(
+            (!env.iter().any(|(name, _)| *name == "XDG_RUNTIME_DIR"))
+                .then_some(("MARA_NO_DAEMON", Path::new("1"))),
+        )
         .envs(env.iter().copied())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

@@ -1,12 +1,19 @@
-//! The cases of VER-DAEMON-START (`docs/daemon/verification.mara.md`) that need no client to
-//! start a daemon on demand: `mara daemon status | start | stop`, the runtime directory, the
-//! lock and the build, each through `mara daemon start`; and the daemon's idle exit
-//! (DES-DAEMON-LIFECYCLE, ADR-TEST-IDLE-PERIOD in `docs/daemon/index.mara.md`).
+//! VER-DAEMON-START and the SIGKILL cases of VER-DAEMON-WRITES (`docs/daemon/verification.mara.md`):
+//! here `mara daemon status | start | stop`, the runtime directory, the lock and the build, each
+//! through `mara daemon start`, and the daemon's idle exit (DES-DAEMON-LIFECYCLE,
+//! ADR-TEST-IDLE-PERIOD in `docs/daemon/index.mara.md`); the CLI and MCP clients in [`client`]
+//! and [`mcp`], and writes through the daemon in [`writes`].
 //!
 //! Every test has a runtime directory of its own, set as `XDG_RUNTIME_DIR`. A daemon of the
 //! test is a process of a binary under test whose environment holds that directory; a test
 //! stops only those, and kills any left when it ends, also when it fails. Only Linux runs
 //! these tests: they find processes in `/proc`.
+//!
+//! Until the daemon keeps sessions (mara-xqcnqw), it reports the counts of a cold request for
+//! every request, so the counts cannot tell who served a call. A test shows that the daemon
+//! served a call by stopping the daemon with SIGSTOP: the call waits until the daemon goes on
+//! ([`Test::served_by`]); and that a call was served in-process when it ends while the only
+//! daemon is stopped ([`Test::in_process`]).
 
 #![cfg(target_os = "linux")]
 
@@ -21,8 +28,13 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::Value;
 
-#[path = "support/daemons.rs"]
+#[path = "../support/daemons.rs"]
 mod support;
+
+mod caller;
+mod client;
+mod mcp;
+mod writes;
 
 use support::Daemons;
 
@@ -37,6 +49,7 @@ fn mara() -> PathBuf {
 }
 
 /// A run of `mara` whose stdout and stderr both reached end of file.
+#[derive(Debug, PartialEq, Eq)]
 struct Run {
     status: ExitStatus,
     stdout: String,
@@ -93,14 +106,26 @@ impl Test {
     }
 
     /// `binary` with `args`, in the test's directory, its environment holding only the runtime
-    /// directory and `env`.
+    /// directory, the test's directory as `TMPDIR` and `env`.
     fn command(&self, binary: &Path, args: &[&str], env: &[(&str, &str)]) -> Command {
+        self.command_in(self.path(), binary, args, env)
+    }
+
+    /// [`Test::command`] in `directory`.
+    fn command_in(
+        &self,
+        directory: &Path,
+        binary: &Path,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Command {
         let mut command = Command::new(binary);
         command
             .args(args)
-            .current_dir(self.path())
+            .current_dir(directory)
             .env_clear()
             .env("XDG_RUNTIME_DIR", &self.base)
+            .env("TMPDIR", self.path())
             .envs(env.iter().copied())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -174,7 +199,128 @@ impl Test {
         let path = |name: &str| PathBuf::from(status[name].as_str().expect("a path"));
         (path("socket"), path("lock"))
     }
+
+    /// A project in `project/` of the test's directory: three requirements in
+    /// `docs/reqs.mara.md`, written in direct mode.
+    fn project(&self) -> PathBuf {
+        self.project_in("project")
+    }
+
+    /// [`Test::project`] in `name/` of the test's directory.
+    fn project_in(&self, name: &str) -> PathBuf {
+        let root = self.path().join(name);
+        fs::create_dir_all(root.join(".mara")).unwrap();
+        fs::write(root.join(".mara/config.toml"), CONFIG).unwrap();
+        fs::write(root.join(".mara/schema.toml"), SCHEMA).unwrap();
+        for title in ["One", "Two", "Three"] {
+            let args = [
+                "item",
+                "create",
+                "requirement",
+                "docs/reqs.mara.md",
+                "--title",
+                title,
+                "--field",
+                "status=draft",
+                "--body",
+                "Text.",
+            ];
+            self.direct(&root, &args).succeeded();
+        }
+        root
+    }
+
+    /// Runs `mara <args>` in `directory` with `env`.
+    fn run_in(&self, directory: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
+        finish(spawn(&mut self.command_in(directory, &mara(), args, env)))
+    }
+
+    /// Starts `mara <args>` in `directory`.
+    fn spawn_in(&self, directory: &Path, args: &[&str]) -> Child {
+        spawn(&mut self.command_in(directory, &mara(), args, &[]))
+    }
+
+    /// `mara <args>` in `directory` in direct mode: what every other run of the request must
+    /// print.
+    fn direct(&self, directory: &Path, args: &[&str]) -> Run {
+        self.run_in(directory, args, &[("MARA_NO_DAEMON", "1")])
+    }
+
+    /// Waits until a daemon of the build answers, and the processes that started it have
+    /// ended: the process ID of the only daemon of the test.
+    fn wait_for_daemon(&self) -> u32 {
+        self.wait_for_daemon_beside(&[])
+    }
+
+    /// [`Test::wait_for_daemon`] while the processes `others` of the binary under test, such as
+    /// an MCP server, run too.
+    fn wait_for_daemon_beside(&self, others: &[u32]) -> u32 {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let status = self.status();
+            if let Some(pid) = status["pid"].as_u64() {
+                let pid = u32::try_from(pid).unwrap();
+                let daemons: Vec<u32> = (self.daemons().into_iter())
+                    .filter(|process| !others.contains(process))
+                    .collect();
+                if daemons == [pid] {
+                    return pid;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no daemon alone: {status}, {:?}",
+                self.daemons()
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Runs `mara <args>` in `directory` while the daemon `pid` is stopped: the call must
+    /// still run after [`STOPPED`], waiting for the daemon, and ends once the daemon goes on.
+    fn served_by(&self, pid: u32, directory: &Path, args: &[&str]) -> Run {
+        served_by(pid, self.command_in(directory, &mara(), args, &[]))
+    }
+
+    /// Runs `mara <args>` in `directory` with `env` while the daemon `pid` is stopped: the call
+    /// ends meanwhile, so no daemon served it.
+    fn in_process(&self, pid: u32, directory: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
+        signal(pid, libc::SIGSTOP);
+        let child = spawn(&mut self.command_in(directory, &mara(), args, env));
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || sender.send(finish(child)));
+        let run = receiver.recv_timeout(Duration::from_secs(10));
+        signal(pid, libc::SIGCONT);
+        run.unwrap_or_else(|_| panic!("mara {args:?} waited for the stopped daemon"))
+    }
 }
+
+/// The arguments and environment that put a client in direct mode.
+type Mode<'a> = (&'a [&'a str], &'a [(&'a str, &'a str)]);
+
+/// Runs `command` while the daemon `pid` is stopped, as [`Test::served_by`] does.
+fn served_by(pid: u32, mut command: Command) -> Run {
+    signal(pid, libc::SIGSTOP);
+    let mut child = spawn(&mut command);
+    thread::sleep(STOPPED);
+    let waited = child.try_wait().unwrap().is_none();
+    signal(pid, libc::SIGCONT);
+    let run = finish(child);
+    assert!(
+        waited,
+        "{command:?} ended while the daemon was stopped: {run:?}"
+    );
+    run
+}
+
+/// How long a call that waits for a stopped daemon must still run.
+const STOPPED: Duration = Duration::from_millis(500);
+
+const CONFIG: &str = "format_version = 1\nschema = \".mara/schema.toml\"\n\n[documents]\n\
+                      format_version = 1\ninclude = [\"**/*.mara.md\"]\n";
+
+const SCHEMA: &str = "format_version = 1\nstatuses = [\"draft\"]\n\n[types.requirement]\n\
+                      id_prefix = \"REQ-\"\ndescription = \"A requirement.\"\n";
 
 fn signal(pid: u32, signal: libc::c_int) {
     // SAFETY: kill takes no pointer.

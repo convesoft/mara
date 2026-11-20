@@ -19,14 +19,16 @@ use mara_engine::hash::Hash;
 use mara_engine::program::Program;
 use mara_engine::work::WorkCounts;
 
+use crate::caller;
+
 /// Writes `mara.dl`, every fact relation of `facts` and every relation of `inputs` into `dir`,
 /// the evaluation's private directory, each relation to the file [`file_name`] names. The JSON
 /// text was rendered once with the snapshot's facts and is written as is.
 pub fn write_facts(dir: &Path, facts: &Facts, inputs: &Inputs) -> io::Result<()> {
-    fs::write(dir.join("mara.dl"), MARA_DL)?;
+    caller::write(&dir.join("mara.dl"), MARA_DL)?;
     let relations = facts.relations.iter().chain(&inputs.relations);
     for relation in relations.chain([&inputs.source_complete]) {
-        fs::write(dir.join(file_name(&relation.name)), &relation.json)?;
+        caller::write(&dir.join(file_name(&relation.name)), &relation.json)?;
     }
     Ok(())
 }
@@ -134,9 +136,7 @@ pub fn evaluate(run: &Run, work: &mut WorkCounts) -> Result<Rows, Fault> {
     // Declared before the directory, so it ends Mara for a deferred signal only after the
     // directory is removed.
     let _interrupts = interrupt::Deferred::begin();
-    let dir = tempfile::Builder::new()
-        .prefix("mara-evaluation-")
-        .tempdir()
+    let dir = caller::tempdir("mara-evaluation-")
         .map_err(|error| host("cannot create the evaluation's private directory", &error))?;
     let read = evaluation::read_relations(run.program, run.relations);
     let inputs: Vec<&str> = read.iter().map(|relation| relation.name.as_str()).collect();
@@ -169,14 +169,14 @@ pub fn evaluate(run: &Run, work: &mut WorkCounts) -> Result<Rows, Fault> {
 /// wrapper into `dir`.
 fn prepare(dir: &Path, run: &Run, read: &[&Relation], inputs: &[&str]) -> io::Result<()> {
     for (name, text) in evaluation::copies(run.program) {
-        fs::write(dir.join(name), text)?;
+        caller::write(&dir.join(name), text)?;
     }
     for relation in read {
-        fs::write(dir.join(file_name(&relation.name)), &relation.json)?;
+        caller::write(&dir.join(file_name(&relation.name)), &relation.json)?;
     }
-    fs::create_dir(dir.join(evaluation::OUTPUT_DIR))?;
+    caller::create_dir(&dir.join(evaluation::OUTPUT_DIR))?;
     let wrapper = evaluation::wrapper(run.program, inputs, run.outputs);
-    fs::write(dir.join(evaluation::WRAPPER), wrapper)
+    caller::write(&dir.join(evaluation::WRAPPER), wrapper)
 }
 
 /// The first 64 KiB of the file at `path`; nothing when it cannot be read.
@@ -202,8 +202,8 @@ fn spawn_and_wait(
         .current_dir(dir)
         .env_clear()
         .stdin(Stdio::null())
-        .stdout(fs::File::create(dir.join(evaluation::STDOUT))?)
-        .stderr(fs::File::create(dir.join(evaluation::STDERR))?);
+        .stdout(caller::create_new(&dir.join(evaluation::STDOUT))?)
+        .stderr(caller::create_new(&dir.join(evaluation::STDERR))?);
     limit(&mut command, limits);
     let mut child = command.spawn()?;
     work.subprocess_spawns += 1;
@@ -263,6 +263,8 @@ fn limit(command: &mut Command, limits: Limits) {
         }
     };
     let parent = std::process::id();
+    // The files Soufflé writes get the modes the client's umask gives them.
+    let umask = caller::umask();
     let pre_exec = move || {
         // The child is killed when the thread that started it ends, however Mara ends; a
         // parent that ended before this call is no longer its parent.
@@ -298,6 +300,20 @@ fn limit(command: &mut Command, limits: Limits) {
         }
         // SAFETY: restoring a signal's default action is async-signal-safe.
         unsafe { libc::signal(libc::SIGXFSZ, libc::SIG_DFL) };
+        if let Some(umask) = umask {
+            // SAFETY: umask is async-signal-safe; this process runs one thread.
+            unsafe { libc::umask(umask as libc::mode_t) };
+        }
+        // The daemon blocks the signals that stop it in every thread, and a child inherits the
+        // mask: Soufflé gets none blocked.
+        // SAFETY: sigemptyset and sigprocmask are async-signal-safe and take a set on the stack.
+        unsafe {
+            let mut none = std::mem::zeroed::<libc::sigset_t>();
+            libc::sigemptyset(&mut none);
+            if libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut()) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
         Ok(())
     };
     // SAFETY: the closure calls only async-signal-safe functions and allocates nothing.

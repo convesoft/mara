@@ -42,12 +42,7 @@ const STATUS: Opt = Opt {
 const NOT_LEGACY: &str = "not-a-legacy-project";
 
 fn project_convert(context: &mut Context, args: &Args) -> Result<Response, Failure> {
-    let start = std::env::current_dir().map_err(|error| {
-        Failure::new(
-            "io-error",
-            format!("cannot read the working directory: {error}"),
-        )
-    })?;
+    let start = context.cwd()?.to_owned();
     let (root, kind) = project::find(&start, context.project.as_deref())?;
     if kind == Root::Project {
         let message = format!(

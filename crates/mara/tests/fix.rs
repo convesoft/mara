@@ -127,6 +127,7 @@ impl Project {
             .args(args)
             .current_dir(&self.root)
             .env_clear()
+            .env("MARA_NO_DAEMON", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

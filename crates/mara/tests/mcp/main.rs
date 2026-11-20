@@ -124,6 +124,7 @@ pub fn cli(directory: &Path, args: &[&str]) -> CliRun {
         .args(args)
         .current_dir(directory)
         .env_clear()
+        .env("MARA_NO_DAEMON", "1")
         .stdin(Stdio::null())
         .output()
         .expect("start mara");
@@ -180,6 +181,7 @@ impl Server {
             .args(options)
             .current_dir(directory)
             .env_clear()
+            .env("MARA_NO_DAEMON", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

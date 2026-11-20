@@ -58,6 +58,7 @@ pub fn run(directory: &Path, calls: &[(&str, &Value)]) -> Run {
         .args(["--debug-stats", "mcp"])
         .current_dir(directory)
         .env_clear()
+        .env("MARA_NO_DAEMON", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

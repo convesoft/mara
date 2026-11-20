@@ -175,6 +175,7 @@ impl Project {
             .args(["--format", "json"])
             .current_dir(self.root())
             .env_clear()
+            .env("MARA_NO_DAEMON", "1")
             .env("TMPDIR", std::env::temp_dir())
             .output()
             .expect("start mara");

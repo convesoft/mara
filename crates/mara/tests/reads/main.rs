@@ -169,6 +169,7 @@ pub fn run_in(directory: &Path, args: &[&str]) -> Run {
         .args(args)
         .current_dir(directory)
         .env_clear()
+        .env("MARA_NO_DAEMON", "1")
         .output()
         .expect("start mara");
     let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");

@@ -68,12 +68,7 @@ fn template(name: &str) -> Option<[(&'static str, &'static str); 2]> {
 fn project_init(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let name = args.value(TEMPLATE.name).unwrap_or("engineering");
     let files = template(name).expect("checked before the operation ran");
-    let start = std::env::current_dir().map_err(|error| {
-        Failure::new(
-            "io-error",
-            format!("cannot read the working directory: {error}"),
-        )
-    })?;
+    let start = context.cwd()?.to_owned();
     let directory = match &context.project {
         Some(named) => start.join(named),
         None => start,

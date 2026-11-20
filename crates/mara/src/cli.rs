@@ -4,10 +4,13 @@
 //! An operation is an [`Operation`] in [`OPERATIONS`]: its words, positional arguments and
 //! options, and a function from a [`Context`] and its [`Args`] to a [`Response`] or a
 //! [`Failure`]. Arguments are checked before the function runs. `mara mcp` serves each document
-//! operation as an MCP tool that runs the same function ([`mcp`]). Each operation also adds its
-//! case to the performance harness (`crates/mara/tests/performance/`).
+//! operation as an MCP tool that runs the same function ([`mcp`]). Both are clients of the daemon:
+//! they send a document operation to the daemon of their build, or run it in-process
+//! ([`client`]). Each operation also adds its case to the performance harness
+//! (`crates/mara/tests/performance/`).
 
 mod author;
+mod client;
 mod convert;
 mod daemon;
 mod fix;
@@ -33,6 +36,7 @@ use mara_engine::snapshot::Snapshot;
 use mara_engine::validation;
 use mara_engine::work::WorkCounts;
 
+use mara::caller::Caller;
 use mara::project::{self, SelectError};
 use mara::write::WriteError;
 
@@ -165,6 +169,10 @@ const FORMAT: Opt = Opt {
 
 /// The flag that prints the work counts (DES-PERFORMANCE-HARNESS).
 const DEBUG_STATS: &str = "debug-stats";
+
+/// The direct-mode flag: the request runs in-process, and no daemon is reached or started
+/// (DES-DAEMON-LIFECYCLE).
+const NO_DAEMON: &str = "no-daemon";
 
 /// `--limit <n>`: records per page (REQ-PAGE-LIMITS).
 pub const LIMIT: Opt = Opt {
@@ -306,19 +314,36 @@ pub struct Context<'w> {
     /// When the request began.
     pub now: SystemTime,
     project: Option<PathBuf>,
+    /// The client's working directory, from which `--project` and every file an argument names
+    /// are resolved, or why it cannot be read. In the daemon it is the client's, never the
+    /// daemon's own.
+    cwd: Result<PathBuf, String>,
+    /// Whether the client runs in direct mode ([`client::direct_mode`]).
+    direct: bool,
+    /// The client's umask and temporary directory, which a request to the daemon carries.
+    caller: Caller,
 }
 
 impl Context<'_> {
     /// The root of the project the request runs against (REQ-ONE-PROJECT-PER-OPERATION).
     pub fn root(&self) -> Result<PathBuf, Failure> {
-        let start = std::env::current_dir().map_err(|error| {
+        project::select(self.cwd()?, self.project.as_deref()).map_err(Failure::from)
+    }
+
+    /// The client's working directory.
+    pub fn cwd(&self) -> Result<&std::path::Path, Failure> {
+        self.cwd.as_deref().map_err(|error| {
             Failure::new(
                 "io-error",
                 format!("cannot read the working directory: {error}"),
             )
-        })?;
-        project::select(&start, self.project.as_deref()).map_err(Failure::from)
+        })
     }
+}
+
+/// The working directory of this process, or why it cannot be read.
+fn working_directory() -> Result<PathBuf, String> {
+    std::env::current_dir().map_err(|error| error.to_string())
 }
 
 /// The result of an operation.
@@ -328,6 +353,38 @@ pub struct Response {
     /// The human form, printed on stdout.
     pub human: String,
     pub status: u8,
+}
+
+/// What a request prints: its result or its failure in the form asked for, and the exit status.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Reply {
+    /// The JSON object without a line end, or the human form.
+    pub text: String,
+    /// Whether the request failed: the human form of a failure goes to stderr, and MCP marks
+    /// the result as an error.
+    pub failed: bool,
+    pub status: u8,
+}
+
+impl Reply {
+    pub fn new(outcome: Result<Response, Failure>, json: bool) -> Reply {
+        match outcome {
+            Ok(response) => Reply {
+                text: if json { response.json } else { response.human },
+                failed: false,
+                status: response.status,
+            },
+            Err(failure) => Reply {
+                text: if json {
+                    failure.json()
+                } else {
+                    failure.human()
+                },
+                failed: true,
+                status: failure.status,
+            },
+        }
+    }
 }
 
 /// Why a request returns no result.
@@ -419,8 +476,10 @@ impl From<SelectError> for Failure {
 /// Runs the request that `arguments` make, prints its result or failure and returns the exit
 /// status.
 pub fn run(arguments: &[OsString], work: &mut WorkCounts) -> u8 {
+    // Read while this process runs one thread: reading the umask sets it for a moment.
+    let caller = Caller::of_this_process();
     let json = requested_json(arguments);
-    let outcome = match parse(arguments) {
+    let reply = match parse(arguments) {
         Ok((None, _)) => {
             print(&mut std::io::stdout(), &usage());
             return SUCCESS;
@@ -430,33 +489,26 @@ pub fn run(arguments: &[OsString], work: &mut WorkCounts) -> u8 {
                 work,
                 now: SystemTime::now(),
                 project: args.value(PROJECT.name).map(PathBuf::from),
+                cwd: working_directory(),
+                direct: client::direct_mode(
+                    arguments.iter().any(|argument| argument == "--no-daemon"),
+                ),
+                caller,
             };
             match operation.run {
-                Run::Document(run) | Run::Command(run) => run(&mut context, &args),
+                Run::Document(run) => client::request(operation, run, &mut context, &args, json),
+                Run::Command(run) => Reply::new(run(&mut context, &args), json),
                 Run::Serve(serve) => return serve(&mut context),
             }
         }
-        Err(failure) => Err(failure),
+        Err(failure) => Reply::new(Err(failure), json),
     };
-    match outcome {
-        Ok(response) => {
-            let text = if json {
-                response.json + "\n"
-            } else {
-                response.human
-            };
-            print(&mut std::io::stdout(), &text);
-            response.status
-        }
-        Err(failure) => {
-            if json {
-                print(&mut std::io::stdout(), &(failure.json() + "\n"));
-            } else {
-                print(&mut std::io::stderr(), &failure.human());
-            }
-            failure.status
-        }
+    match (json, reply.failed) {
+        (true, _) => print(&mut std::io::stdout(), &(reply.text + "\n")),
+        (false, false) => print(&mut std::io::stdout(), &reply.text),
+        (false, true) => print(&mut std::io::stderr(), &reply.text),
     }
+    reply.status
 }
 
 /// Writes `text`, ignoring a closed stream: the exit status still tells the outcome.
@@ -505,11 +557,9 @@ fn parse(arguments: &[OsString]) -> Result<(Option<&'static Operation>, Args), F
                 Some((name, value)) => (name, Some(value)),
                 None => (option, None),
             };
-            if name == DEBUG_STATS {
+            if name == DEBUG_STATS || name == NO_DAEMON {
                 if inline.is_some() {
-                    return Err(Failure::rejected(format!(
-                        "`--{DEBUG_STATS}` takes no value"
-                    )));
+                    return Err(Failure::rejected(format!("`--{name}` takes no value")));
                 }
                 continue;
             }
@@ -613,7 +663,7 @@ fn usage() -> String {
         format!(" [--{} <{}>]{repeat}", option.name, option.value)
     };
     let mut out = format!(
-        "Usage: mara{}{} [--{DEBUG_STATS}] <operation>\n\nOperations:\n",
+        "Usage: mara{}{} [--{DEBUG_STATS}] [--{NO_DAEMON}] <operation>\n\nOperations:\n",
         option(&PROJECT),
         option(&FORMAT)
     );
@@ -705,6 +755,7 @@ mod tests {
                 "`--format`: the format is `human` or `json`",
             ),
             ("--debug-stats=1", "takes no value"),
+            ("--no-daemon=1", "`--no-daemon` takes no value"),
         ] {
             let message = rejected(text);
             assert!(message.contains(expected), "{text:?}: {message}");
