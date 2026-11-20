@@ -26,3 +26,6 @@ One line per decision made on the maintainer's behalf under the rule of 2026-11-
 - 2026-11-16: mara-ttvp9z was started before the alpha.4 epic closed, and mara-yhxq5x was split (mara-hk2arx for programs and the template's code cases, mara-9fphtg for the daemon) and started beside alpha.3 and alpha.4. Undo: not needed.
 
 - 2026-11-16, confirmed by the maintainer: asked how Mara should trust a grammar from a repository the user names that is not in the catalog (options: trust on first use; require a checksum; catalog only), the maintainer chose "Trust on first use (Recommended)". ADR-GRAMMAR-TRUST-ON-FIRST-USE is no longer provisional; mara-h0hxa3 sets it to Accepted.
+
+- Orchestrator, 2026-11-20 (mara-s9gak4): a pinned `.wasm` that is valid WebAssembly but no tree-sitter grammar aborts the process inside the tree-sitter runtime. Rated exotic (only a pin whose checksum names such a file reaches it; ADR-GRAMMAR-TRUST-ON-FIRST-USE): the worker fixes it if small, otherwise states the limit in DES-GRAMMAR-ASSETS and files a backlog issue. Undo: do that backlog issue.
+- Orchestrator, 2026-11-20: mara-hk2arx is started before mara-jm5ecb and mara-s9gak4 are integrated; it rebases over both.
