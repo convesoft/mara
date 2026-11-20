@@ -5,6 +5,8 @@
 
 mod consumer;
 mod invariants;
+#[cfg(target_os = "linux")]
+mod sandbox;
 
 use std::collections::HashMap;
 use std::fs;
@@ -142,19 +144,32 @@ pub fn evaluate(run: &Run, work: &mut WorkCounts) -> Result<Rows, Fault> {
     let inputs: Vec<&str> = read.iter().map(|relation| relation.name.as_str()).collect();
     prepare(dir.path(), run, &read, &inputs)
         .map_err(|error| host("cannot write the evaluation's private directory", &error))?;
-    let exit = spawn_and_wait(run.souffle, dir.path(), run.limits, work)
+    run_in(run, dir.path(), work)
+}
+
+/// Runs Soufflé on the prepared private directory `dir` and reads its outcome.
+fn run_in(run: &Run, dir: &Path, work: &mut WorkCounts) -> Result<Rows, Fault> {
+    let host = |what: &str, error: &dyn std::fmt::Display| Fault::Host(format!("{what}: {error}"));
+    let exit = spawn_and_wait(run.souffle, dir, run.limits, work)
         .map_err(|error| host("cannot run Soufflé", &error))?;
-    let printed = |name: &str| bounded_read(&dir.path().join(name));
+    let printed = |name: &str| bounded_read(&dir.join(name));
+    let stderr = printed(evaluation::STDERR);
+    #[cfg(target_os = "linux")]
+    if !exit.success
+        && let Some(problem) = sandbox::library_fault(run.souffle, &stderr)
+    {
+        return Err(Fault::Host(problem));
+    }
     evaluation::interpret(
         run.program,
         exit,
         &printed(evaluation::STDOUT),
-        &printed(evaluation::STDERR),
+        &stderr,
         run.limits,
     )?;
     let mut rows = Rows::default();
     for relation in run.outputs {
-        let path = dir.path().join(evaluation::output_file(relation));
+        let path = dir.join(evaluation::output_file(relation));
         let bytes = fs::read(&path).map_err(|error| Fault::Output {
             relation: (*relation).to_owned(),
             problem: format!("Soufflé wrote no readable file: {error}"),
@@ -189,7 +204,8 @@ fn bounded_read(path: &Path) -> Vec<u8> {
 }
 
 /// Starts Soufflé on the wrapper in `dir` and waits for it, at most the time limit: the one
-/// place where Mara starts a process. Its standard output and error go to files in `dir`.
+/// place where Mara starts a process. Its standard output and error go to files in `dir`. On
+/// Linux it runs in its sandbox; where that cannot be built, it does not start.
 fn spawn_and_wait(
     souffle: &Path,
     dir: &Path,
@@ -205,7 +221,17 @@ fn spawn_and_wait(
         .stdout(caller::create_new(&dir.join(evaluation::STDOUT))?)
         .stderr(caller::create_new(&dir.join(evaluation::STDERR))?);
     limit(&mut command, limits);
-    let mut child = command.spawn()?;
+    #[cfg(target_os = "linux")]
+    let sandbox = sandbox::Sandbox::new(souffle, dir)?;
+    #[cfg(target_os = "linux")]
+    sandbox.apply(&mut command);
+    #[cfg(target_os = "linux")]
+    let spawned = command.spawn().map_err(sandbox::setup_error);
+    #[cfg(not(target_os = "linux"))]
+    let spawned = command.spawn();
+    let mut child = spawned?;
+    #[cfg(target_os = "linux")]
+    drop(sandbox);
     work.subprocess_spawns += 1;
     work.program_runs += 1;
     let started = Instant::now();

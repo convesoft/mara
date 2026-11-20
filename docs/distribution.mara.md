@@ -35,7 +35,7 @@
 - An npm dispatcher package selects a prebuilt native package for the platform.
 - A native package holds the CLI binary, the Node addon and the `souffle` binary. The browser package holds the engine and Soufflé WASM modules.
 - Every package carries the same version.
-- Platforms: Linux x64 and arm64 (glibc), macOS arm64.
+- Platforms: Linux x64 and arm64 (glibc) with Landlock ([ADR-SANDBOX-REQUIRED](rules/decisions.mara.md#01M7K4XZRS4DDAREPZSWC0WZF7)), macOS arm64.
 - Node 24 or later.
 - The first npm release is 0.4.0. Alpha slices are Git tags only.
 

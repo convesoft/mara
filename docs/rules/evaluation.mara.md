@@ -67,7 +67,7 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 - Validation supplies no input: each input that an entry of the program lists is read as an empty relation, and `source_complete` holds no row.
 - The private copies are `mara.dl` for Mara's declarations and `p<n>.dl` for the program's other files, `n` counting them in the order the parser read them, the declared program first. In each copy, every `.include` path is replaced by the name of the copy that the parser resolved it to, and nothing else changes. So Soufflé reads exactly the files the parser read, and its diagnostics, which name a file only by its base name (`in file q.dl` for `sub/q.dl`), name one file each.
 - For each run the host generates a wrapper program in the private directory. It includes the consumer's program and holds one `.input` directive for each fact relation and supplied input and one `.output` directive for each relation that a configuration entry names in that program, all as JSON files in that directory (`IO=jsonfile`, `format=list`), the outputs in its subdirectory `out/`. JSON keeps tabs, newlines and quotes in values, which Soufflé's default tab-separated files do not.
-- Native: `souffle --no-preprocessor -l "" <wrapper>.dl` as a child process, single-threaded, with the private directory as its working directory, an empty environment, no standard input, and its standard output and error written to files there. `-l ""` stops Soufflé from loading a `libfunctors.so`, which it otherwise does for every program. The host finds the binary as [DES-SOUFFLE-BUILD](../distribution.mara.md#01M7BF6GX9WNFK70C6H1RBQJ5R) says.
+- Native: `souffle --no-preprocessor -l "" <wrapper>.dl` as a child process, single-threaded, with the private directory as its working directory, an empty environment, no standard input, and its standard output and error written to files there. `-l ""` stops Soufflé from loading a `libfunctors.so`, which it otherwise does for every program. On Linux it runs in its sandbox ([DES-SOUFFLE-SANDBOX](#01M7K4XGJ4TSYM1E64C327HXJQ)). The host finds the binary as [DES-SOUFFLE-BUILD](../distribution.mara.md#01M7BF6GX9WNFK70C6H1RBQJ5R) says.
 - Natively, resource limits of the child process bound an evaluation besides its time: 1 GiB of address space (`RLIMIT_AS`) and 64 MiB per file it writes (`RLIMIT_FSIZE`), an output relation or what it prints. Past the memory limit Soufflé fails with `std::bad_alloc` and aborts; past the file size the system ends it with `SIGXFSZ`. Its soft core limit is 1 byte (`RLIMIT_CORE`) where the inherited hard limit allows it, so neither stop writes a core or is recorded as a crash where `core_pattern` pipes to a handler such as systemd-coredump or names a file; Linux logs one kernel line (`RLIMIT_CORE is set to 1, aborting core`) instead ([ADR-LIMIT-STOPS-NOT-CRASHES](decisions.mara.md#01M7K0ZGQTPCKA5Z5M49NW7C35)). On a host whose `core_pattern` names a socket, or pipes to a handler while the hard core limit for `mara` is 0, the user still sees each such stop as a crash of `souffle` in the crash records, without a core, beside the fault that names the limit. The host reads at most 64 KiB of what it printed and quotes at most 4 KiB in a diagnostic.
 - An evaluation never outlives `mara`: on Linux the child gets SIGKILL when the thread that started it ends (`PR_SET_PDEATHSIG`). SIGINT, SIGTERM or SIGHUP during an evaluation stops the child and removes the private directory, then ends `mara` by the signal's default action; at other times they act as by default. After SIGKILL the private directory stays under the temporary directory until the system cleans it; nothing reads it again.
 - Browser: Soufflé runs in a worker of its own, apart from the one that holds the workspace. Compile `souffle.wasm` once per such worker. For each evaluation, create a fresh instance, write programs and facts into its in-memory filesystem and read the outputs back. The module is built with `-sEXIT_RUNTIME=1` or exports `callMain`, so the host receives the exit code of `main`.
@@ -79,6 +79,44 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 - Soufflé's compile diagnostics name a file and a line. Anything else it prints on stderr or stdout during a run, such as the warning for a `substr` out of range, is a runtime fault, also when it exits with 0. A compile warning, such as for a relation without rules or facts, is a compile error for Mara: only an invariant gives a warning ([DES-DIAGNOSTICS](../validation.mara.md#01M7CMW71GXWZS8HPVVTYPENDK)).
 - A compile error, a refusal or a fault is an error diagnostic at the project path of the file it concerns, never the private copy's, and at its line; a compile error's message ends with the source line and a caret under the column. A fault without a line, or from a limit, which it names, is at the configuration line that declares the program. `project validate` is then invalid, `query execute` and `query view` fail, and a gate and every item it names are unavailable. The codes are `program-refused` for a refusal, `program-error` for a compile diagnostic and `program-fault` for the rest.
 - At the time limit ([REQ-EVALUATION-TIME-LIMIT](#01M7CMW70G711Z67QEWW5Z0MK0)) the host kills the child process natively and terminates the Soufflé worker in the browser; the workspace and its unexported edits are not in that worker.
+
+---
+
+<a id="01M7K4XGJ4TSYM1E64C327HXJQ"></a>
+
+### Soufflé's sandbox on Linux
+
+| Type | Design |
+| --- | --- |
+| ID | DES-SOUFFLE-SANDBOX |
+| Status | Accepted |
+| Satisfies | [REQ-PROGRAMS-ONLY-COMPUTE](index.mara.md#01M7CMW6ZTAJHSF5BR9SF9KR86) |
+| Mitigates | [RISK-SOUFFLE-REACHES-OUTSIDE](index.mara.md#01M7CYC90BZBBXGC0CZ66W8ZEV) |
+
+On Linux the `souffle` child process enters a sandbox between fork and exec, after its limits ([DES-RULE-EXECUTION](#01M7BF6HD6K4B2K5Q7FJVGCDNH)): every descriptor from 3 up marked close-on-exec (`close_range`, Linux 5.11), no-new-privileges, then a Landlock domain, then a seccomp filter. So at `exec` it holds only its standard input, output and error, whichever descriptors `mara` inherited. The host builds the ruleset and the filter for each evaluation before it starts the child.
+
+| Object | Allowed |
+| --- | --- |
+| The private directory | Read files, list directories |
+| Its `out/` | Also create, write and truncate regular files |
+| The Soufflé binary | Execute, read |
+| The ELF interpreter that the binary names (`PT_INTERP`) | Execute, read |
+| The directory that holds the interpreter, after symbolic links | Read files: the shared libraries |
+| `/etc/ld.so.cache` | Read |
+
+- The ruleset handles every access right that the kernel's Landlock ABI knows: files, TCP and UDP, pathname and abstract UNIX sockets, signals. Each right that the table does not allow is denied.
+- The filter fails these system calls with `EPERM`, which Landlock leaves open on every ABI or on older ones:
+  - `socket` and `socketpair`, and `io_uring_setup`, which opens sockets past the filter; no other call yields a socket without an inherited one;
+  - `kill`, `tkill`, `tgkill`, `rt_sigqueueinfo` and `rt_tgsigqueueinfo` unless their first argument is the child's process ID; `pidfd_send_signal`; `fcntl` with `F_SETOWN`, `F_SETOWN_EX` or `F_SETSIG`, which direct the signal of asynchronous I/O to a chosen process;
+  - every `ioctl` but `TCGETS`, by which the C library asks whether a stream is a terminal: among them `FIOSETOWN`, `SIOCSPGRP` and `FIOASYNC`, and `FS_IOC_SETFLAGS` and `FS_IOC_FSSETXATTR`, which change a file's attribute flags;
+  - the changes of a file's mode, owner, times or extended attributes, by path or through a descriptor (`chmod`, `fchmod`, `fchmodat`, `fchmodat2`, `chown`, `lchown`, `fchown`, `fchownat`, `utime`, `utimes`, `futimesat`, `utimensat`, the `setxattr` and `removexattr` families); `truncate`;
+  - `keyctl`, `add_key` and `request_key`; every system call of another architecture or of the x32 ABI.
+- So the child is contained alike on Landlock ABI 1 (Linux 5.13) and later. Without Landlock, or on an architecture without a filter (Mara has them for x86-64 and arm64), the evaluation does not start ([ADR-SANDBOX-REQUIRED](decisions.mara.md#01M7K4XZRS4DDAREPZSWC0WZF7)): its fault says that Mara runs Soufflé only in a Landlock sandbox and how to enable Landlock.
+- The loader's directory holds every library of the Soufflé that Mara runs: the one it ships or that `scripts/build-souffle.sh` builds, linked only against the C library, `libm` and the loader, which glibc installs together ([DES-SOUFFLE-BUILD](../distribution.mara.md#01M7BF6GX9WNFK70C6H1RBQJ5R)); Mara never runs another. A Soufflé whose libraries lie elsewhere (RPATH, `/opt`, Nix with nix-ld, Homebrew on Linux) cannot load them: its fault names the library and this rule.
+- A step of entering the sandbox that fails stops the child before `exec`, so Soufflé is not started; that includes a kernel or an outer filter that refuses `close_range`. The fault names the step and says that a confinement Mara runs in, such as a container's seccomp profile or an agent's sandbox, must permit `close_range`, no-new-privileges, Landlock and seccomp filters.
+- The child can still read file metadata outside (`stat`, `access`), which Landlock does not restrict, and it can run code it maps from memory, inside the same sandbox.
+- A denied call fails with an error. Soufflé reports a file it cannot read, so the evaluation is a fault; it skips an output file it cannot open without a message ([EVD-SOUFFLE-PROGRAM-REACH](#01M7CMW70TAFCJKPAX3VY94QMG)), so such a write is stopped and the outcome holds the program's rows.
+- On macOS Soufflé runs without a sandbox.
 
 ---
 
@@ -167,6 +205,7 @@ The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 20
 | Upstream on 2026-11-14 | 2.5 is the latest release. Fixed on master only: `magic` with subsumption (issue 2322) and an explanation fix (2585). By design: `choice-domain` order, the `libfunctors.so` load, `#line`, unchecked `as`. Unchanged on master: the JSON reader |
 | `-t explain` on a rule with `autoinc()`, on a rule with an ADT constructor in its body, or on a program with a subsumption clause | Aborted; normal evaluation of the same programs succeeded |
 | `-t explain` with records, aggregates, negation, components or `eqrel` | Explained |
+| `.output r(IO=file, filename="<path>")` and `IO=jsonfile`, where it cannot open the path; run on 2026-11-16 | Exit status 0, no message, no file |
 | `nat(0). nat(x + 1) :- nat(x).` | Still running when killed after 5 s |
 | `s("a"). s(cat(x, "a")) :- s(x).` | Still running when killed after 5 s |
 

@@ -140,3 +140,45 @@
 - Rejected: Mara polling the child's memory and killing it before the limit. An allocation that jumps past the limit between two polls still aborts.
 - Rejected: a Soufflé patched to exit on `std::bad_alloc` without aborting. It changes the pinned build, and `abort()` cannot be ignored or blocked from outside.
 - Rejected: `SIGXFSZ` ignored and the output limit read from file sizes. The core limit already covers a piped handler and a file pattern; it is one way to cover the output limit under a socket handler (mara-8dtsks).
+
+---
+
+<a id="01M7K4XZPESXME0JGJMP2CAXPS"></a>
+
+### Contain Soufflé with Landlock and seccomp on Linux
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-SOUFFLE-SANDBOX |
+| Status | Accepted |
+| Justifies | [DES-SOUFFLE-SANDBOX](evaluation.mara.md#01M7K4XGJ4TSYM1E64C327HXJQ) |
+
+- Chosen by the maintainer on 2026-11-16: an operating-system sandbox around the `souffle` child process on Linux, built before 0.4.0; macOS follows with the macOS work. Programs come with checkouts the user did not write, five reviews found ways past the admission check, and a memory fault in Soufflé is outside any check ([EVD-SOUFFLE-PROGRAM-REACH](evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
+- Rejected by the maintainer: a Decision that accepts [RISK-SOUFFLE-REACHES-OUTSIDE](index.mara.md#01M7CYC90BZBBXGC0CZ66W8ZEV); a sandbox after 0.4.0.
+- Chosen: Landlock for files, programs, sockets and signals, and a seccomp filter for what Landlock leaves open ([DES-SOUFFLE-SANDBOX](evaluation.mara.md#01M7K4XGJ4TSYM1E64C327HXJQ)).
+- Rejected: Landlock alone. On every ABI it leaves changes of mode, owner, times and attributes by path, and the keyrings; below ABI 6 signals to other processes, below ABI 9 and 10 UNIX and UDP sockets. Ubuntu 24.04's kernel 6.8 has ABI 4.
+- Rejected: seccomp alone. It cannot tell paths apart.
+- Rejected: user namespaces through `bwrap` or `unshare`. Ubuntu 24.04 restricts unprivileged user namespaces, and they add a program to install and a process to each evaluation.
+- Chosen: the kernel interface through `libc`, already a dependency. The parent builds the ruleset and the filter; the child makes four system calls, which are async-signal-safe and allocate nothing. Rejected: the `landlock` crate. It allocates, so it too could only run in the parent, and it adds dependencies for about 60 lines.
+- Chosen: reading files beneath the interpreter's directory, rather than only the libraries the binary needs. The loader may load a variant from a subdirectory (`glibc-hwcaps`), and finding the exact files means repeating its search. That directory holds system libraries, no user data.
+- Chosen on 2026-11-20, after review: only that directory, because Mara runs only the Soufflé it ships or builds, whose libraries are all there. Rejected for now: allowing the directories that the loader resolves for a Soufflé with libraries elsewhere; Mara runs none (backlog mara-kga2ga).
+- Chosen: marking every inherited descriptor close-on-exec with `close_range`. Rejected: closing them, which would break how Rust's `Command` reports a failed `exec`; a loop over descriptor numbers, up to a million calls.
+- Chosen: allowing one `ioctl` request, `TCGETS`, rather than refusing listed ones. Requests that work on any file and change it or direct a signal are many and grow.
+
+---
+
+<a id="01M7K4XZRS4DDAREPZSWC0WZF7"></a>
+
+### Evaluate no program without the sandbox
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-SANDBOX-REQUIRED |
+| Status | Accepted |
+| Justifies | [DES-SOUFFLE-SANDBOX](evaluation.mara.md#01M7K4XGJ4TSYM1E64C327HXJQ) |
+
+- Chosen by the worker of mara-ptq6xc on 2026-11-16, the stricter reading of [REQ-PROGRAMS-ONLY-COMPUTE](index.mara.md#01M7CMW6ZTAJHSF5BR9SF9KR86), and confirmed by the maintainer on 2026-11-20: on Linux without Landlock, or wherever the sandbox cannot be built or entered, Mara evaluates no program. Each evaluation is a fault that names Landlock, or the step that failed, and how to fix it, and Soufflé never starts.
+- Landlock ABI 1 suffices: the seccomp filter closes what it leaves open ([DES-SOUFFLE-SANDBOX](evaluation.mara.md#01M7K4XGJ4TSYM1E64C327HXJQ)). Landlock is on in the default kernels of current Ubuntu, Debian, Fedora and Arch Linux, per their kernel configurations; measured only on Arch Linux with Linux 7.2, ABI 10. Read from the published profiles and kernel configurations, not run: Docker's default seccomp profile refuses Landlock's system calls up to Docker 20.10.7, gVisor does not offer Landlock, and the WSL 2 kernel does.
+- Rejected: evaluating without the sandbox, with or without a warning. A checkout could then reach outside exactly on the hosts that lack it, and a warning undoes no read or write.
+- Rejected: requiring ABI 6, 9 or 10, which cover signals, UNIX sockets and UDP themselves. They refuse Ubuntu 24.04's kernel 6.8 (ABI 4), and the filter covers those.
+- Rejected: an option that allows evaluation without the sandbox. It adds a capability that loosens a security requirement, which only the maintainer decides.

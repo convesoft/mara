@@ -199,6 +199,40 @@ Each row of [EVD-SOUFFLE-PROGRAM-REACH](evaluation.mara.md#01M7CMW70TAFCJKPAX3VY
 
 ---
 
+<a id="01M7K4YJXCHYZDK1DQKCWJ9B7S"></a>
+
+### Stop a child that reaches outside its evaluation
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-SOUFFLE-SANDBOX |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-PROGRAMS-ONLY-COMPUTE](index.mara.md#01M7CMW6ZTAJHSF5BR9SF9KR86) |
+
+The unit tests in `crates/mara/src/rules/sandbox/tests.rs` plant the way past the admission check below it, on the evaluation's own path: directives appended to the generated wrapper for Soufflé, and a helper built with `cc` that runs in Soufflé's place, as code that a memory fault would run. Each case runs on the kernel's Landlock ABI and with the ABI capped at 1, a cap that only the unit tests contain. Outside the evaluation the test holds a secret, a kept file, and a TCP, a UDP, a UNIX stream, a UNIX datagram and an abstract UNIX datagram socket. After every case no file was created outside, the kept file has its bytes, mode and modification time, and no socket received anything. Stopped means a runtime fault ([REQ-PROGRAM-FAULTS-REPORTED](evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)) that does not quote the secret.
+
+| Case | Expectation |
+| --- | --- |
+| `.input` of the secret | Stopped |
+| `.output` of a row to a file outside, as text and as JSON | Nothing written; the program's rows |
+| `.output` to the private directory and to its `out/` | Only the file in `out/` written |
+| The helper opens the secret and lists its directory, and reads the session keyring | Stopped |
+| The helper creates a file, opens the kept file for writing, truncates it, changes its mode and its times; through a descriptor opened for reading on its own binary it changes the mode, the owner, the times, an extended attribute and the attribute flags, each to what is there | Stopped |
+| The helper, with a descriptor open on the secret without close-on-exec in the test, reads every descriptor from 3 up | Stopped: none is open |
+| The helper executes a program outside, and a copy of itself that it wrote into `out/` | Stopped; the program did not run |
+| The helper connects over TCP, sends over UDP and connects to the UNIX socket; opens a socket pair and sends from it to the UNIX datagram and the abstract socket | Stopped |
+| The helper sends signal 0 to its parent and to every process; directs a pipe's I/O signal to its parent with `F_SETOWN`, `F_SETOWN_EX`, `F_SETSIG`, `FIOSETOWN`, `SIOCSPGRP` and `FIOASYNC` | Stopped |
+| The helper linked against a library in a directory of its own (RPATH) | A fault that names the library, the loader's directory and the Soufflé that Mara supports; outside the sandbox the helper runs |
+| A seccomp filter on the calling thread, as a caller's confinement, refusing `close_range`, no-new-privileges, `landlock_restrict_self` or `seccomp` | A fault that names the step and what to permit; 0 subprocess spawns |
+| The helper attempts nothing; the program it would execute, run outside the sandbox | Empty rows; the program runs |
+| A program with one output row | Its row |
+| The ABI capped at 0, as without Landlock | A fault that names Landlock; 0 subprocess spawns |
+
+Every case of [VER-PROGRAM-REACH-CASES](#01M7HZYKCS3TN1SR30YSN69SED), [VER-PROGRAM-FAULTS](#01M7HZYKB4R632Q63YWS8CY1FJ) and [VER-EVALUATION-TIME-LIMIT](#01M7HZYKBNDY3ZA77JMB0VD06H), and the interruption tests of [DES-RULE-EXECUTION](evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH), run with the sandbox.
+
+---
+
 <a id="01M7HZYKDB9NDNWP4KJFGK5A9D"></a>
 
 ### Parse the admitted language and nothing else

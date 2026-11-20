@@ -301,10 +301,4 @@ The parser reads text as Soufflé 2.5 does with `--no-preprocessor` and refuses 
 | Consequence | Severe |
 | Threatens | [REQ-PROGRAMS-ONLY-COMPUTE](#01M7CMW6ZTAJHSF5BR9SF9KR86) |
 
-A construct that the parser admits, or a memory fault in Soufflé, lets a program from an untrusted checkout read or write files or run code as the user who validates it. Five reviews each found ways past earlier, weaker checks ([EVD-SOUFFLE-PROGRAM-REACH](evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
-
----
-
-## Open questions
-
-- Whether the `souffle` child process also runs in an operating-system sandbox, or an accepted Decision accepts [RISK-SOUFFLE-REACHES-OUTSIDE](#01M7CYC90BZBBXGC0CZ66W8ZEV). The maintainer decides before the release.
+A construct that the parser admits, or a memory fault in Soufflé, lets a program from an untrusted checkout read or write files or run code as the user who validates it. Five reviews each found ways past earlier, weaker checks ([EVD-SOUFFLE-PROGRAM-REACH](evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)). On Linux the sandbox ([DES-SOUFFLE-SANDBOX](evaluation.mara.md#01M7K4XGJ4TSYM1E64C327HXJQ)) contains such a program; on macOS nothing does yet.
