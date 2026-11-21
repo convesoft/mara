@@ -9,6 +9,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Value, json};
 
+use crate::grammar::grammar_project;
 use crate::{Run, Test, copy_binary, finish, hold_lock, mara, private_directory, signal};
 
 /// A read whose JSON result and stats line the tests compare.
@@ -675,52 +676,6 @@ fn code_operations_through_the_daemon_match_direct_mode() {
     assert_eq!(got.json()["node"]["declaration"], "one", "{got:?}");
 }
 
-/// A project with an invariant over code links and the Rust grammar of VER-GRAMMAR-MARKERS,
-/// pinned and in the per-user cache of `home/` in the test's directory: its root and `HOME`.
-fn grammar_project(test: &Test) -> (std::path::PathBuf, String) {
-    let project = test.project();
-    let schema = format!(
-        "{}\n[relations.implements]\ninverse = \"implemented_by\"\n\
-         description = \"The code realizes the target.\"\n\
-         targets = {{ code = [\"requirement\"] }}\n",
-        crate::SCHEMA
-    );
-    fs::write(project.join(".mara/schema.toml"), schema).unwrap();
-    let home = test.path().join("home");
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/grammars/rust");
-    let wasm = fs::read(fixtures.join("tree-sitter-rust.wasm")).unwrap();
-    let tags = fs::read(fixtures.join("tags.scm")).unwrap();
-    let checksum = mara::grammar::checksum(&wasm, &tags);
-    let cache = home
-        .join(".cache/mara/grammars/rust/0.24.2")
-        .join(checksum.to_string());
-    fs::create_dir_all(&cache).unwrap();
-    fs::write(cache.join(mara::grammar::WASM_FILE), wasm).unwrap();
-    fs::write(cache.join(mara::grammar::TAGS_FILE), tags).unwrap();
-    fs::create_dir_all(project.join(".mara/rules")).unwrap();
-    fs::write(
-        project.join(".mara/rules/code.dl"),
-        ".include \"mara.dl\"\n.decl linked(dst: Mid)\nlinked(d) :- code_link(_, d, _, _, _, _).\n",
-    )
-    .unwrap();
-    let config = format!(
-        "{}\n[rules]\nprograms = [\".mara/rules/*.dl\"]\n\n[invariants.implemented]\n\
-         program = \".mara/rules/code.dl\"\nrelation = \"linked\"\nseverity = \"warning\"\n\
-         message = \"Code implements this requirement\"\n\n[code]\nformat_version = 1\n\n\
-         [code.languages.rust]\ninclude = [\"src/**/*.rs\"]\ncomment_prefixes = [\"//\"]\n\
-         grammar = {{ version = \"0.24.2\", checksum = \"blake3:{checksum}\" }}\n",
-        crate::CONFIG
-    );
-    fs::write(project.join(".mara/config.toml"), config).unwrap();
-    fs::create_dir(project.join("src")).unwrap();
-    fs::write(
-        project.join("src/lib.rs"),
-        "// @mara implements REQ-ONE\npub fn one() {}\n",
-    )
-    .unwrap();
-    (project, home.to_str().unwrap().to_owned())
-}
-
 /// How long the grammar may take on the file that stalls it: the length of the scan.
 const STALLED_SCAN: Duration = Duration::from_secs(10);
 
@@ -730,7 +685,7 @@ const STALLED_SCAN: Duration = Duration::from_secs(10);
 /// scanning request still runs, long before the grammar's time is up.
 fn a_read_is_answered_while_a_code_scan_runs(scanning: &[&str]) {
     let test = Test::new();
-    let (project, home) = grammar_project(&test);
+    let (project, home) = grammar_project(&test, "project", "rust");
     let budget = STALLED_SCAN.as_millis().to_string();
     let env = [
         ("HOME", home.as_str()),

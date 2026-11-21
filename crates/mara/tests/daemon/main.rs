@@ -36,6 +36,7 @@ mod caller;
 mod client;
 mod deadlines;
 mod fresh;
+mod grammar;
 mod mcp;
 mod parity;
 mod warm;

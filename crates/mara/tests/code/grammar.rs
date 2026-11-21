@@ -539,6 +539,50 @@ fn a_dropped_grammar_stays_dropped_in_its_process() {
 }
 
 #[test]
+fn a_grammar_that_does_not_load_in_time_stays_dropped_in_its_process() {
+    let project = stalled();
+    // The first call waits at least the limit; a later call that loaded or waited again would
+    // take that long too, so a bound of half the limit tells them apart on a busy machine.
+    let limit = std::time::Duration::from_secs(6);
+    let millis = limit.as_millis().to_string();
+    let env = [
+        ("MARA_TEST_GRAMMAR_LOAD_STALL", Path::new("rust")),
+        ("MARA_TEST_GRAMMAR_LOAD_MS", Path::new(&millis)),
+    ];
+    let mut mcp = project.mcp_with(&env);
+    let mut threads = Vec::new();
+    for index in 0..3 {
+        let started = std::time::Instant::now();
+        let answer = mcp.call("relation_list", json!({"node": "REQ-LOGIN"}));
+        let elapsed = started.elapsed();
+        let found = unavailable(&answer);
+        assert_eq!(found.len(), 1, "call {index}: {answer}");
+        let message = &found[0].2;
+        assert!(
+            message.contains("did not load within 6.0 s")
+                && message.contains("no longer used in this process"),
+            "call {index}: {message}"
+        );
+        // The basic level: the raw string's line is a marker.
+        assert_eq!(
+            answer["connections"].as_array().unwrap().len(),
+            2,
+            "{answer}"
+        );
+        // Only the first call waits for the load; the others neither wait nor load.
+        match index {
+            0 => assert!(elapsed >= limit, "{elapsed:?}"),
+            _ => assert!(elapsed < limit / 2, "call {index}: {elapsed:?}"),
+        }
+        threads.push(grammar_threads(mcp.pid()));
+    }
+    // The stalled load's thread, left running by the first call, and no other.
+    assert_eq!(threads[0].len(), 1, "{threads:?}");
+    assert_eq!(threads[1], threads[0], "{threads:?}");
+    assert_eq!(threads[2], threads[0], "{threads:?}");
+}
+
+#[test]
 fn each_file_that_falls_back_is_named() {
     let mut project = Project::new();
     let text = "// @mara implements REQ-LOGIN\nfn same() {}\n";

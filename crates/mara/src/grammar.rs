@@ -7,9 +7,10 @@
 //! it no file, network or native code and at most 128 MiB of memory; a trap ends the parse
 //! without a tree. Mara bounds its time: a parse and its tags query are cancelled after a budget
 //! that grows with the file, and a grammar whose thread does not answer by twice that budget
-//! and 1 s more is dropped for the rest of the process, its thread left running. The record of
-//! dropped grammars is the process's, so that no later request of any project waits on one
-//! again.
+//! and 1 s more, or that does not load within 10 s, is dropped for the rest of the
+//! process, its thread left running. The record of dropped grammars is the process's, so that no
+//! later request of any project waits on one again. Each grammar loads under a lock of its own,
+//! so that a slow load holds up only the requests that need that grammar.
 
 mod module;
 
@@ -17,9 +18,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -96,16 +97,28 @@ pub fn checksum(wasm: &[u8], tags: &[u8]) -> Hash {
 
 /// The grammars of this process: those loaded, each kept until its files' stats change, and
 /// those dropped, each kept until the process ends. Every request and project the process serves
-/// shares them.
+/// shares them. The registry is locked only to look a grammar up, never across a load.
 #[derive(Debug, Default)]
 struct Registry {
-    loaded: HashMap<(String, Hash), Loaded>,
+    /// By language name and checksum.
+    slots: HashMap<(String, Hash), Arc<Slot>>,
     /// By language name and checksum, with the reason.
     dropped: HashMap<(String, Hash), String>,
 }
 
+/// The place of one grammar, which a load holds locked: requests for that grammar wait for the
+/// load and share what it gives, and those for other grammars do not wait.
+#[derive(Debug, Default)]
+struct Slot {
+    loaded: Mutex<Option<Loaded>>,
+    /// How many loads have ended, so that a request tells whether one ended while it waited.
+    attempts: AtomicU64,
+}
+
 #[derive(Debug)]
 struct Loaded {
+    /// The directory of the files it was loaded from.
+    directory: PathBuf,
     stats: Option<[Stat; 2]>,
     grammar: Result<Arc<Grammar>, String>,
 }
@@ -132,46 +145,101 @@ impl Stat {
 }
 
 /// The registry of this process, locked.
-fn registry() -> std::sync::MutexGuard<'static, Registry> {
+fn registry() -> MutexGuard<'static, Registry> {
     static REGISTRY: OnceLock<Mutex<Registry>> = OnceLock::new();
-    let registry = REGISTRY.get_or_init(Mutex::default);
-    registry
+    lock(REGISTRY.get_or_init(Mutex::default))
+}
+
+/// `mutex` locked, also after a panic of another holder.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Why the grammar of `key` is dropped for the process, if it is.
+fn dropped(key: &(String, Hash)) -> Option<String> {
+    registry().dropped.get(key).cloned()
+}
+
+/// Drops the grammar of `key` for the rest of the process, for `reason` unless it was dropped
+/// before. Its slot leaves the registry, so that a grammar it holds is released once no request
+/// holds the slot.
+fn drop_for_process(key: &(String, Hash), reason: String) {
+    let mut registry = registry();
+    registry.dropped.entry(key.clone()).or_insert(reason);
+    let slot = registry.slots.remove(key);
+    drop(registry);
+    drop(slot);
 }
 
 /// The grammar that `language` pins, loaded unless this process loaded it from files whose
 /// stats are unchanged: `None` without a pin, else the grammar or its `unavailable-grammar`
 /// diagnostic at the configuration line of the pin. A grammar dropped in this process is
-/// neither loaded nor waited on.
+/// neither loaded nor waited on. A request waits only for a load of the same grammar.
 pub fn get(language: &Language) -> Option<Result<Arc<Grammar>, Diagnostic>> {
     let pin = language.grammar.as_ref()?;
     let unavailable = |reason: String| unavailable(language, &reason);
     let key = (language.name.clone(), pin.checksum);
-    let mut registry = registry();
-    if let Some(reason) = registry.dropped.get(&key) {
-        return Some(Err(unavailable(reason.clone())));
-    }
+    let slot = {
+        let mut registry = registry();
+        if let Some(reason) = registry.dropped.get(&key) {
+            return Some(Err(unavailable(reason.clone())));
+        }
+        Arc::clone(registry.slots.entry(key.clone()).or_default())
+    };
     let Some(root) = cache_root() else {
         let reason = "is not cached: the environment names no home directory for the cache";
         return Some(Err(unavailable(reason.to_owned())));
     };
     let directory = grammar_dir(&root, &language.name, pin);
     let (wasm, tags) = (directory.join(WASM_FILE), directory.join(TAGS_FILE));
-    let stats = Stat::of(&wasm).zip(Stat::of(&tags)).map(|(a, b)| [a, b]);
-    let reusable = registry.loaded.get(&key).is_some_and(|loaded| {
-        loaded.stats.is_some() && loaded.stats == stats && loaded.grammar.is_ok()
-    });
-    if !reusable {
-        let grammar = load(&key, pin, &wasm, &tags).map(Arc::new);
-        registry
-            .loaded
-            .insert(key.clone(), Loaded { stats, grammar });
+    let seen = slot.attempts.load(Ordering::Acquire);
+    let mut held = match slot.loaded.try_lock() {
+        Ok(loaded) => loaded,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(TryLockError::WouldBlock) => {
+            #[cfg(debug_assertions)]
+            event("wait", &key.0);
+            lock(&slot.loaded)
+        }
+    };
+    // Dropped while this request waited for another's load of it, as when that load timed out.
+    if let Some(reason) = dropped(&key) {
+        return Some(Err(unavailable(reason)));
     }
-    let grammar = match &registry.loaded[&key].grammar {
+    // A load of the same files that ended while this request waited gives its grammar or its
+    // failure to this request too; a later request checks the files again and loads again after
+    // a failure.
+    let shared = slot.attempts.load(Ordering::Acquire) != seen;
+    let stats = Stat::of(&wasm).zip(Stat::of(&tags)).map(|(a, b)| [a, b]);
+    let reusable = held.as_ref().is_some_and(|loaded| {
+        (shared && loaded.directory == directory)
+            || (loaded.stats.is_some() && loaded.stats == stats && loaded.grammar.is_ok())
+    });
+    let loaded = match &mut *held {
+        Some(loaded) if reusable => loaded,
+        empty_or_stale => {
+            let grammar = load(&key, pin, &wasm, &tags).map(Arc::new);
+            let fresh = empty_or_stale.insert(Loaded {
+                directory,
+                stats,
+                grammar,
+            });
+            slot.attempts.fetch_add(1, Ordering::Release);
+            fresh
+        }
+    };
+    let grammar = match &loaded.grammar {
         Ok(grammar) => Ok(Arc::clone(grammar)),
         Err(reason) => Err(reason.clone()),
     };
+    drop(held);
+    // Dropped during this request's load: by its timeout, or by a stalled parse of the grammar
+    // that the load replaced.
+    if !reusable && let Some(reason) = dropped(&key) {
+        return Some(Err(unavailable(reason)));
+    }
     Some(grammar.map_err(unavailable))
 }
 
@@ -255,17 +323,27 @@ pub struct Grammar {
     worker: Option<thread::JoinHandle<()>>,
     /// Its language's name and its checksum, under which it is recorded when abandoned.
     key: (String, Hash),
-    /// Whether a parse did not answer in time; the registry keeps the reason.
-    abandoned: AtomicBool,
+    /// Where the thread stands with its requests, shared with it: [`GAVE_UP`] once a parse did
+    /// not answer in time; the registry keeps the reason.
+    state: Arc<AtomicU8>,
     /// Held during a parse, so that one request's wait never includes another's job.
     busy: Mutex<()>,
 }
+
+/// A grammar's thread is loading it, and its request waits.
+const LOADING: u8 = 0;
+/// A grammar's thread answers its request: the request waits for it, and joins it when it
+/// releases the grammar.
+const ANSWERED: u8 = 1;
+/// A grammar's request gave up on its thread, which then never drops what it loaded: it must not
+/// tear its WebAssembly code down while the process exits.
+const GAVE_UP: u8 = 2;
 
 impl Drop for Grammar {
     fn drop(&mut self) {
         drop(self.jobs.take());
         if let Some(worker) = self.worker.take()
-            && !self.abandoned.load(Ordering::Relaxed)
+            && self.state.load(Ordering::Acquire) != GAVE_UP
         {
             let _ = worker.join();
         }
@@ -295,16 +373,37 @@ impl Grammar {
         let (ready, loaded) = mpsc::channel::<Result<(), String>>();
         let name = &key.0;
         let symbol = name.replace('-', "_");
+        let state = Arc::new(AtomicU8::new(LOADING));
+        let shared = Arc::clone(&state);
         let spawned = thread::Builder::new()
             .name(format!("mara-grammar-{name}"))
-            .spawn(move || match Worker::load(&symbol, &wasm, &tags) {
-                Ok(worker) => {
-                    if ready.send(Ok(())).is_ok() {
-                        worker.run(received);
+            .spawn(move || {
+                // Called before the thread drops anything it loaded: parks, keeping it, once the
+                // request gave up.
+                let answer = || {
+                    let answered = shared.compare_exchange(
+                        LOADING,
+                        ANSWERED,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    );
+                    if answered.is_err() {
+                        park_forever();
                     }
-                }
-                Err(reason) => {
-                    let _ = ready.send(Err(reason));
+                };
+                match Worker::load(&symbol, &wasm, &tags, &answer) {
+                    Ok(mut worker) => {
+                        answer();
+                        if ready.send(Ok(())).is_ok() {
+                            worker.run(received);
+                        }
+                        if shared.load(Ordering::Acquire) == GAVE_UP {
+                            park_forever();
+                        }
+                    }
+                    Err(reason) => {
+                        let _ = ready.send(Err(reason));
+                    }
                 }
             });
         let worker = match spawned {
@@ -313,12 +412,29 @@ impl Grammar {
                 return Err(format!("cannot be loaded: no thread could start ({error})"));
             }
         };
-        match loaded.recv_timeout(LOAD_LIMIT) {
+        let limit = load_limit();
+        let mut reply = loaded.recv_timeout(limit);
+        if matches!(reply, Err(RecvTimeoutError::Timeout)) {
+            let gave_up =
+                state.compare_exchange(LOADING, GAVE_UP, Ordering::AcqRel, Ordering::Acquire);
+            if gave_up.is_ok() {
+                // Its thread is left running, like that of a parse that does not answer.
+                let reason = format!(
+                    "did not load within {:.1} s and is no longer used in this process",
+                    limit.as_secs_f64()
+                );
+                drop_for_process(key, reason.clone());
+                return Err(reason);
+            }
+            // The thread answered as the time ran out: its answer follows.
+            reply = loaded.recv().map_err(|_| RecvTimeoutError::Disconnected);
+        }
+        match reply {
             Ok(Ok(())) => Ok(Grammar {
                 jobs: Some(jobs),
                 worker: Some(worker),
                 key: key.clone(),
-                abandoned: AtomicBool::new(false),
+                state,
                 busy: Mutex::new(()),
             }),
             Ok(Err(reason)) => {
@@ -326,25 +442,22 @@ impl Grammar {
                 let _ = worker.join();
                 Err(format!("cannot be loaded: {reason}"))
             }
-            Err(_) => Err(format!(
-                "cannot be loaded: it did not load within {} s",
-                LOAD_LIMIT.as_secs()
-            )),
+            Err(_) => {
+                let _ = worker.join();
+                Err("cannot be loaded: its thread stopped while it loaded".to_owned())
+            }
         }
     }
 
     /// Why the grammar is dropped for the process, once a parse did not answer in time.
     pub fn abandoned(&self) -> Option<String> {
-        registry().dropped.get(&self.key).cloned()
+        dropped(&self.key)
     }
 
     /// What the grammar finds in `contents`, the file at `path`, within its budget.
     pub fn parse(&self, contents: &[u8], path: &str) -> Result<Syntax, ParseFailure> {
-        let _busy = self
-            .busy
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if self.abandoned.load(Ordering::Relaxed) {
+        let _busy = lock(&self.busy);
+        if self.state.load(Ordering::Acquire) == GAVE_UP {
             return Err(ParseFailure::Abandoned);
         }
         let budget = budget(contents.len());
@@ -378,15 +491,23 @@ impl Grammar {
 
     /// Drops the grammar for the rest of the process, for `reason`.
     fn abandon(&self, reason: String) -> ParseFailure {
-        self.abandoned.store(true, Ordering::Relaxed);
-        let mut registry = registry();
-        registry.dropped.entry(self.key.clone()).or_insert(reason);
-        // Kept out of `loaded`, so that its thread is never waited for.
-        let loaded = registry.loaded.remove(&self.key);
-        drop(registry);
-        drop(loaded);
+        // Set first, so that its thread is never waited for once the slot releases it.
+        self.state.store(GAVE_UP, Ordering::Release);
+        drop_for_process(&self.key, reason);
         ParseFailure::Abandoned
     }
+}
+
+/// The time a grammar may take to load.
+fn load_limit() -> Duration {
+    #[cfg(debug_assertions)]
+    if let Some(millis) = std::env::var("MARA_TEST_GRAMMAR_LOAD_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+    {
+        return Duration::from_millis(millis);
+    }
+    LOAD_LIMIT
 }
 
 /// The time a grammar may take on a file of `length` bytes.
@@ -411,27 +532,34 @@ struct Worker {
 }
 
 impl Worker {
-    fn load(symbol: &str, wasm: &[u8], tags: &str) -> Result<Worker, String> {
+    /// Loads the grammar, calling `answer` before a failure drops anything it loaded.
+    fn load(symbol: &str, wasm: &[u8], tags: &str, answer: &dyn Fn()) -> Result<Worker, String> {
+        #[cfg(debug_assertions)]
+        stall_load(symbol);
+        let failed = |reason: String| {
+            answer();
+            reason
+        };
         let engine = wasmtime::Engine::default();
-        let mut store = WasmStore::new(&engine).map_err(|error| error.message)?;
+        let mut store = WasmStore::new(&engine).map_err(|error| failed(error.message))?;
         let language = store
             .load_language(symbol, wasm)
-            .map_err(|error| error.message)?;
+            .map_err(|error| failed(error.message))?;
         // Tree-sitter's store refuses another ABI too; the grammar is never used with one.
         let abi = language.abi_version();
         if !(MIN_COMPATIBLE_LANGUAGE_VERSION..=LANGUAGE_VERSION).contains(&abi) {
-            return Err(format!(
+            return Err(failed(format!(
                 "its ABI version is {abi}, and Mara's tree-sitter runtime takes \
                  {MIN_COMPATIBLE_LANGUAGE_VERSION} to {LANGUAGE_VERSION}"
-            ));
+            )));
         }
         let query = Query::new(&language, tags)
-            .map_err(|error| format!("its tags.scm is no query of the grammar: {error}"))?;
+            .map_err(|error| failed(format!("its tags.scm is no query of the grammar: {error}")))?;
         let mut parser = Parser::new();
         parser
             .set_wasm_store(store)
             .and_then(|()| parser.set_language(&language))
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| failed(error.to_string()))?;
         let definitions = (query.capture_names().iter())
             .map(|name| name.starts_with("definition."))
             .collect();
@@ -444,7 +572,7 @@ impl Worker {
         })
     }
 
-    fn run(mut self, jobs: Receiver<Job>) {
+    fn run(&mut self, jobs: Receiver<Job>) {
         while let Ok(job) = jobs.recv() {
             #[cfg(debug_assertions)]
             stall(&job.contents);
@@ -549,8 +677,51 @@ fn stall(contents: &[u8]) {
     };
     let text = text.into_encoded_bytes();
     if contents.windows(text.len()).any(|window| window == text) {
-        loop {
-            thread::park();
-        }
+        park_forever();
+    }
+}
+
+/// Parks the calling thread for the rest of the process.
+fn park_forever() -> ! {
+    loop {
+        thread::park();
+    }
+}
+
+/// A load to hold, for tests in debug builds: records the event `load`, and with
+/// `MARA_TEST_GRAMMAR_LOAD_STALL` set to the grammar's tree-sitter name, its thread stops before
+/// it loads anything: until `hold` is gone from the directory that `MARA_TEST_GRAMMAR_EVENTS`
+/// names, or for the rest of the process without that directory.
+#[cfg(debug_assertions)]
+fn stall_load(symbol: &str) {
+    event("load", symbol);
+    if std::env::var_os("MARA_TEST_GRAMMAR_LOAD_STALL").is_none_or(|name| name != symbol) {
+        return;
+    }
+    let Some(events) = std::env::var_os("MARA_TEST_GRAMMAR_EVENTS") else {
+        park_forever();
+    };
+    let hold = Path::new(&events).join("hold");
+    while hold.exists() {
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Records `what` for the grammar `name`, for tests in debug builds: with
+/// `MARA_TEST_GRAMMAR_EVENTS` naming a directory, appends the line `<what> <name>` to its file
+/// `events`. The events are `load`, when a grammar's thread starts to load it, and `wait`, when
+/// a request finds a load of the grammar it needs in progress and waits for it.
+#[cfg(debug_assertions)]
+fn event(what: &str, name: &str) {
+    use std::io::Write;
+    let Some(events) = std::env::var_os("MARA_TEST_GRAMMAR_EVENTS") else {
+        return;
+    };
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(Path::new(&events).join("events"));
+    if let Ok(mut file) = file {
+        let _ = file.write_all(format!("{what} {name}\n").as_bytes());
     }
 }
