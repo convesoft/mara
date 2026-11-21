@@ -28,11 +28,17 @@ pub const REPLY_BYTES: usize = 16 << 20;
 
 /// What a run in provenance mode gives: the rows of its outputs, which make the outcome as an
 /// evaluation's do, and the explanation of each row that `select` chose.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Explained {
     pub rows: Rows,
     pub targets: Vec<Target>,
     pub explanations: Vec<Explanation>,
+    /// Whether the key decides the whole outcome: every row has the explanation, or the reason
+    /// it has none, that the exchange gave it, and the run then ended as a successful run does
+    /// ([`settled`]). A row left without one by the end of the run (the time limit, an abort, a
+    /// stray or invalid reply, the bound on replies), or a run stopped at a limit or failed after
+    /// the last reply, depends on the machine at the time.
+    pub settled: bool,
 }
 
 /// Runs `run.program` once in provenance mode: when the evaluation ends, `select` chooses the
@@ -352,7 +358,7 @@ impl Provenance<'_, '_> {
                 let after =
                     String::from_utf8_lossy(&stderr[self.stderr_at_ready.min(stderr.len())..]);
                 // How the run ended comes first: a reply cut short by an abort is no JSON.
-                let aborted = !exit.success || !after.trim().is_empty();
+                let aborted = aborted(exit, &after);
                 let reason = match (exit.limit, aborted, broken) {
                     (Some(Limit::Time), _, _) => format!(
                         "the exchange with Soufflé passed the time limit of {} s \
@@ -380,14 +386,29 @@ impl Provenance<'_, '_> {
                 // A row explained before the run ended keeps its proof: the whole reply came and
                 // was checked against the row.
                 let targets = explainer.targets().to_vec();
+                let settled = settled(explainer.settled(), exit, &after);
                 Ok(Explained {
                     rows,
                     targets,
                     explanations: (*explainer).finish(&reason),
+                    settled,
                 })
             }
         }
     }
+}
+
+/// Whether a run that answered then failed: it exited unsuccessfully, or printed `after` on its
+/// standard error after its first reply.
+fn aborted(exit: Exit, after: &str) -> bool {
+    !exit.success || !after.trim().is_empty()
+}
+
+/// Whether a run is settled ([`Explained::settled`]): every row it chose has the explanation
+/// its exchange gave (`filled`, [`Explainer::settled`]), and it ended on its own, at no limit and
+/// not [`aborted`], as a successful run does.
+fn settled(filled: bool, exit: Exit, after: &str) -> bool {
+    filled && exit.limit.is_none() && !aborted(exit, after)
 }
 
 /// At most [`evaluation::QUOTED_BYTES`] of `text`.
@@ -399,5 +420,41 @@ fn quote(text: &str) -> String {
     match end < text.len() {
         true => format!("{}…", &text[..end]),
         false => text.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A run whose every row was explained is settled only when it then ended as a successful
+    /// run does: not when the host stopped it at the deadline, nor when it exited unsuccessfully
+    /// or printed on its standard error after the last reply.
+    #[test]
+    fn a_run_is_settled_only_when_every_row_was_explained_and_it_ended_successfully() {
+        let ended = Exit {
+            success: true,
+            limit: None,
+        };
+        assert!(settled(true, ended, ""));
+        assert!(settled(true, ended, "\n"), "nothing but whitespace");
+        assert!(
+            !settled(false, ended, ""),
+            "a row left without its exchange"
+        );
+        let deadline = Exit {
+            success: false,
+            limit: Some(Limit::Time),
+        };
+        assert!(!settled(true, deadline, ""), "stopped at the deadline");
+        let failed = Exit {
+            success: false,
+            limit: None,
+        };
+        assert!(!settled(true, failed, ""), "an unsuccessful exit");
+        assert!(
+            !settled(true, ended, "Error: aborted"),
+            "an abort's message"
+        );
     }
 }

@@ -186,10 +186,6 @@ fn the_same_read_request_again_does_no_work() {
     let warm = Warm::start();
     for (args, status) in reads(&warm.corpus) {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        if args[1] == "report" {
-            // Waits for mara-6za81b: the session keeps no explained outcome yet.
-            continue;
-        }
         warm.run_in(warm.root(), &args, status);
         let again = warm.run_in(warm.root(), &args, status);
         // Every request reads a file that `--input` names, which is no input of the session
@@ -764,5 +760,135 @@ fn an_mcp_call_after_the_same_cli_request_does_no_work() {
         run.work,
         WorkCounts::default(),
         "item_list through mara mcp"
+    );
+}
+
+/// The `query report` case of `cli::cases` named `entry`, with its exit status.
+fn report(corpus: &Corpus, entry: &str) -> (Vec<String>, i32) {
+    let case = (cli::cases(corpus).into_iter())
+        .find(|case| case.args[1] == "report" && case.args[2] == entry)
+        .expect("a report case");
+    (case.args, case.status)
+}
+
+impl Warm {
+    /// `mara --format json <args>` sent to the daemon: what it printed and the work it reports.
+    fn json(&self, args: &[&str], status: i32) -> (String, WorkCounts) {
+        let args: Vec<&str> = ["--format", "json"].iter().chain(args).copied().collect();
+        let run = cli::run_with(self.root(), &args, &self.env(), status);
+        (String::from_utf8(run.output.stdout).unwrap(), run.work)
+    }
+}
+
+/// The lines in `path` that the proofs of a `query report` response cite: those of its fact
+/// leaves, never of the item it reports on.
+fn cited_lines(response: &str, path: &str) -> Vec<u64> {
+    fn walk(node: &serde_json::Value, path: &str, lines: &mut Vec<u64>) {
+        if node["path"] == path
+            && let Some(line) = node["line"].as_u64()
+        {
+            lines.push(line);
+        }
+        for child in node["children"].as_array().into_iter().flatten() {
+            walk(child, path, lines);
+        }
+    }
+    let response: serde_json::Value = serde_json::from_str(response).unwrap();
+    let mut lines = Vec::new();
+    for row in response["rows"].as_array().expect("rows") {
+        walk(&row["proof"], path, &mut lines);
+    }
+    lines
+}
+
+/// A report after an edit that moves the lines its proof cites runs again and cites the new
+/// lines; once the edit is undone, the session's first run answers it again.
+#[test]
+fn a_report_after_an_edit_to_its_proof_runs_again() {
+    let warm = Warm::start();
+    let (args, status) = report(&warm.corpus, "implementation-ready");
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let retired = &warm.corpus.retired_requirement;
+    let (_, relative) = (warm.corpus.ids.iter())
+        .find(|(id, _)| id == retired)
+        .expect("the retired requirement's document");
+    let (before, _) = warm.json(&args, status);
+    let cited = cited_lines(&before, relative);
+    assert!(!cited.is_empty(), "a proof citing {relative}: {before}");
+    let path = warm.root().join(relative);
+    let original = fs::read_to_string(&path).unwrap();
+    let (title, rest) = original.split_once('\n').unwrap();
+    warm.settled(SystemTime::now());
+    // Two lines more above every item of the document.
+    fs::write(&path, format!("{title}\n\nInserted.\n{rest}")).unwrap();
+    let (moved, work) = warm.json(&args, status);
+    assert_counts(&work, &[("program_runs", 1)], "the report after the edit");
+    let shifted: Vec<u64> = cited.iter().map(|line| line + 2).collect();
+    assert_eq!(cited_lines(&moved, relative), shifted, "{moved}");
+    warm.settled(derived::changed(&[&path]));
+    fs::write(&path, &original).unwrap();
+    let (restored, work) = warm.json(&args, status);
+    assert_counts(
+        &work,
+        &[("program_runs", 0)],
+        "the report after the restore",
+    );
+    assert_eq!(cited_lines(&restored, relative), cited);
+    assert_eq!(restored, before);
+}
+
+/// A report of another item of the same entry, whose evaluation has the same key, explains
+/// other rows and runs; so does one with other inputs. Each is kept beside the others, and a
+/// page option, which chooses no part of the outcome, runs nothing.
+#[test]
+fn a_report_of_other_rows_or_inputs_runs_its_program() {
+    let warm = Warm::start();
+    let (args, status) = report(&warm.corpus, "implementation-ready");
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let (retired, _) = warm.json(&args, status);
+    let mut other = args.clone();
+    *other.last_mut().unwrap() = &warm.corpus.gate_requirement;
+    let (accepted, work) = warm.json(&other, 0);
+    assert_counts(&work, &[("program_runs", 1)], "the report of another item");
+    assert_ne!(accepted, retired);
+    for (args, expected) in [(&args, &retired), (&other, &accepted)] {
+        let (again, work) = warm.json(args, status);
+        assert_counts(
+            &work,
+            &[("program_runs", 0)],
+            &format!("mara {args:?} again"),
+        );
+        assert_eq!(&again, expected, "mara {args:?} again");
+    }
+    let mut paged = args.clone();
+    paged.extend(["--limit", "1"]);
+    let work = warm.run_in(warm.root(), &paged, status);
+    assert_counts(
+        &work,
+        &[("program_runs", 0)],
+        "the report with a page option",
+    );
+
+    // The `verified` gate with its inputs, then without `--complete`, then for another
+    // candidate.
+    let gate = self::gate(&warm.corpus, crate::corpus::CANDIDATE);
+    let mut gate: Vec<&str> = gate.iter().map(String::as_str).collect();
+    gate[1] = "report";
+    warm.run_in(warm.root(), &gate, 0);
+    let incomplete = &gate[..gate.len() - 2];
+    let work = warm.run_in(warm.root(), incomplete, 0);
+    assert_counts(
+        &work,
+        &[("program_runs", 1)],
+        "the report without `--complete`",
+    );
+    let other = self::gate(&warm.corpus, "def");
+    let mut other: Vec<&str> = other.iter().map(String::as_str).collect();
+    other[1] = "report";
+    let work = warm.run_in(warm.root(), &other, 0);
+    assert_counts(
+        &work,
+        &[("program_runs", 1)],
+        "the report of another candidate",
     );
 }

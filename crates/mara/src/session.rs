@@ -16,13 +16,14 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
+use mara_engine::evaluation::explain::{Explanation, Node, Target};
 use mara_engine::evaluation::{Fault, Rows};
 use mara_engine::facts::Value;
 use mara_engine::hash::Hash;
 use mara_engine::work::WorkCounts;
 
 use crate::inputs::Inputs;
-use crate::rules::{self, Run};
+use crate::rules::{self, Explained, Run};
 
 /// One project's session.
 #[derive(Debug)]
@@ -269,15 +270,36 @@ const ENTRY_BYTES: usize = 256;
 /// the time. At most [`EVALUATED_BYTES`] of them, by an estimate, the oldest dropped first. An
 /// outcome is kept for the Soufflé executable that gave it ([`Build`]), so a replaced one
 /// evaluates again.
+///
+/// The outcomes of runs in provenance mode ([`rules::explain`]) are kept under the same rules,
+/// apart from evaluations, by key and by the rows explained: a report reads one whose rows
+/// explained are those its own selection chooses from the kept rows. Only a settled one is kept
+/// ([`Explained::settled`]), whose every explanation the key and those rows decide.
 #[derive(Debug, Default)]
 pub struct Evaluated(Mutex<Kept>);
 
+/// The outcome of an evaluation.
+type Evaluation = Arc<Result<Rows, Fault>>;
+
+/// The outcome of a run in provenance mode.
+type Explanations = Arc<Result<Explained, Fault>>;
+
 #[derive(Debug, Default)]
 struct Kept {
-    outcomes: HashMap<Key, Arc<Result<Rows, Fault>>>,
-    /// The keys of `outcomes`, oldest first, with the size of each.
-    order: VecDeque<(Key, usize)>,
+    outcomes: HashMap<Key, Evaluation>,
+    /// The outcomes of runs in provenance mode by key: those of one key have the same rows and
+    /// differ in the rows explained.
+    explained: HashMap<Key, Vec<Explanations>>,
+    /// Every outcome kept, oldest first, with its size.
+    order: VecDeque<(Key, Outcome, usize)>,
     bytes: usize,
+}
+
+/// One outcome kept.
+#[derive(Clone, Debug)]
+enum Outcome {
+    Evaluation(Evaluation),
+    Explanations(Explanations),
 }
 
 /// An outcome's key in the store: the evaluation's key ([`mara_engine::evaluation::key`]) and
@@ -309,80 +331,214 @@ impl Evaluated {
     /// The outcome of `run`, whose key is `key`: one that an earlier run with that key and the
     /// same Soufflé executable left, else evaluated ([`rules::evaluate`]) without holding the
     /// store, so that no request waits for another's evaluation.
-    pub fn evaluate(
-        &self,
-        key: Hash,
-        run: &Run,
-        work: &mut WorkCounts,
-    ) -> Arc<Result<Rows, Fault>> {
+    pub fn evaluate(&self, key: Hash, run: &Run, work: &mut WorkCounts) -> Evaluation {
         // An executable that cannot be read leaves the evaluation to report it.
         let Some(build) = Build::of(run.souffle) else {
             return Arc::new(rules::evaluate(run, work));
         };
         let key = (key, build);
-        if let Some(outcome) = self.find(&key) {
+        if let Some(outcome) = lock(&self.0).outcomes.get(&key).cloned() {
             return outcome;
         }
         let outcome = Arc::new(rules::evaluate(run, work));
-        self.keep_within(key, &outcome, EVALUATED_BYTES);
+        self.keep_within(
+            key,
+            Outcome::Evaluation(Arc::clone(&outcome)),
+            EVALUATED_BYTES,
+        );
         outcome
     }
 
-    fn find(&self, key: &Key) -> Option<Arc<Result<Rows, Fault>>> {
-        lock(&self.0).outcomes.get(key).cloned()
+    /// The outcome of `run` in provenance mode, whose key is `key`, explaining the rows that
+    /// `select` chooses: one that an earlier run with that key and the same Soufflé executable
+    /// left, having explained the rows that `select` chooses from its rows, else run
+    /// ([`rules::explain`]) without holding the store.
+    pub fn explain(
+        &self,
+        key: Hash,
+        run: &Run,
+        select: &mut dyn FnMut(&Rows) -> Vec<Target>,
+        work: &mut WorkCounts,
+    ) -> Explanations {
+        let Some(build) = Build::of(run.souffle) else {
+            return Arc::new(rules::explain(run, select, work));
+        };
+        let key = (key, build);
+        if let Some(outcome) = self.find_explained(&key, select) {
+            return outcome;
+        }
+        let outcome = Arc::new(rules::explain(run, select, work));
+        self.keep_within(
+            key,
+            Outcome::Explanations(Arc::clone(&outcome)),
+            EVALUATED_BYTES,
+        );
+        outcome
     }
 
-    /// Keeps `outcome` under `key` if it is kept at all, dropping the oldest outcomes until
-    /// those kept hold at most `budget` bytes.
-    fn keep_within(&self, key: Key, outcome: &Arc<Result<Rows, Fault>>, budget: usize) {
-        let Some(size) = size(outcome) else {
+    /// The kept outcome of a run in provenance mode with `key` that explained the rows `select`
+    /// chooses from its rows, or its compile error, which no choice of rows changes. `select`
+    /// runs without holding the store.
+    fn find_explained(
+        &self,
+        key: &Key,
+        select: &mut dyn FnMut(&Rows) -> Vec<Target>,
+    ) -> Option<Explanations> {
+        let kept = lock(&self.0).explained.get(key)?.clone();
+        let rows = match kept.first().map(|outcome| &**outcome) {
+            Some(Ok(explained)) => &explained.rows,
+            _ => return kept.into_iter().next(),
+        };
+        let targets = select(rows);
+        (kept.iter())
+            .find(|outcome| matches!(&***outcome, Ok(explained) if explained.targets == targets))
+            .cloned()
+    }
+
+    /// Keeps `outcome` under `key` if it is kept at all and no such outcome is, dropping the
+    /// oldest outcomes until those kept hold at most `budget` bytes.
+    fn keep_within(&self, key: Key, outcome: Outcome, budget: usize) {
+        let Some(size) = size(&outcome) else {
             return;
         };
         if size > budget {
             return;
         }
         let mut kept = lock(&self.0);
-        if kept.outcomes.contains_key(&key) {
+        let present = match &outcome {
+            Outcome::Evaluation(_) => kept.outcomes.contains_key(&key),
+            Outcome::Explanations(new) => {
+                (kept.explained.get(&key).into_iter().flatten()).any(|old| match (&**old, &**new) {
+                    (Ok(old), Ok(new)) => old.targets == new.targets,
+                    (old, new) => old.is_err() && new.is_err(),
+                })
+            }
+        };
+        if present {
             return;
         }
         while kept.bytes + size > budget {
-            let Some((oldest, freed)) = kept.order.pop_front() else {
+            let Some((oldest, dropped, freed)) = kept.order.pop_front() else {
                 break;
             };
-            kept.outcomes.remove(&oldest);
             kept.bytes -= freed;
+            match dropped {
+                Outcome::Evaluation(_) => {
+                    kept.outcomes.remove(&oldest);
+                }
+                Outcome::Explanations(dropped) => {
+                    let Some(outcomes) = kept.explained.get_mut(&oldest) else {
+                        continue;
+                    };
+                    outcomes.retain(|outcome| !Arc::ptr_eq(outcome, &dropped));
+                    if outcomes.is_empty() {
+                        kept.explained.remove(&oldest);
+                    }
+                }
+            }
         }
-        kept.outcomes.insert(key.clone(), Arc::clone(outcome));
-        kept.order.push_back((key, size));
+        match &outcome {
+            Outcome::Evaluation(rows) => {
+                kept.outcomes.insert(key.clone(), Arc::clone(rows));
+            }
+            Outcome::Explanations(explained) => {
+                let outcomes = kept.explained.entry(key.clone()).or_default();
+                outcomes.push(Arc::clone(explained));
+            }
+        }
+        kept.order.push_back((key, outcome, size));
         kept.bytes += size;
     }
 }
 
 /// An estimate of the memory that `outcome` holds as kept, at least [`ENTRY_BYTES`], or `None`
-/// for an outcome that is not kept.
-fn size(outcome: &Result<Rows, Fault>) -> Option<usize> {
-    const ROW: usize = size_of::<Vec<Value>>();
-    const VALUE: usize = size_of::<Value>();
-    let held: Option<usize> = match outcome {
-        Ok(rows) => Some(
-            (rows.relations.iter())
-                .map(|(name, rows)| {
-                    let values = rows.iter().flatten().map(|value| match value {
-                        Value::Symbol(text) => VALUE + text.len(),
-                        Value::Number(_) => VALUE,
-                    });
-                    name.len() + rows.len() * ROW + values.sum::<usize>()
-                })
-                .sum(),
-        ),
-        Err(Fault::Compile(messages)) => Some(
+/// for an outcome that is not kept: a fault other than a compile error, or a run in provenance
+/// mode that is not settled.
+fn size(outcome: &Outcome) -> Option<usize> {
+    let held = match outcome {
+        Outcome::Evaluation(outcome) => match &**outcome {
+            Ok(rows) => rows_bytes(rows),
+            Err(fault) => fault_bytes(fault)?,
+        },
+        Outcome::Explanations(outcome) => match &**outcome {
+            Ok(explained) if explained.settled => {
+                let targets = (explained.targets.iter())
+                    .map(|target| target.relation.len() + values_bytes(&target.values));
+                let explanations = (explained.explanations.iter()).map(|explanation| {
+                    size_of::<Explanation>()
+                        + match explanation {
+                            Ok(node) => node_bytes(node),
+                            Err(reason) => reason.len(),
+                        }
+                });
+                rows_bytes(&explained.rows)
+                    + targets.sum::<usize>()
+                    + explained.targets.len() * size_of::<Target>()
+                    + explanations.sum::<usize>()
+            }
+            Ok(_) => return None,
+            Err(fault) => fault_bytes(fault)?,
+        },
+    };
+    Some(ENTRY_BYTES + held)
+}
+
+/// What the rows of each relation of `rows` hold.
+fn rows_bytes(rows: &Rows) -> usize {
+    (rows.relations.iter())
+        .map(|(name, rows)| {
+            let values: usize = rows.iter().map(|row| values_bytes(row)).sum();
+            name.len() + rows.len() * size_of::<Vec<Value>>() + values
+        })
+        .sum()
+}
+
+/// What `values` hold, besides the vector that holds them.
+fn values_bytes(values: &[Value]) -> usize {
+    (values.iter())
+        .map(|value| match value {
+            Value::Symbol(text) => size_of::<Value>() + text.len(),
+            Value::Number(_) => size_of::<Value>(),
+        })
+        .sum()
+}
+
+/// What a compile error holds, or `None` for any other fault, which is not kept.
+fn fault_bytes(fault: &Fault) -> Option<usize> {
+    match fault {
+        Fault::Compile(messages) => Some(
             (messages.iter())
                 .map(|message| size_of_val(message) + message.text.len())
                 .sum(),
         ),
-        Err(_) => None,
-    };
-    held.map(|held| ENTRY_BYTES + held)
+        _ => None,
+    }
+}
+
+/// What a step of a proof holds, its children included.
+fn node_bytes(node: &Node) -> usize {
+    size_of::<Node>()
+        + match node {
+            Node::Derived {
+                relation,
+                atom,
+                rule,
+                children,
+            } => {
+                relation.len()
+                    + atom.len()
+                    + rule.len()
+                    + children.iter().map(node_bytes).sum::<usize>()
+            }
+            Node::Fact {
+                relation,
+                values,
+                path,
+                ..
+            } => relation.len() + values_bytes(values) + path.len(),
+            Node::Input { name, values } => name.len() + values_bytes(values),
+            Node::Absent { atom } => atom.len(),
+        }
 }
 
 /// The open sessions of a daemon.
@@ -491,11 +647,44 @@ mod tests {
 
     use super::*;
 
-    fn rows(text: &str) -> Arc<Result<Rows, Fault>> {
+    fn rows(text: &str) -> Outcome {
+        Outcome::Evaluation(Arc::new(Ok(some_rows(text))))
+    }
+
+    fn some_rows(text: &str) -> Rows {
         let mut rows = Rows::default();
         let values = vec![vec![Value::Symbol(text.to_owned())]];
         rows.relations.insert("r".to_owned(), values);
-        Arc::new(Ok(rows))
+        rows
+    }
+
+    fn target(text: &str) -> Target {
+        Target {
+            relation: "r".to_owned(),
+            values: vec![Value::Symbol(text.to_owned())],
+        }
+    }
+
+    /// A run in provenance mode whose rows hold `a` and `b` and which explained `targets`.
+    fn explained(targets: &[&str], settled: bool) -> Explanations {
+        let mut rows = some_rows("a");
+        rows.relations
+            .get_mut("r")
+            .unwrap()
+            .push(vec![Value::Symbol("b".to_owned())]);
+        let explanations = (targets.iter())
+            .map(|text| {
+                Ok(Node::Absent {
+                    atom: format!("r(\"{text}\")"),
+                })
+            })
+            .collect();
+        Arc::new(Ok(Explained {
+            rows,
+            targets: targets.iter().map(|text| target(text)).collect(),
+            explanations,
+            settled,
+        }))
     }
 
     fn build() -> Build {
@@ -512,7 +701,7 @@ mod tests {
 
     fn kept(evaluated: &Evaluated) -> Vec<Key> {
         let kept = lock(&evaluated.0);
-        kept.order.iter().map(|(key, _)| key.clone()).collect()
+        kept.order.iter().map(|(key, ..)| key.clone()).collect()
     }
 
     /// Rows and compile errors are kept, the oldest dropped first past the budget; a fault that
@@ -523,10 +712,10 @@ mod tests {
         let one = rows("a");
         let size = super::size(&one).unwrap();
         let budget = 2 * size;
-        evaluated.keep_within(key(1), &one, budget);
-        evaluated.keep_within(key(2), &rows("b"), budget);
+        evaluated.keep_within(key(1), one, budget);
+        evaluated.keep_within(key(2), rows("b"), budget);
         assert_eq!(kept(&evaluated), [key(1), key(2)]);
-        evaluated.keep_within(key(3), &rows("c"), budget);
+        evaluated.keep_within(key(3), rows("c"), budget);
         assert_eq!(kept(&evaluated), [key(2), key(3)], "the oldest goes first");
         assert_eq!(lock(&evaluated.0).bytes, budget);
 
@@ -543,13 +732,13 @@ mod tests {
             },
         ];
         for (n, fault) in (4..).zip(faults) {
-            evaluated.keep_within(key(n), &Arc::new(Err(fault)), budget);
+            evaluated.keep_within(key(n), Outcome::Evaluation(Arc::new(Err(fault))), budget);
         }
-        evaluated.keep_within(key(9), &rows(&"x".repeat(budget)), budget);
+        evaluated.keep_within(key(9), rows(&"x".repeat(budget)), budget);
         assert_eq!(kept(&evaluated), [key(2), key(3)]);
 
-        let compile = Arc::new(Err(Fault::Compile(Vec::new())));
-        evaluated.keep_within(key(10), &compile, budget);
+        let compile = Outcome::Evaluation(Arc::new(Err(Fault::Compile(Vec::new()))));
+        evaluated.keep_within(key(10), compile, budget);
         assert_eq!(kept(&evaluated).last(), Some(&key(10)));
     }
 
@@ -558,10 +747,10 @@ mod tests {
     #[test]
     fn outcomes_without_rows_count_against_the_budget() {
         let evaluated = Evaluated::default();
-        let empty = Arc::new(Ok(Rows::default()));
+        let empty = Outcome::Evaluation(Arc::new(Ok(Rows::default())));
         assert_eq!(super::size(&empty), Some(ENTRY_BYTES));
         for n in 0..10 {
-            evaluated.keep_within(key(n), &empty, 3 * ENTRY_BYTES);
+            evaluated.keep_within(key(n), empty.clone(), 3 * ENTRY_BYTES);
         }
         assert_eq!(kept(&evaluated), [key(7), key(8), key(9)]);
     }
@@ -576,15 +765,105 @@ mod tests {
         let before = Build::of(&souffle).unwrap();
         let evaluated = Evaluated::default();
         let hash = Hash::of_bytes(b"evaluation");
-        evaluated.keep_within((hash, before.clone()), &rows("a"), EVALUATED_BYTES);
+        evaluated.keep_within((hash, before.clone()), rows("a"), EVALUATED_BYTES);
         fs::write(&souffle, "another build").unwrap();
         let after = Build::of(&souffle).unwrap();
         assert_ne!(before, after);
-        assert!(
-            evaluated.find(&(hash, after)).is_none(),
-            "the old outcome was found"
-        );
-        assert!(evaluated.find(&(hash, before)).is_some());
+        let find = |key| lock(&evaluated.0).outcomes.get(&key).cloned();
+        assert!(find((hash, after)).is_none(), "the old outcome was found");
+        assert!(find((hash, before)).is_some());
         assert!(Build::of(&dir.path().join("missing")).is_none());
+    }
+
+    /// A run in provenance mode is found by its key and by the rows that the request's
+    /// selection chooses from its rows; a compile error whatever the selection; never an
+    /// evaluation's rows, and never a run that left a row without the explanation its exchange
+    /// would give.
+    #[test]
+    fn an_explained_outcome_is_found_for_the_rows_that_the_request_explains() {
+        let evaluated = Evaluated::default();
+        let budget = EVALUATED_BYTES;
+        let choose = |chosen: &'static [&'static str]| {
+            move |rows: &Rows| {
+                assert_eq!(rows.relations["r"].len(), 2, "the kept run's rows");
+                chosen.iter().map(|text| target(text)).collect::<Vec<_>>()
+            }
+        };
+        let a = explained(&["a"], true);
+        evaluated.keep_within(key(1), Outcome::Explanations(Arc::clone(&a)), budget);
+        let found = evaluated.find_explained(&key(1), &mut choose(&["a"]));
+        assert!(Arc::ptr_eq(&found.unwrap(), &a));
+        assert!(
+            evaluated
+                .find_explained(&key(1), &mut choose(&["b"]))
+                .is_none()
+        );
+        assert!(
+            evaluated
+                .find_explained(&key(1), &mut choose(&[]))
+                .is_none()
+        );
+        assert!(
+            evaluated
+                .find_explained(&key(2), &mut choose(&["a"]))
+                .is_none()
+        );
+
+        let b = explained(&["b"], true);
+        evaluated.keep_within(key(1), Outcome::Explanations(Arc::clone(&b)), budget);
+        let found = evaluated.find_explained(&key(1), &mut choose(&["b"]));
+        assert!(Arc::ptr_eq(&found.unwrap(), &b));
+        evaluated.keep_within(
+            key(1),
+            Outcome::Explanations(explained(&["b"], true)),
+            budget,
+        );
+        assert_eq!(kept(&evaluated).len(), 2, "the same outcome is kept once");
+
+        evaluated.keep_within(
+            key(3),
+            Outcome::Explanations(explained(&["a"], false)),
+            budget,
+        );
+        assert!(
+            evaluated
+                .find_explained(&key(3), &mut choose(&["a"]))
+                .is_none()
+        );
+        evaluated.keep_within(key(4), rows("a"), budget);
+        assert!(
+            evaluated
+                .find_explained(&key(4), &mut choose(&["a"]))
+                .is_none()
+        );
+        let limit = Fault::Limit(Limit::Time, Limits::with_time(1));
+        evaluated.keep_within(key(5), Outcome::Explanations(Arc::new(Err(limit))), budget);
+        assert!(
+            evaluated
+                .find_explained(&key(5), &mut choose(&[]))
+                .is_none()
+        );
+
+        let compile: Explanations = Arc::new(Err(Fault::Compile(Vec::new())));
+        evaluated.keep_within(key(6), Outcome::Explanations(Arc::clone(&compile)), budget);
+        let found = evaluated.find_explained(&key(6), &mut |_: &Rows| panic!("no rows"));
+        assert!(Arc::ptr_eq(&found.unwrap(), &compile));
+    }
+
+    /// Runs in provenance mode and evaluations share one budget and one order, and a dropped
+    /// run is found no more.
+    #[test]
+    fn explained_outcomes_share_the_budget_with_evaluations() {
+        let evaluated = Evaluated::default();
+        let explanations = Outcome::Explanations(explained(&["a"], true));
+        let budget = super::size(&explanations).unwrap() + super::size(&rows("a")).unwrap();
+        evaluated.keep_within(key(1), explanations, budget);
+        evaluated.keep_within(key(2), rows("a"), budget);
+        assert_eq!(kept(&evaluated), [key(1), key(2)]);
+        evaluated.keep_within(key(3), rows("b"), budget);
+        assert_eq!(kept(&evaluated), [key(2), key(3)]);
+        assert!(lock(&evaluated.0).explained.is_empty());
+        let mut choose = |_: &Rows| vec![target("a")];
+        assert!(evaluated.find_explained(&key(1), &mut choose).is_none());
     }
 }

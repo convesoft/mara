@@ -882,6 +882,12 @@ impl<'a> Explainer<'a> {
         self.explanations[target] = Some(explanation);
     }
 
+    /// Whether every row has the explanation that its exchange gave, so that
+    /// [`Explainer::finish`] gives none its reason.
+    pub fn settled(&self) -> bool {
+        self.explanations.iter().all(Option::is_some)
+    }
+
     /// The explanation of each row, in the order given: a row whose exchange did not end gets
     /// `reason`, such as the time limit or an aborted run.
     pub fn finish(self, reason: &str) -> Vec<Explanation> {
@@ -1145,7 +1151,12 @@ mod tests {
         explainer.command();
         explainer.reply(&json!({"proof": leaf("Tuple not found"), "rules": []}));
         explainer.command();
+        assert!(!explainer.settled(), "a row awaits its reply");
         explainer.reply(&json!({"proof": 5, "rules": []}));
+        assert!(
+            explainer.settled(),
+            "each row has the reason its exchange gave"
+        );
         let not_a_proof = Err("Soufflé's reply is not a proof of this row".to_owned());
         assert_eq!(explainer.finish("x"), [not_a_proof.clone(), not_a_proof]);
         // A reply that no command awaits: no later reply can be paired with its row.
@@ -1154,6 +1165,10 @@ mod tests {
         explainer.reply(&json!({"proof": leaf("Tuple not found"), "rules": []}));
         explainer.reply(&json!({"proof": leaf("Tuple not found"), "rules": []}));
         assert_eq!(explainer.command(), None);
+        assert!(
+            !explainer.settled(),
+            "the second row was left without its exchange"
+        );
         let explanations = explainer.finish("x");
         assert_eq!(
             explanations[1],

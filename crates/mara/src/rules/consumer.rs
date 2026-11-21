@@ -61,7 +61,9 @@ pub fn consume(
 
 /// The entry evaluated as [`consume`] does, code links included, but in one run in provenance
 /// mode, which also explains the rows that `select` chooses from its outputs
-/// ([`super::explain`]). It is no evaluation that another consumer reads.
+/// ([`super::explain`]). It is no evaluation that another consumer reads; a session's request
+/// reads the run of an earlier request with the same key that explained the rows `select`
+/// chooses (DES-DAEMON-SESSIONS).
 pub fn consume_explained(
     generation: &Generation,
     entry: usize,
@@ -71,7 +73,10 @@ pub fn consume_explained(
     select: &mut dyn FnMut(&Rows) -> Vec<Target>,
     work: &mut WorkCounts,
 ) -> Result<Consumed<Explained>, InputError> {
-    let explain = |run: &Run, _, work: &mut WorkCounts| super::explain(run, select, work);
+    let explain = |run: &Run, key, work: &mut WorkCounts| match &generation.evaluated {
+        Some(evaluated) => (*evaluated.explain(key, run, select, work)).clone(),
+        None => super::explain(run, select, work),
+    };
     consume_with(generation, entry, supplied, complete, code, work, explain)
 }
 
