@@ -86,11 +86,12 @@ struct State {
     /// the same file are not scanned again.
     code_scans: HashMap<String, Scan>,
     /// The listings and `.gitignore` files of the directories on the way to the paths that
-    /// [`Inputs::code_file`] checked, so that a session lists and reads them again only when a
-    /// check would, also after a derivation that lists no code dropped them from the inventory.
-    /// Every walk takes a record from here when it is the one a check keeps, and brings the
-    /// records of the directories it lists up to date; a listing of the code files drops the
-    /// directories it does not list ([`refresh_ancestors`]). No daemon watches them.
+    /// [`Inputs::code_file`] checked, and of every directory that the last listing of the code
+    /// files listed, so that a session lists and reads them again only when a check would, also
+    /// after a derivation that lists no code dropped them from the inventory. Every walk takes a
+    /// record from here when it is the one a check keeps, and brings the records of the
+    /// directories it lists up to date; a listing of the code files makes them its own records
+    /// ([`refresh_ancestors`]). No daemon watches them.
     ancestors: Inventory,
 }
 
@@ -935,20 +936,39 @@ fn keep_ancestors(ancestors: &mut Inventory, mut next: Inventory) {
 /// Brings `ancestors` up to date with a walk of the inventory that found `next`: each of its
 /// directories that the walk listed takes the walk's listing and `.gitignore` record, none when
 /// it found none. With `all`, the walk listed the code files, which reaches every directory
-/// that may hold one, and a directory it did not list leaves. Costs one lookup per directory of
-/// `ancestors`.
+/// that may hold one: `ancestors` takes the records of every directory it listed, and a
+/// directory it did not list leaves, so that a walk that lists no code, which drops the code
+/// directories from the inventory, leaves the next listing of the code files reading no
+/// `.gitignore` again (DES-INPUTS-AND-KEYS). Costs one lookup per directory of `ancestors`, and
+/// with `all` one per directory the walk listed.
 fn refresh_ancestors(ancestors: &mut Inventory, next: &Inventory, all: bool) {
     let Inventory {
         directories,
         gitignores,
         ..
     } = ancestors;
+    if all {
+        directories.retain(|directory, _| next.directories.contains_key(directory));
+        gitignores.retain(|directory, _| next.gitignores.contains_key(directory));
+        // A directory kept from an earlier listing takes the new record in place, so that only
+        // a directory new to `ancestors` copies its path.
+        for (directory, listing) in &next.directories {
+            match directories.get_mut(directory) {
+                Some(kept) => kept.clone_from(listing),
+                None => drop(directories.insert(directory.clone(), listing.clone())),
+            }
+        }
+        for (directory, read) in &next.gitignores {
+            match gitignores.get_mut(directory) {
+                Some(kept) => kept.clone_from(read),
+                None => drop(gitignores.insert(directory.clone(), read.clone())),
+            }
+        }
+        return;
+    }
     directories.retain(|directory, kept| {
         let Some(listing) = next.directories.get(directory) else {
-            if all {
-                gitignores.remove(directory);
-            }
-            return !all;
+            return true;
         };
         *kept = listing.clone();
         match next.gitignores.get(directory) {

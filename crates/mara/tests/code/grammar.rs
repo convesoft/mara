@@ -302,6 +302,8 @@ fn a_grammar_missing_from_the_cache_falls_back_to_the_basic_level() {
     project.write("scripts/tool.py", PYTHON);
     let (rust, line) = project.install_grammar("rust");
     project.install_grammar("python");
+    // The project's daemon loads the grammar before it goes.
+    project.json(&["relation", "list", "REQ-AUDIT"], 0);
     fs::remove_dir_all(&rust).unwrap();
     falls_back(&project, line, "is not in the grammar cache");
     let validated = project.json(&["project", "validate"], 1);
@@ -316,6 +318,8 @@ fn a_damaged_grammar_falls_back_to_the_basic_level() {
     project.write("scripts/tool.py", PYTHON);
     let (rust, line) = project.install_grammar("rust");
     project.install_grammar("python");
+    // The project's daemon loads the grammar before it is damaged.
+    project.json(&["relation", "list", "REQ-AUDIT"], 0);
     // A truncated `.wasm`, pinned with its own checksum, so that it fails as it loads.
     let wasm = fs::read(rust.join(mara::grammar::WASM_FILE)).unwrap();
     let tags = fs::read(rust.join(mara::grammar::TAGS_FILE)).unwrap();

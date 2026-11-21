@@ -81,6 +81,14 @@ impl Written {
         let paths = self.files.iter().map(|(path, _)| path.to_string_lossy());
         paths.filter(|path| path.ends_with(".rs")).count() as u64
     }
+
+    /// The number of distinct contents the run wrote into code files.
+    #[cfg(debug_assertions)]
+    pub fn distinct_code(&self) -> u64 {
+        let written = self.files.iter().zip(&self.contents);
+        let code = written.filter(|((path, _), _)| path.to_string_lossy().ends_with(".rs"));
+        code.map(|(_, bytes)| bytes).collect::<BTreeSet<_>>().len() as u64
+    }
 }
 
 /// Every file below `root` with its contents, and every directory, `.git` aside.

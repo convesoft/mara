@@ -9,6 +9,8 @@
 //! change less than 2 s after it, or one that checked it later. The expected counts are the
 //! row's for that case. A run in which a derivation that did work was reported while the request
 //! ran cannot be judged and is repeated (`derived::decided`).
+//!
+//! The warm rows of code are in `warm_code.rs`.
 
 #![cfg(debug_assertions)]
 
@@ -26,21 +28,25 @@ use crate::derived::{self, Case, Reports, decided, until_settled};
 use crate::restore::{self, Written};
 use crate::{SEED, mcp};
 
-const LIST: &[&str] = &["item", "list"];
-const VALIDATE: &[&str] = &["project", "validate"];
+pub(crate) const LIST: &[&str] = &["item", "list"];
+pub(crate) const VALIDATE: &[&str] = &["project", "validate"];
 
 /// A 1× corpus and a runtime directory of the test, whose daemons are killed when it is dropped.
-struct Warm {
+pub(crate) struct Warm {
     /// Kills the daemons when the test ends, before the runtime directory goes.
     _daemons: Daemons,
-    reports: Reports,
-    corpus: Corpus,
+    pub(crate) reports: Reports,
+    pub(crate) corpus: Corpus,
     runtime: tempfile::TempDir,
+    /// The `HOME` of every run, the daemon's included: a private directory, or the one the
+    /// test gives ([`Warm::with_home`]), which holds the per-user grammar cache
+    /// (DES-GRAMMAR-ASSETS).
+    home: tempfile::TempDir,
 }
 
 impl Warm {
     /// A corpus whose files last changed 2 s ago, and no daemon yet.
-    fn new() -> Warm {
+    pub(crate) fn new() -> Warm {
         let corpus = Corpus::generate(1, SEED);
         // Short enough for the socket path; mode 0700, as DES-DAEMON-LIFECYCLE requires.
         let runtime = tempfile::Builder::new()
@@ -54,50 +60,61 @@ impl Warm {
             reports: Reports::new(runtime.path().join("derived")),
             corpus,
             runtime,
+            home: tempfile::Builder::new()
+                .prefix("mara-home-")
+                .tempdir()
+                .expect("create a temporary directory"),
         }
+    }
+
+    /// Gives every later run `home` as its `HOME`; before the daemon starts, so that it finds
+    /// the grammar cache there too.
+    pub(crate) fn with_home(&mut self, home: tempfile::TempDir) {
+        self.home = home;
     }
 
     /// [`Warm::new`] with a daemon started in the corpus, whose session has validated the
     /// project, every input read by a check 2 s after its last change.
-    fn start() -> Warm {
+    pub(crate) fn start() -> Warm {
         let warm = Warm::new();
         warm.start_daemon(warm.root());
         warm.run(VALIDATE);
         warm
     }
 
-    fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         self.corpus.root()
     }
 
-    /// The environment of every run: the test's runtime directory.
-    fn env(&self) -> [(&'static str, &Path); 2] {
-        [
+    /// The environment of every run: the test's runtime directory and `HOME`.
+    pub(crate) fn env(&self) -> Vec<(&'static str, &Path)> {
+        vec![
             ("XDG_RUNTIME_DIR", self.runtime.path()),
             ("TMPDIR", self.runtime.path()),
+            ("HOME", self.home.path()),
         ]
     }
 
     /// Starts the daemon in `directory`, reporting its derivations to [`Warm::reports`].
-    fn start_daemon(&self, directory: &Path) {
-        let mut env = self.env().to_vec();
+    pub(crate) fn start_daemon(&self, directory: &Path) {
+        let mut env = self.env();
         env.push(("MARA_TEST_DERIVED", self.reports.path()));
         cli::run_with(directory, &["daemon", "start"], &env, 0);
     }
 
     /// `mara <args>` in the corpus, sent to the daemon: the work it reports. It exits 0.
-    fn run(&self, args: &[&str]) -> WorkCounts {
+    pub(crate) fn run(&self, args: &[&str]) -> WorkCounts {
         self.run_in(self.root(), args, 0)
     }
 
-    fn run_in(&self, directory: &Path, args: &[&str], status: i32) -> WorkCounts {
+    pub(crate) fn run_in(&self, directory: &Path, args: &[&str], status: i32) -> WorkCounts {
         cli::run_with(directory, args, &self.env(), status).work
     }
 
     /// Settles the files changed at `changed` and the session's record of them: a request 2 s
     /// after the change. The number of derivations reported then, after which the next
     /// response's begin.
-    fn settled(&self, changed: SystemTime) -> usize {
+    pub(crate) fn settled(&self, changed: SystemTime) -> usize {
         until_settled(changed);
         self.run(LIST);
         self.reports.seen()
@@ -106,7 +123,7 @@ impl Warm {
 
 /// Each of `expected`, a counter's name and value, in `work`.
 #[track_caller]
-fn assert_counts(work: &WorkCounts, expected: &[(&str, u64)], what: &str) {
+pub(crate) fn assert_counts(work: &WorkCounts, expected: &[(&str, u64)], what: &str) {
     for &(name, value) in expected {
         let actual = match name {
             "file_reads" => work.file_reads,
@@ -124,10 +141,10 @@ fn assert_counts(work: &WorkCounts, expected: &[(&str, u64)], what: &str) {
 }
 
 /// A change a test makes to the corpus.
-type Change<'a> = Box<dyn Fn() + 'a>;
+pub(crate) type Change<'a> = Box<dyn Fn() + 'a>;
 
 /// No file read or hashed, nothing parsed or built: a request on unchanged inputs.
-const UNCHANGED: [(&str, u64); 4] = [
+pub(crate) const UNCHANGED: [(&str, u64); 4] = [
     ("file_reads", 0),
     ("hashes", 0),
     ("parses", 0),
@@ -144,12 +161,12 @@ fn reads(corpus: &Corpus) -> Vec<(Vec<String>, i32)> {
 }
 
 /// A document of the first cluster, which every test edits.
-fn document(corpus: &Corpus) -> PathBuf {
+pub(crate) fn document(corpus: &Corpus) -> PathBuf {
     corpus.root().join(&corpus.ids[0].1)
 }
 
 /// Appends a paragraph naming `run` to `path`, in place: new contents in every run.
-fn edit_in_place(path: &Path, run: usize) {
+pub(crate) fn edit_in_place(path: &Path, run: usize) {
     let mut contents = fs::read_to_string(path).unwrap();
     contents.push_str(&format!("\nEdited in run {run}.\n"));
     fs::write(path, contents).unwrap();
@@ -167,7 +184,7 @@ fn edit_by_rename(path: &Path, run: usize) {
 /// The reads, and hashes, of an input that a request reads and that the watcher's derivation
 /// read too when it checked the input before the request, less than 2 s after the change; one
 /// that checked later settled it, and the request read it no more.
-fn reads_in(case: Case, what: &str) -> u64 {
+pub(crate) fn reads_in(case: Case, what: &str) -> u64 {
     match case {
         Case::None => 1,
         Case::Early(derived) => {
@@ -364,51 +381,6 @@ fn an_added_removed_or_renamed_document_is_parsed_only_when_its_contents_are_new
         let work = warm.run(LIST);
         let expected = [("parses", parses), ("snapshot_builds", 1)];
         assert_counts(&work, &expected, &format!("a document {what}"));
-    }
-}
-
-/// The row of VER-CODE-WORK-COUNTERS (`docs/code/verification.mara.md`) of a code file added,
-/// one removed and one renamed with its contents unchanged: the new path is read and hashed,
-/// and only new contents are scanned.
-#[test]
-fn an_added_removed_or_renamed_code_file_is_scanned_only_when_its_contents_are_new() {
-    let warm = Warm::start();
-    let path = warm.root().join(&warm.corpus.code_files[0]);
-    let added = path.with_file_name("added.rs");
-    let renamed = path.with_file_name("renamed.rs");
-    let mut changed = SystemTime::now();
-    let changes: [(&str, Change, u64, u64); 3] = [
-        (
-            "added",
-            Box::new(|| fs::write(&added, "pub fn added() {}\n").unwrap()),
-            1,
-            1,
-        ),
-        (
-            "removed",
-            Box::new(|| fs::remove_file(&added).unwrap()),
-            0,
-            0,
-        ),
-        (
-            "renamed",
-            Box::new(|| fs::rename(&path, &renamed).unwrap()),
-            1,
-            0,
-        ),
-    ];
-    for (what, change, reads, scans) in changes {
-        warm.settled(changed);
-        change();
-        changed = SystemTime::now();
-        let work = warm.run(VALIDATE);
-        let expected = [
-            ("file_reads", reads),
-            ("hashes", reads),
-            ("parses", 0),
-            ("code_scans", scans),
-        ];
-        assert_counts(&work, &expected, &format!("a code file {what}"));
     }
 }
 
@@ -774,27 +746,6 @@ fn the_project_through_a_symbolic_link_is_the_same_session() {
     let status: serde_json::Value = serde_json::from_slice(&status.output.stdout).unwrap();
     let root = fs::canonicalize(warm.root()).unwrap();
     assert_eq!(status["sessions"], json!([root]), "{status}");
-}
-
-/// `get` of a code location checks the file against the contents the session keeps of it that
-/// a check keeps, those whose stat is the file's and whose check settled it: here a scan of the
-/// file's new contents, after an earlier `get` kept the old ones.
-#[test]
-fn a_code_location_after_a_scan_of_its_new_contents_reads_nothing() {
-    let warm = Warm::start();
-    let path = &warm.corpus.code_files[0];
-    let line = format!("{path}:2");
-    let get = ["get", line.as_str()];
-    warm.run(&get);
-    let absolute = warm.root().join(path);
-    let mut code = fs::read_to_string(&absolute).unwrap();
-    code.push_str("// Edited.\n");
-    fs::write(&absolute, code).unwrap();
-    warm.settled(derived::changed(&[&absolute]));
-    let work = warm.run(VALIDATE);
-    assert_counts(&work, &[("file_reads", 1), ("code_scans", 1)], "the scan");
-    let work = warm.run(&get);
-    assert_eq!(work, WorkCounts::default(), "get after the scan");
 }
 
 #[test]

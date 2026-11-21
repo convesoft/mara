@@ -167,3 +167,68 @@ fn a_grammar_load_holds_up_only_requests_for_its_grammar() {
     assert!(found[0].contains("tags.scm is no query"), "{}", found[0]);
     assert_eq!(count(&events, "load rust"), 2);
 }
+
+/// `served` of `mara daemon status`: the operation requests that the test's daemon answered.
+fn served(test: &Test) -> u64 {
+    let status = test.status();
+    status["served"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("no daemon: {status}"))
+}
+
+/// A daemon loads a pinned grammar once for every request that needs it, and again only when
+/// the cached files' stats change (DES-GRAMMAR-ASSETS): the events `MARA_TEST_GRAMMAR_EVENTS`
+/// records count the loads, and each request is one that daemon served.
+#[test]
+fn the_daemon_loads_a_grammar_again_only_when_its_files_change() {
+    let test = Test::new();
+    let (project, home) = grammar_project(&test, "project", "rust");
+    let events = test.path().join("events");
+    fs::create_dir(&events).unwrap();
+    let env = [
+        ("HOME", home.as_str()),
+        ("MARA_TEST_GRAMMAR_EVENTS", events.to_str().unwrap()),
+    ];
+    test.start_in(&project, &env);
+    test.wait_for_session(&project);
+    let requests: [&[&str]; 2] = [
+        &["--format", "json", "get", "src/lib.rs:2"],
+        &["--format", "json", "relation", "list", "REQ-ONE"],
+    ];
+    // Each request through the daemon: answered by it, at the grammar level.
+    let send = |args: &[&str]| {
+        let before = served(&test);
+        let run = test.run_in(&project, args, &[]).succeeded();
+        assert_eq!(
+            served(&test),
+            before + 1,
+            "{args:?}: the daemon did not serve it"
+        );
+        assert_eq!(unavailable(&run.json()), Vec::<String>::new(), "{run:?}");
+        run.json()
+    };
+    let got = send(requests[0]);
+    assert_eq!(got["node"]["declaration"], "one", "{got}");
+    send(requests[1]);
+    send(requests[0]);
+    assert_eq!(count(&events, "load rust"), 1, "loads of unchanged files");
+
+    // The cached `.wasm` rewritten with the same bytes and another mtime: its stats change.
+    let cache = Path::new(&home).join(".cache/mara/grammars/rust/0.24.2");
+    let directory = fs::read_dir(&cache)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let wasm = directory.join(mara::grammar::WASM_FILE);
+    let file = fs::File::options().write(true).open(&wasm).unwrap();
+    let modified = file.metadata().unwrap().modified().unwrap();
+    file.set_modified(modified - Duration::from_secs(60))
+        .unwrap();
+    drop(file);
+    send(requests[1]);
+    assert_eq!(count(&events, "load rust"), 2, "the load after the change");
+    send(requests[0]);
+    assert_eq!(count(&events, "load rust"), 2, "loads after the change");
+}

@@ -4,7 +4,8 @@
 //! whose session an earlier request opened, returns the JSON of CLI direct mode and leaves the
 //! files that direct mode leaves. Generated MIDs are paired as VER-CLI-MCP-PARITY pairs them.
 //! That daemon answered each request: `served` of `mara daemon status` rose by one across it
-//! (VER-DAEMON-START).
+//! (VER-DAEMON-START). The project declares Rust at the basic level, so the operations that read
+//! code (DES-CODE-READERS) read the markers of its code files.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -278,12 +279,37 @@ subjects = ["bad"]
 conditions = ["bad"]
 "#;
 
-/// A project of the engineering template with one need and the inputs of the gate below,
-/// written in direct mode, its files last changed at least 2 s before this returns.
+/// Rust at the basic level (DES-CODE-MARKERS), declared before the template's `[rules]`, which
+/// the test later replaces by hand.
+const CODE: &str = "[code]\nformat_version = 1\n\n[code.languages.rust]\n\
+                    include = [\"src/**/*.rs\"]\ncomment_prefixes = [\"//\"]\n\n";
+
+/// An invariant over code links: the template's `readiness.dl` names `code_link`, so an item
+/// validation reads code (DES-CODE-READERS). Its views and gates read code too.
+const IMPLEMENTED: &str = "\n[invariants.requirement-implemented]\n\
+                           program = \".mara/rules/readiness.dl\"\nrelation = \"not_implemented\"\n\
+                           severity = \"warning\"\nmessage = \"No code implements this requirement\"\n";
+
+/// The invariant's code, which `project validate` reports for each requirement no code
+/// implements.
+const NOT_IMPLEMENTED: &str = "requirement-implemented";
+
+/// A project of the engineering template with one need, the inputs of the gate below and Rust
+/// declared ([`CODE`]), written in direct mode, its files last changed at least 2 s before this
+/// returns.
 fn project(test: &Test) -> PathBuf {
     let root = test.path().join("project");
     fs::create_dir(&root).unwrap();
     test.direct(&root, &["project", "init"]).succeeded();
+    let config = root.join(".mara/config.toml");
+    let template = fs::read_to_string(&config).unwrap();
+    let rules = template.find("[rules]\n").expect("the template's rules");
+    let declared = format!(
+        "{}{CODE}{}{IMPLEMENTED}",
+        &template[..rules],
+        &template[rules..]
+    );
+    fs::write(&config, declared).unwrap();
     let need = [
         "--format",
         "json",
@@ -306,6 +332,7 @@ fn project(test: &Test) -> PathBuf {
         json!([[mid, "pass", 1.5]]).to_string(),
     )
     .unwrap();
+    fs::write(root.join("verified.json"), "[]").unwrap();
     settle();
     fs::canonicalize(root).unwrap()
 }
@@ -381,6 +408,69 @@ fn the_daemon_answers_each_document_operation_as_direct_mode() {
         ],
         "inverse-relation",
     );
+
+    // Code that implements the requirements, a marker that does not resolve, and the
+    // operations that read code (DES-CODE-READERS).
+    c.write(
+        "src/read.rs",
+        "// @mara implements REQ-COLD-READ-TIME\npub fn cold() {\n    \
+         warm(); // @mara implements REQ-WARM-READ\n}\n",
+    );
+    c.write(
+        "src/typo.rs",
+        "// @mara implements REQ-COLD-READ\nfn typo() {}\n",
+    );
+    let validated = c.expect(&["project", "validate"], 1);
+    let codes: Vec<&Value> = (validated["diagnostics"].as_array().unwrap().iter())
+        .map(|diagnostic| &diagnostic["code"])
+        .filter(|code| *code != NOT_IMPLEMENTED)
+        .collect();
+    assert_eq!(codes, [&json!("unresolved-marker")], "{validated}");
+    let linked = c.expect(&["relation", "list", "REQ-COLD-READ-TIME"], 0);
+    let neighbours: Vec<&Value> = (linked["connections"].as_array().unwrap().iter())
+        .map(|connection| &connection["neighbour"]["kind"])
+        .collect();
+    assert!(neighbours.contains(&&json!("code")), "{linked}");
+    c.expect(
+        &[
+            "relation",
+            "list",
+            "REQ-WARM-READ",
+            "--relation",
+            "implemented_by",
+        ],
+        0,
+    );
+    c.expect(&["relation", "list", "src/read.rs:3"], 0);
+    c.expect(&["relation", "list", "src/read.rs"], 0);
+    c.refused(&["relation", "list", "src/read.rs:99"], "unknown-node");
+    c.expect(&["get", "src/read.rs:2"], 0);
+    c.expect(&["get", "src/read.rs"], 0);
+    c.refused(&["get", "src/none.rs"], "unknown-item");
+    c.expect(&["query", "execute", "implemented"], 0);
+    // A view over code links: the requirement that the code implements counts its code link,
+    // and counts none when code is not read.
+    let view = c.expect(
+        &[
+            "query",
+            "view",
+            "requirement-verification",
+            "--input",
+            "candidate=abc",
+            "--input",
+            "verification_result=@verified.json",
+        ],
+        0,
+    );
+    let row = (view["rows"].as_array().unwrap().iter())
+        .find(|row| row["item"]["id"] == "REQ-COLD-READ-TIME")
+        .unwrap_or_else(|| panic!("no row: {view}"));
+    assert_eq!(row["values"][2], 1, "the code links: {view}");
+    c.refused(&["item", "delete", "REQ-WARM-READ"], "targeted-item");
+    c.write(
+        "src/typo.rs",
+        "// @mara implements REQ-COLD-READ-TIME\nfn typo() {}\n",
+    );
     c.expect(
         &[
             "item",
@@ -431,6 +521,12 @@ fn the_daemon_answers_each_document_operation_as_direct_mode() {
         ],
         0,
     );
+    // The rename rewrote the markers that named the old ID.
+    assert_eq!(
+        fs::read_to_string(c.root.join("src/typo.rs")).unwrap(),
+        "// @mara implements REQ-COLD-READ-BUDGET\nfn typo() {}\n"
+    );
+    c.expect(&["relation", "list", "src/read.rs:1"], 0);
     c.refused(
         &["item", "rename", "REQ-COLD-READ-BUDGET", "NEED-WRONG"],
         "wrong-id-prefix",
@@ -456,7 +552,33 @@ fn the_daemon_answers_each_document_operation_as_direct_mode() {
     );
     assert_ne!(c.expect(&["project", "fix"], 0)["repairs"], json!([]));
     c.expect(&["project", "validate"], 0);
-    c.expect(&["item", "validate", "REQ-HAND-WRITTEN"], 0);
+    // An item validation, a gate and its report over code links, of a requirement that no
+    // marker names: with every code file read, `not_implemented` has its row, so the invariant
+    // warns and the gate fails on that condition besides `not_accepted`. An operation that read
+    // no code would give no such row (`readiness.dl`), whatever its host.
+    let validated = c.expect(&["item", "validate", "REQ-HAND-WRITTEN"], 0);
+    let warned: Vec<&Value> = (validated["diagnostics"].as_array().unwrap().iter())
+        .map(|diagnostic| &diagnostic["code"])
+        .collect();
+    assert_eq!(warned, [&json!(NOT_IMPLEMENTED)], "{validated}");
+    let inputs = [
+        "--input",
+        "candidate=abc",
+        "--input",
+        "verification_result=@verified.json",
+    ];
+    let one = ["--id", "REQ-HAND-WRITTEN"];
+    let gate = [&["query", "gate", "verified"][..], &one, &inputs].concat();
+    let gated = c.expect(&gate, 1);
+    let report = [&["query", "report", "verified"][..], &one, &inputs].concat();
+    let reported = c.expect(&report, 0);
+    for result in [&gated["items"][0], &reported] {
+        let relations: Vec<&Value> = (result["rows"].as_array().unwrap().iter())
+            .map(|row| &row["relation"])
+            .collect();
+        let expected = [json!("not_accepted"), json!("not_implemented")];
+        assert_eq!(relations, expected.iter().collect::<Vec<_>>(), "{result}");
+    }
     c.expect(&["relation", "list", "docs/hand.mara.md"], 0);
 
     // Requests that fail.

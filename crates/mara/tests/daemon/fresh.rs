@@ -94,14 +94,29 @@ const READS: &[&[&str]] = &[
 ];
 
 /// Sends `args` to the daemon `pid` in `directory`, then runs it in direct mode: both print the
-/// same and exit the same.
+/// same and exit the same. That daemon answered it: `served` of `mara daemon status` rose by one
+/// across it (VER-DAEMON-START), so a request that fell back to direct mode fails.
 #[track_caller]
 fn same(test: &Test, pid: u32, directory: &Path, args: &[&str]) -> Run {
+    let before = served_count(test, pid);
     let served = test.run_in(directory, args, &[]);
+    assert_eq!(
+        served_count(test, pid),
+        before + 1,
+        "{args:?}: the daemon did not serve it"
+    );
     let direct = test.direct(directory, args);
     assert_eq!(served, direct, "{args:?}");
     assert_eq!(test.daemons(), [pid], "the daemon ended");
     served
+}
+
+/// `served` of `mara daemon status`, which the daemon `pid` answers.
+#[track_caller]
+fn served_count(test: &Test, pid: u32) -> u64 {
+    let status = test.status();
+    assert_eq!(status["pid"], pid, "another daemon answers: {status}");
+    status["served"].as_u64().expect("a count of requests")
 }
 
 /// Makes `change`, then sends `reads` at once and again 2 s later.

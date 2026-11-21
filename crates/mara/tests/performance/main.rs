@@ -30,6 +30,8 @@ mod scaling;
 #[cfg(target_os = "linux")]
 mod warm;
 #[cfg(target_os = "linux")]
+mod warm_code;
+#[cfg(target_os = "linux")]
 mod warm_scaling;
 mod work_counters;
 

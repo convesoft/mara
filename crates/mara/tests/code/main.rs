@@ -2,10 +2,17 @@
 //! initialized from `engineering`: VER-CODE-MARKERS, VER-GRAMMAR-MARKERS, VER-CODE-EDITS and
 //! VER-CODE-FACTS and VER-CODE-ADD in `docs/code/verification.mara.md`, and the code rows of
 //! VER-DELETE-ITEM and VER-INTERRUPTED-EDITS.
+//!
+//! On Linux, every request that [`Project::json`] sends and a daemon serves also runs through a
+//! daemon of the project, which must answer it as direct mode does: the daemon case of each of
+//! those verification items ([`Daemon`]).
 
 #![cfg(unix)]
 
 mod add;
+#[cfg(target_os = "linux")]
+#[path = "../support/daemons.rs"]
+mod daemons;
 mod edits;
 mod facts;
 mod grammar;
@@ -13,6 +20,7 @@ mod grammar;
 mod grammar_server;
 mod markers;
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -58,6 +66,12 @@ pub fn item(n: u32, kind: &str, id: &str, rows: &str, body: &str) -> String {
 /// Files with their bytes and mtimes.
 pub type Tree = BTreeMap<String, (Vec<u8>, SystemTime)>;
 
+/// The files of a [`Tree`], and the mode of each.
+pub struct Files {
+    pub tree: Tree,
+    pub modes: BTreeMap<String, u32>,
+}
+
 /// The official release files of the grammars that the tests install (VER-GRAMMAR-MARKERS):
 /// language, version, and the `.wasm` file's name in its fixture directory.
 pub const GRAMMARS: [(&str, &str, &str); 2] = [
@@ -68,9 +82,21 @@ pub const GRAMMARS: [(&str, &str, &str); 2] = [
 /// A disposable project, removed on drop.
 pub struct Project {
     dir: TempDir,
-    /// The `HOME` of its runs, which holds the per-user grammar cache, once a grammar is
-    /// installed.
-    home: Option<TempDir>,
+    /// The `HOME` of its runs, which holds the per-user grammar cache once a grammar is
+    /// installed. It exists from the start, so that a daemon of the project, which finds the
+    /// cache from the environment it started with (DES-GRAMMAR-ASSETS), has it.
+    home: TempDir,
+    /// The daemon of the project, started by the first request that [`Project::json`] sends to
+    /// one.
+    daemon: RefCell<Option<Daemon>>,
+}
+
+impl Drop for Project {
+    fn drop(&mut self) {
+        if let Some(daemon) = self.daemon.get_mut().take() {
+            daemon.stop(&self.root(), self.home.path());
+        }
+    }
 }
 
 impl Project {
@@ -100,22 +126,22 @@ impl Project {
 
     /// An empty directory.
     pub fn bare() -> Project {
-        let dir = tempfile::Builder::new()
-            .prefix("mara-code-")
-            .tempdir()
-            .expect("create a temporary directory");
-        Project { dir, home: None }
+        let temporary = |prefix| {
+            tempfile::Builder::new()
+                .prefix(prefix)
+                .tempdir()
+                .expect("create a temporary directory")
+        };
+        Project {
+            dir: temporary("mara-code-"),
+            home: temporary("mara-home-"),
+            daemon: RefCell::new(None),
+        }
     }
 
     /// The `HOME` of the runs: the per-user grammar cache is `.cache/mara/grammars` in it.
     pub fn home(&mut self) -> PathBuf {
-        let home = self.home.get_or_insert_with(|| {
-            tempfile::Builder::new()
-                .prefix("mara-home-")
-                .tempdir()
-                .expect("create a temporary directory")
-        });
-        home.path().to_owned()
+        self.home.path().to_owned()
     }
 
     /// Installs the fixture grammar of `language` in the per-user cache, as `code add` stores it,
@@ -175,18 +201,11 @@ impl Project {
     }
 
     /// Runs `mara <args>` in the project root with an environment of only `MARA_NO_DAEMON`, the
-    /// test's `TMPDIR`, which receives the private directories of program runs, and `env`.
+    /// test's `TMPDIR`, which receives the private directories of program runs, `HOME` and
+    /// `env`.
     pub fn mara(&self, args: &[&str], env: &[(&str, &Path)]) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_mara"));
-        command
-            .args(args)
-            .current_dir(self.root())
-            .env_clear()
-            .env("MARA_NO_DAEMON", "1")
-            .env("TMPDIR", std::env::temp_dir());
-        if let Some(home) = &self.home {
-            command.env("HOME", home.path());
-        }
+        let mut command = client(&self.root(), self.home.path(), args);
+        command.env("MARA_NO_DAEMON", "1");
         for (name, value) in env {
             command.env(name, value);
         }
@@ -207,22 +226,39 @@ impl Project {
     }
 
     /// Runs `mara --format json <args>`, requires exit status `status` and returns its result.
+    /// On Linux, a request that a daemon serves runs through the project's daemon too, on the
+    /// files direct mode found, and must print what direct mode printed and leave the files
+    /// direct mode left ([`Daemon::compare`]).
     pub fn json(&self, args: &[&str], status: i32) -> Value {
         let mut all = vec!["--format", "json"];
         all.extend(args);
+        let before = served(args).then(|| self.files());
         let output = self.run(&all, status);
+        if let Some(before) = before {
+            self.through_daemon(&all, &output, &before);
+        }
         serde_json::from_slice(&output.stdout).expect("a JSON result")
     }
 
-    /// The code, path and line of each diagnostic of `project validate`, sorted.
+    /// Runs `all` through the project's daemon on the files `before`, which direct mode found
+    /// and answered with `direct`.
+    #[cfg(target_os = "linux")]
+    fn through_daemon(&self, all: &[&str], direct: &Output, before: &Files) {
+        let mut daemon = self.daemon.borrow_mut();
+        let daemon = daemon.get_or_insert_with(|| Daemon::start(&self.root(), self.home.path()));
+        daemon.compare(self, all, direct, before);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn through_daemon(&self, _: &[&str], _: &Output, _: &Files) {}
+
+    /// The code, path and line of each diagnostic of `project validate`, sorted, valid or not,
+    /// through the daemon too.
     pub fn problems(&self) -> Vec<(String, String, u64)> {
-        let output = self
-            .mara(
-                &["--format", "json", "project", "validate", "--limit", "100"],
-                &[],
-            )
-            .output()
-            .expect("run mara");
+        let all = ["--format", "json", "project", "validate", "--limit", "100"];
+        let before = self.files();
+        let output = self.mara(&all, &[]).output().expect("run mara");
+        self.through_daemon(&all, &output, &before);
         let result: Value = serde_json::from_slice(&output.stdout).expect("a JSON result");
         let mut problems: Vec<(String, String, u64)> = result["diagnostics"]
             .as_array()
@@ -292,6 +328,20 @@ impl Project {
         out
     }
 
+    /// [`Project::tree`] with the mode of each file, a symbolic link's own.
+    pub fn files(&self) -> Files {
+        let root = self.root();
+        let tree = self.tree();
+        let modes = (tree.keys())
+            .map(|path| {
+                let metadata = fs::symlink_metadata(root.join(path)).unwrap();
+                let mode = std::os::unix::fs::PermissionsExt::mode(&metadata.permissions());
+                (path.clone(), mode & 0o7777)
+            })
+            .collect();
+        Files { tree, modes }
+    }
+
     /// A running `mara mcp` in the project root.
     pub fn mcp(&self) -> Mcp {
         self.mcp_with(&[])
@@ -299,7 +349,169 @@ impl Project {
 
     /// A running `mara mcp` in the project root, its environment holding `env` too.
     pub fn mcp_with(&self, env: &[(&str, &Path)]) -> Mcp {
-        Mcp::start(&self.root(), self.home.as_ref().map(TempDir::path), env)
+        Mcp::start(&self.root(), Some(self.home.path()), env)
+    }
+}
+
+/// `mara <args>` in `root`, its environment holding only the test's `TMPDIR`, which receives the
+/// private directories of program runs, and `home` as `HOME`.
+fn client(root: &Path, home: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mara"));
+    command
+        .args(args)
+        .current_dir(root)
+        .env_clear()
+        .env("TMPDIR", std::env::temp_dir())
+        .env("HOME", home);
+    command
+}
+
+/// Whether a daemon serves the request `args`: every operation but those that run in the
+/// client's process (DES-DAEMON-LIFECYCLE, DES-GRAMMAR-ASSETS).
+fn served(args: &[&str]) -> bool {
+    let words: Vec<&str> = args
+        .iter()
+        .copied()
+        .filter(|a| !a.starts_with("--"))
+        .collect();
+    !matches!(
+        words.as_slice(),
+        ["code", ..] | ["daemon", ..] | ["prime", ..] | ["project", "init" | "convert", ..]
+    )
+}
+
+/// A daemon of a project, with a runtime directory of its own, which serves each request that
+/// [`Project::json`] sends besides direct mode: the daemon case of VER-CODE-MARKERS,
+/// VER-CODE-EDITS and VER-GRAMMAR-MARKERS, which runs the same cases through the daemon. Each
+/// request must print what direct mode printed and leave the files direct mode left, and the
+/// daemon must have answered it: `served` of `mara daemon status` rose by one across it
+/// (VER-DAEMON-START). The daemon keeps its session across the requests of a test, so a request
+/// finds what earlier requests left in it, as an agent's requests do.
+#[cfg(target_os = "linux")]
+struct Daemon {
+    /// Kills the daemon when dropped, if `daemon stop` did not end it, before `runtime` goes.
+    daemons: daemons::Daemons,
+    runtime: TempDir,
+    /// The operation requests that the daemon has answered, as `mara daemon status` last
+    /// reported them.
+    served: u64,
+}
+
+#[cfg(target_os = "linux")]
+impl Daemon {
+    /// Starts a daemon in `root` whose environment holds `home` as `HOME`.
+    fn start(root: &Path, home: &Path) -> Daemon {
+        // Short enough for the socket path, with mode 0700 (DES-DAEMON-LIFECYCLE).
+        let runtime = tempfile::Builder::new()
+            .prefix("mara-run-")
+            .permissions(std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .tempdir()
+            .expect("create a temporary directory");
+        let daemon = Daemon {
+            daemons: daemons::Daemons::new(runtime.path(), None),
+            runtime,
+            served: 0,
+        };
+        let started = daemon.run(root, home, &["--format", "json", "daemon", "start"]);
+        assert!(started.status.success(), "daemon start: {started:?}");
+        daemon
+    }
+
+    /// Runs `mara <args>` in `root` as a client of the daemon.
+    fn run(&self, root: &Path, home: &Path, args: &[&str]) -> Output {
+        let mut command = client(root, home, args);
+        command.env("XDG_RUNTIME_DIR", self.runtime.path());
+        command.stdin(Stdio::null()).output().expect("run mara")
+    }
+
+    /// Runs `all` through the daemon on the files `before`, as `project` held them before
+    /// direct mode answered `direct`, then leaves the files as direct mode left them. The daemon
+    /// must leave the names, bytes and modes that direct mode left, and every file that direct
+    /// mode left as it was, its mtime included, as it was: for a read, every file.
+    #[track_caller]
+    fn compare(&mut self, project: &Project, all: &[&str], direct: &Output, before: &Files) {
+        let (root, home) = (project.root(), project.home.path());
+        let expected = project.files();
+        restore(&root, &expected, before);
+        let start = project.tree();
+        let daemon = self.run(&root, home, all);
+        let status = self.run(&root, home, &["--format", "json", "daemon", "status"]);
+        let status: Value = serde_json::from_slice(&status.stdout).expect("a JSON status");
+        let served = status["served"].as_u64();
+        let served = served.unwrap_or_else(|| panic!("{all:?}: no daemon runs: {status}"));
+        assert_eq!(
+            served,
+            self.served + 1,
+            "{all:?}: the daemon did not serve it"
+        );
+        self.served = served;
+        let text = |output: &Output| String::from_utf8_lossy(&output.stdout).into_owned();
+        assert_eq!(
+            (daemon.status.code(), text(&daemon)),
+            (direct.status.code(), text(direct)),
+            "{all:?} through the daemon: {}",
+            String::from_utf8_lossy(&daemon.stderr)
+        );
+        let after = project.files();
+        let (want, got) = (&expected.tree, &after.tree);
+        let differ: Vec<&String> = (want.keys().chain(got.keys()))
+            .filter(|path| want.get(*path).map(|f| &f.0) != got.get(*path).map(|f| &f.0))
+            .collect();
+        assert!(
+            differ.is_empty(),
+            "{all:?} through the daemon: files differ: {differ:?}"
+        );
+        assert_eq!(
+            after.modes, expected.modes,
+            "{all:?} through the daemon: modes differ"
+        );
+        let touched: Vec<&String> = (before.tree.iter())
+            .filter(|(path, file)| want.get(*path) == Some(file))
+            .filter(|(path, _)| got.get(*path) != start.get(*path))
+            .map(|(path, _)| path)
+            .collect();
+        assert!(
+            touched.is_empty(),
+            "{all:?} through the daemon: it changed what direct mode left alone: {touched:?}"
+        );
+        // The daemon's write left the same bytes and modes; direct mode's files take their place
+        // again.
+        restore(&root, &after, &expected);
+    }
+
+    /// Stops the daemon, which then removes its socket.
+    fn stop(self, root: &Path, home: &Path) {
+        let _ = self.run(root, home, &["daemon", "stop"]);
+        self.daemons.kill();
+    }
+}
+
+/// Makes the files below `root`, which are `now`, hold the bytes and modes of `wanted`: writes
+/// each file whose bytes differ or that is missing, sets each mode that differs, and removes each
+/// file that `wanted` does not hold. Leaves the rest, their mtimes included, as they are.
+#[cfg(target_os = "linux")]
+fn restore(root: &Path, now: &Files, wanted: &Files) {
+    use std::os::unix::fs::PermissionsExt;
+    for path in now
+        .tree
+        .keys()
+        .filter(|path| !wanted.tree.contains_key(*path))
+    {
+        fs::remove_file(root.join(path)).unwrap();
+    }
+    for (path, (bytes, _)) in &wanted.tree {
+        if now.tree.get(path).map(|file| &file.0) != Some(bytes) {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+    }
+    for (path, mode) in &wanted.modes {
+        let absolute = root.join(path);
+        let metadata = fs::symlink_metadata(&absolute).unwrap();
+        if !metadata.is_symlink() && metadata.permissions().mode() & 0o7777 != *mode {
+            fs::set_permissions(absolute, fs::Permissions::from_mode(*mode)).unwrap();
+        }
     }
 }
 
@@ -376,7 +588,8 @@ impl Mcp {
             .arg("mcp")
             .current_dir(directory)
             .env_clear()
-            .env("MARA_NO_DAEMON", "1");
+            .env("MARA_NO_DAEMON", "1")
+            .env("TMPDIR", std::env::temp_dir());
         if let Some(home) = home {
             command.env("HOME", home);
         }

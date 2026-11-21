@@ -125,7 +125,8 @@ impl Test {
     }
 
     /// `binary` with `args`, in the test's directory, its environment holding only the runtime
-    /// directory, the test's directory as `TMPDIR` and `env`.
+    /// directory, the test's directory as `TMPDIR`, its `home/` as `HOME` and `env`, which may
+    /// give another `HOME`.
     fn command(&self, binary: &Path, args: &[&str], env: &[(&str, &str)]) -> Command {
         self.command_in(self.path(), binary, args, env)
     }
@@ -145,6 +146,7 @@ impl Test {
             .env_clear()
             .env("XDG_RUNTIME_DIR", &self.base)
             .env("TMPDIR", self.path())
+            .env("HOME", self.path().join("home"))
             .envs(env.iter().copied())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
