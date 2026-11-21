@@ -1,6 +1,6 @@
 ---
 title: Teach code markers in the agent guide
-status: todo
+status: in-progress
 type: task
 parent: mara-779tms
 blocked_by:
