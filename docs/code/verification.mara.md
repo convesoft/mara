@@ -174,6 +174,7 @@ Cold rows, in CLI direct mode:
 | `relation list`, `project validate`, `item rename`, `item delete`, and `query execute`, `query view`, `query gate` and `query report` of a program that uses code links, such as the `engineering` readiness gates | For each code file, 1 read and 1 hash; 1 code scan per distinct code file content ([DES-INPUTS-AND-KEYS](../engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)), so two code files with the same contents are scanned once |
 | `item rename` that rewrites markers, every file it writes last changed at least 2 s before | The counts of the row above and of the write row of [VER-WORK-COUNTERS](../verification.mara.md#01M7BF6HGG6ET88HS641Y5676G); no code scan of the new contents |
 | `get` of a code location, of a line or of the whole file | 1 read and 1 hash of that code file and of no other; 1 code scan at the grammar level, 0 at the basic level; 0 parses and 0 snapshot builds at either level |
+| `get` of a document's path, of a line in it, or of a path that no code include pattern matches, with a `.gitignore` and a problem in the code tree, at the basic and at the grammar level | The counts of `get` of the item by ID, and no diagnostic of code |
 | Every other operation, `search` included, and the `query` operations of a program that does not use code links | As without code |
 | The `query` operations above with the corpus's Rust grammar pinned and cached | The counts at the basic level: grammar files are not counted, and a program that does not use code links loads no grammar |
 | Any operation in a project that declares no code language | 0 code scans |
@@ -185,6 +186,7 @@ Warm rows, against the daemon, besides the code row of [VER-WORK-COUNTERS](../ve
 | --- | --- |
 | A code file edited to the contents of another code file | 0 code scans |
 | A code file added; one removed; one renamed, its contents unchanged | 1 code scan; 0 code scans; 1 read and 1 hash of the new path and 0 code scans; 0 parses in all three |
+| `get` of a document's path, of a line in it, or of a path that no code include pattern matches, with a `.gitignore` and a problem in the code tree, at either level, the session holding the snapshot and the inputs settled | 0 of each count, and no diagnostic of code |
 | Code files edited, then a request that reads no code | No read, hash or scan of a code file; the next request that reads code scans each edited file once |
 | A document edited, then `relation list` | 0 code scans |
 | A language's comment prefixes changed in the configuration, or its grammar added by `code add` | 1 code scan per distinct content of that language's files, none of another language's; 0 parses |

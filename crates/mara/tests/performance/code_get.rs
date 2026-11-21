@@ -1,7 +1,8 @@
 //! The `get` row of VER-CODE-WORK-COUNTERS (`docs/code/verification.mara.md`): `get` of a code
 //! location parses no document and builds no snapshot, at the basic and at the grammar level,
 //! cold in direct mode and warm through a daemon the test starts, whose session keeps its
-//! snapshot and reads a code file as it is on disk now (REQ-NEVER-STALE).
+//! snapshot and reads a code file as it is on disk now (REQ-NEVER-STALE). `get` of a document
+//! reads no code, cold and warm (DES-CODE-READERS).
 
 use std::fs;
 use std::path::Path;
@@ -57,14 +58,131 @@ fn cold_get_of_code_reads_no_document() {
                 assert!(result["node"]["declaration"].is_string(), "{result}");
             }
         }
-        // An address that is no code file reads the documents as before: a document's path
-        // costs what its item's ID does.
-        let document = &corpus.ids[0].1;
-        let by_path = cli::run_with(corpus.root(), &["get", document], &env, 0).work;
-        let by_id = cli::run_with(corpus.root(), &["get", &corpus.first_id], &env, 0).work;
-        assert_eq!(by_path, by_id, "get {document}, grammar {grammar}");
-        assert_eq!(by_path.snapshot_builds, 1);
     }
+}
+
+/// Gives the corpus a code tree whose listing reads a file and reports a problem: a
+/// `.gitignore` in the directory of its first code file, and a `.gitignore` that is a directory
+/// below it. A request that lists code reads and hashes the first and reports the second.
+fn code_tree_with_a_problem(corpus: &Corpus) {
+    let path = &corpus.code_files[0];
+    let directory = corpus
+        .root()
+        .join(path.rsplit_once('/').expect("a code directory").0);
+    fs::write(directory.join(".gitignore"), "*.tmp\n").unwrap();
+    fs::create_dir_all(directory.join("hidden/.gitignore")).unwrap();
+}
+
+/// The addresses of a `get` that reads no code: the path of the document of the corpus's first
+/// item, a line in it, and a path that no code include pattern matches and that is no input.
+/// Each with whether it succeeds.
+fn document_addresses(corpus: &Corpus) -> [(String, bool); 3] {
+    let document = &corpus.ids[0].1;
+    [
+        (document.clone(), true),
+        (format!("{document}:1"), true),
+        ("notes.txt".to_owned(), false),
+    ]
+}
+
+/// The diagnostics of a JSON result or failure.
+fn diagnostics(result: &Value) -> &Value {
+    match result.get("error") {
+        Some(error) => &error["diagnostics"],
+        None => &result["diagnostics"],
+    }
+}
+
+/// DES-CODE-READERS: `get` of a document path, of a line in a document or of a path that no
+/// code include pattern matches reads the documents only, in a project with a code language
+/// whose code tree holds a `.gitignore` and a problem, at the basic and at the grammar level.
+/// It reads and hashes what `get` by ID does and reports no diagnostic of the code tree, which
+/// a listing of the code files would report.
+#[test]
+fn cold_get_of_a_document_reads_no_code() {
+    for grammar in [false, true] {
+        let corpus = Corpus::generate(1, SEED);
+        code_tree_with_a_problem(&corpus);
+        let home = level(&corpus, grammar);
+        let env: Vec<(&str, &Path)> = home.iter().map(|h| ("HOME", h.path())).collect();
+        let validate = ["--format", "json", "project", "validate"];
+        let validated = cli::run_any(corpus.root(), &validate, &env);
+        let validated: Value = serde_json::from_slice(&validated.output.stdout).unwrap();
+        assert!(
+            validated
+                .to_string()
+                .contains("hidden/.gitignore is not a regular file"),
+            "a listing of the code files reports the problem: {validated}"
+        );
+        let by_id = cli::run_with(corpus.root(), &["get", &corpus.first_id], &env, 0).work;
+        assert_eq!(by_id.snapshot_builds, 1, "{by_id:?}, grammar {grammar}");
+        for (address, succeeds) in document_addresses(&corpus) {
+            let args = ["--format", "json", "get", &address];
+            let run = cli::run_with(corpus.root(), &args, &env, i32::from(!succeeds));
+            assert_eq!(run.work, by_id, "get {address}, grammar {grammar}");
+            let result: Value = serde_json::from_slice(&run.output.stdout).unwrap();
+            assert_eq!(diagnostics(&result), &Value::Array(Vec::new()), "{result}");
+        }
+    }
+}
+
+/// [`cold_get_of_a_document_reads_no_code`] through a daemon the test starts, at both levels:
+/// once the session holds the snapshot and the inputs are settled, each `get` that the daemon
+/// serves reads nothing, and none reports a diagnostic of the code tree.
+#[cfg(target_os = "linux")]
+#[test]
+fn warm_get_of_a_document_reads_no_code() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::SystemTime;
+
+    use crate::daemons::Daemons;
+    use crate::restore::settle;
+
+    // Short enough for the socket path.
+    let runtime = tempfile::Builder::new()
+        .prefix("mara-run-")
+        .permissions(fs::Permissions::from_mode(0o700))
+        .tempdir()
+        .expect("create a temporary directory");
+    let daemons = Daemons::new(runtime.path(), None);
+    for grammar in [false, true] {
+        let corpus = Corpus::generate(1, SEED);
+        code_tree_with_a_problem(&corpus);
+        let home = level(&corpus, grammar);
+        let home = home.as_ref().map_or(runtime.path(), |home| home.path());
+        let env = [
+            ("XDG_RUNTIME_DIR", runtime.path()),
+            ("TMPDIR", runtime.path()),
+            ("HOME", home),
+        ];
+        let run = |args: &[&str]| cli::run_any(corpus.root(), args, &env);
+        let served = || {
+            let status = run(&["--format", "json", "daemon", "status"]);
+            let status: Value = serde_json::from_slice(&status.output.stdout).unwrap();
+            status["served"].as_u64().expect("a running daemon's count")
+        };
+        settle(SystemTime::now());
+        run(&["daemon", "start"]);
+        // The session holds the snapshot.
+        run(&["get", &corpus.first_id]);
+        assert_eq!(run(&["get", &corpus.first_id]).work, WorkCounts::default());
+        for (address, succeeds) in document_addresses(&corpus) {
+            let before = served();
+            let run = run(&["--format", "json", "get", &address]);
+            assert_eq!(served(), before + 1, "the daemon served get {address}");
+            assert_eq!(
+                run.output.status.code(),
+                Some(i32::from(!succeeds)),
+                "get {address}, grammar {grammar}"
+            );
+            let message = format!("warm get {address}, grammar {grammar}");
+            assert_eq!(run.work, WorkCounts::default(), "{message}");
+            let result: Value = serde_json::from_slice(&run.output.stdout).unwrap();
+            assert_eq!(diagnostics(&result), &Value::Array(Vec::new()), "{result}");
+        }
+        run(&["daemon", "stop"]);
+    }
+    assert!(daemons.running().is_empty(), "a daemon runs after `stop`");
 }
 
 // The warm case finds the daemons of a test in `/proc`.

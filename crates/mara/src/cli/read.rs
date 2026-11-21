@@ -316,23 +316,13 @@ fn code_path(address: &str) -> Option<&str> {
 fn get(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let cursor = args.cursor();
     let address = args.argument(0);
-    let Some(path) = code_path(address) else {
-        return with_documents(context, |documents| {
-            let portion = read::get(documents, address, cursor.as_ref())?;
-            let human = |out: &mut String| portion_lines(out, &portion);
-            Ok(respond(
-                portion.json.clone(),
-                human,
-                documents.diagnostics,
-                portion.next_cursor,
-            ))
-        });
-    };
     let (mut inputs, _) = open(context)?;
-    // A code file is read without the documents (DES-CODE-READERS).
-    let (language, listed) = inputs.code_file(path, context.now, context.work);
-    let Some(language) = language else {
-        let generation = inputs.generation(context.now, context.work, CodeReads::List);
+    // A code file is read without the documents, and anything else as `get` of an item is,
+    // reading no code (DES-CODE-READERS).
+    let code =
+        code_path(address).map(|path| (path, inputs.code_file(path, context.now, context.work)));
+    let Some((path, (Some(language), listed))) = code else {
+        let generation = inputs.snapshot(context.now, context.work);
         let documents = Documents {
             snapshot: &generation.snapshot,
             diagnostics: &generation.diagnostics,
