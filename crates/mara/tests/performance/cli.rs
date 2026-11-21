@@ -38,6 +38,9 @@ pub enum Code {
 pub enum Reads {
     /// The configuration and the schema.
     Schema,
+    /// The configuration, the schema and the `.gitignore` files where a code file can be, and
+    /// no document or program: `get` of a code location (DES-CODE-READERS).
+    Code,
     /// The configuration, the schema, the `.gitignore` files, every document and every program,
     /// which it parses into a snapshot and checks, and `runs` program runs.
     Checked { runs: u64 },
@@ -93,7 +96,7 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
             Reads::Documents,
             Code::All,
         ),
-        with_code(&["get", &line], Reads::Documents, Code::One),
+        with_code(&["get", &line], Reads::Code, Code::One),
         case(&["item", "list"], Reads::Documents),
         case(&["schema", "list"], Reads::Schema),
         case(&["schema", "get", "requirement"], Reads::Schema),

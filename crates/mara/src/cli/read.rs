@@ -316,45 +316,23 @@ fn code_path(address: &str) -> Option<&str> {
 fn get(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let cursor = args.cursor();
     let address = args.argument(0);
-    if let Some(path) = code_path(address) {
-        let (mut inputs, _) = open(context)?;
-        let generation = inputs.generation(context.now, context.work, CodeReads::List);
-        let listed = (generation.code_paths).binary_search_by(|(p, _)| p.as_str().cmp(path));
-        if let Ok(index) = listed {
-            let language = generation.code_paths[index].1;
-            let (hash, contents) =
-                inputs
-                    .read_code(path, context.now, context.work)
-                    .map_err(|diagnostic| Failure {
-                        message: diagnostic.message.clone(),
-                        diagnostics: vec![*diagnostic],
-                        ..Failure::new("io-error", String::new())
-                    })?;
-            let line = match address.len() > path.len() {
-                true => Some(address[path.len() + 1..].parse().unwrap_or(usize::MAX)),
-                false => None,
-            };
-            let (scanned, problems) =
-                inputs.scan_code(path, language, hash, &contents, context.work);
-            let mut diagnostics = generation.diagnostics.clone();
-            diagnostics.extend(problems);
-            diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
-            let key = scanned.as_ref().map_or(hash, |(key, _)| key.0);
-            let scanned = scanned.as_ref().map(|(_, scanned)| &**scanned);
-            let portion = read::get_code(
-                path,
-                line,
-                scanned,
-                key,
-                &contents,
-                cursor.as_ref(),
-                &diagnostics,
-            )
-            .map_err(failure)?;
+    let Some(path) = code_path(address) else {
+        return with_documents(context, |documents| {
+            let portion = read::get(documents, address, cursor.as_ref())?;
             let human = |out: &mut String| portion_lines(out, &portion);
-            let next = portion.next_cursor;
-            return Ok(respond(portion.json.clone(), human, &diagnostics, next));
-        }
+            Ok(respond(
+                portion.json.clone(),
+                human,
+                documents.diagnostics,
+                portion.next_cursor,
+            ))
+        });
+    };
+    let (mut inputs, _) = open(context)?;
+    // A code file is read without the documents (DES-CODE-READERS).
+    let (language, listed) = inputs.code_file(path, context.now, context.work);
+    let Some(language) = language else {
+        let generation = inputs.generation(context.now, context.work, CodeReads::List);
         let documents = Documents {
             snapshot: &generation.snapshot,
             diagnostics: &generation.diagnostics,
@@ -368,17 +346,38 @@ fn get(context: &mut Context, args: &Args) -> Result<Response, Failure> {
             documents.diagnostics,
             next,
         ));
-    }
-    with_documents(context, |documents| {
-        let portion = read::get(documents, args.argument(0), cursor.as_ref())?;
-        let human = |out: &mut String| portion_lines(out, &portion);
-        Ok(respond(
-            portion.json.clone(),
-            human,
-            documents.diagnostics,
-            portion.next_cursor,
-        ))
-    })
+    };
+    let (hash, contents) =
+        inputs
+            .read_code(path, context.now, context.work)
+            .map_err(|diagnostic| Failure {
+                message: diagnostic.message.clone(),
+                diagnostics: vec![*diagnostic],
+                ..Failure::new("io-error", String::new())
+            })?;
+    let line = match address.len() > path.len() {
+        true => Some(address[path.len() + 1..].parse().unwrap_or(usize::MAX)),
+        false => None,
+    };
+    let (scanned, problems) = inputs.scan_code(path, language, hash, &contents, context.work);
+    let mut diagnostics = listed;
+    diagnostics.extend(problems);
+    diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+    let key = scanned.as_ref().map_or(hash, |(key, _)| key.0);
+    let scanned = scanned.as_ref().map(|(_, scanned)| &**scanned);
+    let portion = read::get_code(
+        path,
+        line,
+        scanned,
+        key,
+        &contents,
+        cursor.as_ref(),
+        &diagnostics,
+    )
+    .map_err(failure)?;
+    let human = |out: &mut String| portion_lines(out, &portion);
+    let next = portion.next_cursor;
+    Ok(respond(portion.json.clone(), human, &diagnostics, next))
 }
 
 fn schema_list(context: &mut Context, args: &Args) -> Result<Response, Failure> {

@@ -321,6 +321,64 @@ impl Inputs {
         (Some((key, scanned)), diagnostics)
     }
 
+    /// The index of the language of the code file at `path`, in the configuration, as the
+    /// request that began at `now` lists it, with the listing's diagnostics: what `get` of a code
+    /// location reads instead of a [`Generation`] (DES-CODE-READERS). `None` when the
+    /// configuration declares no code file at `path`: no language's include pattern matches it,
+    /// or it is a document, a program or a temporary file, which lists nothing; or the listing
+    /// does not find it. Lists only the directories where a code include pattern can match, as
+    /// [`CodeReads::List`] does, and reads no document or program and builds no snapshot. The
+    /// listing starts from the directories and `.gitignore` files of the last check, each
+    /// listed or read again only when its stat says so, and changes nothing that these inputs
+    /// or a session keep.
+    pub fn code_file(
+        &mut self,
+        path: &str,
+        now: SystemTime,
+        work: &mut WorkCounts,
+    ) -> (Option<usize>, Vec<Diagnostic>) {
+        let project = self.project(now, work);
+        let config = &project.config;
+        let patterns = |paths: &mut dyn Iterator<Item = &mara_engine::config::PathSetting>| {
+            Patterns::new(
+                paths
+                    .map(|pattern| pattern.path.as_str())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let documents = patterns(&mut config.include.iter().flatten());
+        let programs = patterns(&mut config.rules.iter().flat_map(|rules| &rules.programs));
+        let code = patterns(&mut config.code.iter().flat_map(|language| &language.include));
+        let name = path.rsplit('/').next().unwrap_or(path);
+        let excluded = (name.ends_with(".mara.md") && documents.matches(path))
+            || programs.matches(path)
+            || name.starts_with(TEMPORARY_PREFIX);
+        if excluded || !code.matches(path) {
+            return (None, Vec::new());
+        }
+        let config = Config {
+            include: None,
+            rules: None,
+            ..config.clone()
+        };
+        let previous = State {
+            directories: self.state.directories.clone(),
+            gitignores: self.state.gitignores.clone(),
+            ..State::default()
+        };
+        let mut problems = Vec::new();
+        let code = Code::new(&config, CodeReads::List, &previous, &mut problems);
+        let mut reads = Reads::default();
+        let mut walk = Walk::new(&self.root, &config, code, previous, now, work, &mut reads);
+        walk.run();
+        let listed = (walk.code.paths.iter()).find(|(listed, _)| listed == path);
+        let language = listed.map(|&(_, language)| language);
+        let mut diagnostics = walk.diagnostics;
+        diagnostics.extend(problems);
+        diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+        (language, diagnostics)
+    }
+
     /// Reads, hashes and scans every code file that `generation`, of the request that began at
     /// `now` with [`CodeReads::List`], listed, as [`CodeReads::Scan`] would have, through the
     /// same scan: each read only when its stat changed, scanned only when its contents, its

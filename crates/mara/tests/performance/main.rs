@@ -4,6 +4,7 @@
 
 mod cli;
 mod code_add;
+mod code_get;
 mod convert;
 mod corpus;
 mod cpu_time;

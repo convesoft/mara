@@ -243,6 +243,12 @@ fn check_cold(
             hashes: 2,
             ..WorkCounts::default()
         },
+        // The root `.gitignore` is the corpus's only one.
+        Reads::Code => WorkCounts {
+            file_reads: 3,
+            hashes: 3,
+            ..WorkCounts::default()
+        },
         Reads::Checked { runs } => WorkCounts {
             file_reads: read,
             hashes: read,
