@@ -1,14 +1,12 @@
 //! Each request through the CLI with `--format json` and through `mara mcp`, from the same files
 //! at the same path: the same JSON and the same files (VER-CLI-MCP-PARITY).
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 
 use serde_json::{Value, json};
 
 use crate::{
-    CliRun, Dir, Files, Server, Usage, anchors, cli, engineering_project, mcp_request, no_work,
-    usage,
+    CliRun, Dir, Server, Usage, cli, engineering_project, mcp_request, no_work, pair_mids, usage,
 };
 
 /// A project, the MCP server started in it, and what turns a CLI request into its tool call.
@@ -42,33 +40,7 @@ impl Parity {
         self.dir.restore(&before);
         let (tool, arguments) = mcp_request(&self.usages, &self.tools, args, &self.dir.root());
         let call = self.server.call(&tool, arguments);
-        let mut text = call.text.clone();
-        let mut mcp_files = self.dir.files();
-        let known: BTreeSet<String> = anchors(&before).into_values().collect();
-        let generated = |files: &Files| -> BTreeMap<(String, usize), String> {
-            (anchors(files).into_iter())
-                .filter(|(_, mid)| !known.contains(mid))
-                .collect()
-        };
-        let (cli_mids, mcp_mids) = (generated(&cli_files), generated(&mcp_files));
-        assert_eq!(
-            cli_mids.keys().collect::<Vec<_>>(),
-            mcp_mids.keys().collect::<Vec<_>>(),
-            "{args:?}: MIDs generated at other places"
-        );
-        // A MID that both runs wrote, such as one a conversion keeps, was not generated.
-        for (place, mid) in mcp_mids
-            .iter()
-            .filter(|(place, mid)| cli_mids[*place] != **mid)
-        {
-            let replacement = &cli_mids[place];
-            text = text.replace(mid, replacement);
-            for bytes in mcp_files.values_mut() {
-                if let Ok(contents) = std::str::from_utf8(bytes) {
-                    *bytes = contents.replace(mid, replacement).into_bytes();
-                }
-            }
-        }
+        let (text, mcp_files) = pair_mids(args, &before, &cli_files, &call.text, self.dir.files());
         assert_eq!(run.stdout, format!("{text}\n"), "{args:?}");
         assert_eq!(
             call.is_error,

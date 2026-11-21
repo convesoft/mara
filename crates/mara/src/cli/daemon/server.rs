@@ -239,6 +239,8 @@ struct State {
     /// `status` and `stop` do not count, so that a client watching the daemon does not keep
     /// it alive.
     last_request: Instant,
+    /// Operation requests run and answered since the daemon started, which `status` reports.
+    served: u64,
 }
 
 impl Daemon {
@@ -279,6 +281,7 @@ impl Daemon {
                     "version": PROTOCOL_VERSION,
                     "pid": self.pid,
                     "sessions": sessions,
+                    "served": self.state().served,
                 })
             }
             // The daemon stops once this answer is sent ([`connection`]), so the client gets it
@@ -290,6 +293,9 @@ impl Daemon {
                 self.touch();
                 match answer {
                     Ok(mut answer) => {
+                        // Counted before the answer is sent, so a client that has it sees it in
+                        // `status`.
+                        self.state().served += 1;
                         answer["version"] = json!(PROTOCOL_VERSION);
                         answer["pid"] = json!(self.pid);
                         answer
@@ -332,6 +338,7 @@ fn serve(
             active: 0,
             writes: 0,
             last_request: Instant::now(),
+            served: 0,
         }),
         changed: Condvar::new(),
         sessions: Sessions::default(),

@@ -46,6 +46,7 @@ fn a_cli_write_and_an_mcp_create_at_once() {
             .current_dir(dir.root())
             .env_clear()
             .env("MARA_NO_DAEMON", "1")
+            .env("TMPDIR", std::env::temp_dir())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

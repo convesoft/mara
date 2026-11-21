@@ -10,13 +10,17 @@ mod parity;
 mod protocol;
 mod writers;
 
-use std::collections::BTreeMap;
+#[path = "../support/requests.rs"]
+mod requests;
+
+pub use requests::{Files, Usage, mcp_request, pair_mids, tool_result, usage};
+
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 /// A disposable directory, removed on drop.
@@ -53,25 +57,7 @@ impl Dir {
 
     /// Every file below the root with its bytes, and every directory with a trailing `/`.
     pub fn files(&self) -> Files {
-        fn walk(root: &Path, directory: &Path, out: &mut Files) {
-            for entry in fs::read_dir(directory).unwrap() {
-                let path = entry.unwrap().path();
-                let relative = path
-                    .strip_prefix(root)
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned();
-                if fs::symlink_metadata(&path).unwrap().is_dir() {
-                    out.insert(format!("{relative}/"), Vec::new());
-                    walk(root, &path, out);
-                } else {
-                    out.insert(relative, fs::read(&path).unwrap());
-                }
-            }
-        }
-        let mut out = Files::new();
-        walk(&self.root(), &self.root(), &mut out);
-        out
+        requests::files(&self.root())
     }
 
     /// Makes the directory hold exactly `files`, at the same path.
@@ -98,9 +84,6 @@ impl Dir {
     }
 }
 
-/// Files and directories below a root, as [`Dir::files`] records them.
-pub type Files = BTreeMap<String, Vec<u8>>;
-
 /// A finished `mara --debug-stats --format json` process.
 #[derive(Debug)]
 pub struct CliRun {
@@ -117,7 +100,9 @@ impl CliRun {
     }
 }
 
-/// Runs `mara --debug-stats --format json <args>` in `directory` with an empty environment.
+/// Runs `mara --debug-stats --format json <args>` in `directory` in direct mode, its environment
+/// holding only the test process's temporary directory as `TMPDIR`, so that no evaluation writes
+/// under `/tmp` when the test runs elsewhere.
 pub fn cli(directory: &Path, args: &[&str]) -> CliRun {
     let output = Command::new(env!("CARGO_BIN_EXE_mara"))
         .args(["--debug-stats", "--format", "json"])
@@ -125,6 +110,7 @@ pub fn cli(directory: &Path, args: &[&str]) -> CliRun {
         .current_dir(directory)
         .env_clear()
         .env("MARA_NO_DAEMON", "1")
+        .env("TMPDIR", std::env::temp_dir())
         .stdin(Stdio::null())
         .output()
         .expect("start mara");
@@ -173,7 +159,7 @@ impl Call {
 }
 
 impl Server {
-    /// Starts `mara --debug-stats mcp <options>` in `directory` with an empty environment,
+    /// Starts `mara --debug-stats mcp <options>` in `directory` with the environment of [`cli`],
     /// without initializing it.
     pub fn spawn(directory: &Path, options: &[&str]) -> Server {
         let mut child = Command::new(env!("CARGO_BIN_EXE_mara"))
@@ -182,6 +168,7 @@ impl Server {
             .current_dir(directory)
             .env_clear()
             .env("MARA_NO_DAEMON", "1")
+            .env("TMPDIR", std::env::temp_dir())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -246,14 +233,8 @@ impl Server {
     /// Calls `tool` with `arguments` and returns its result.
     pub fn call(&mut self, tool: &str, arguments: Value) -> Call {
         let response = self.request("tools/call", json!({"name": tool, "arguments": arguments}));
-        let result = &response["result"];
-        let content = result["content"].as_array().expect("content");
-        assert_eq!(content.len(), 1, "{response}");
-        assert_eq!(content[0]["type"], "text", "{response}");
-        Call {
-            text: content[0]["text"].as_str().expect("text").to_owned(),
-            is_error: result["isError"].as_bool().expect("isError"),
-        }
+        let (text, is_error) = tool_result(&response);
+        Call { text, is_error }
     }
 
     /// The tools of `tools/list`.
@@ -276,147 +257,6 @@ impl Server {
         let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
         (output.status, stats(&stderr))
     }
-}
-
-/// An operation as the CLI's usage lists it: its words, positional arguments and options.
-#[derive(Debug)]
-pub struct Usage {
-    pub words: Vec<String>,
-    pub arguments: Vec<String>,
-    /// Each option's name, and whether it repeats.
-    pub options: Vec<(String, bool)>,
-}
-
-/// The operations that bare `mara` lists.
-pub fn usage() -> Vec<Usage> {
-    let run = cli(&std::env::temp_dir(), &[]);
-    assert_eq!(run.status, 0);
-    run.stdout
-        .lines()
-        .filter_map(|line| line.strip_prefix("  mara "))
-        .map(|line| {
-            let mut usage = Usage {
-                words: Vec::new(),
-                arguments: Vec::new(),
-                options: Vec::new(),
-            };
-            for part in line.split(' ') {
-                if let Some(option) = part.strip_prefix("[--") {
-                    usage.options.push((option.to_owned(), false));
-                } else if part.ends_with("]...") {
-                    usage.options.last_mut().expect("an option").1 = true;
-                } else if part.ends_with(']') {
-                    // An option's value.
-                } else if let Some(argument) = part.strip_prefix('<') {
-                    usage
-                        .arguments
-                        .push(argument.trim_end_matches('>').to_owned());
-                } else {
-                    usage.words.push(part.to_owned());
-                }
-            }
-            usage
-        })
-        .collect()
-}
-
-/// The MCP form of the CLI request `args`: its tool and arguments, from the usage of its
-/// operation and the types of the tool's parameters.
-/// A file that `--input <name>=@<file>` names is read from `cwd`, where the CLI runs.
-pub fn mcp_request(
-    usages: &[Usage],
-    tools: &[Value],
-    args: &[&str],
-    cwd: &Path,
-) -> (String, Value) {
-    let usage = usages
-        .iter()
-        .filter(|usage| {
-            args.starts_with(&usage.words.iter().map(String::as_str).collect::<Vec<_>>())
-        })
-        .max_by_key(|usage| usage.words.len())
-        .unwrap_or_else(|| panic!("no operation for {args:?}"));
-    let name = usage.words.join("_");
-    let tool = tools
-        .iter()
-        .find(|tool| tool["name"] == name.as_str())
-        .unwrap_or_else(|| panic!("no tool {name}"));
-    let properties = &tool["inputSchema"]["properties"];
-    let mut arguments = Map::new();
-    let mut positional = usage.arguments.iter();
-    let mut rest = args[usage.words.len()..].iter();
-    while let Some(arg) = rest.next() {
-        let (key, value) = match arg.strip_prefix("--") {
-            Some(option) => match option.split_once('=') {
-                Some((key, value)) => (key.to_owned(), (*value).to_owned()),
-                None => (
-                    option.to_owned(),
-                    (*rest.next().expect("a value")).to_owned(),
-                ),
-            },
-            None => (
-                positional.next().expect("a declared argument").clone(),
-                (*arg).to_owned(),
-            ),
-        };
-        let schema = &properties[&key];
-        // `--input <name>=<value>` or `<name>=@<file>`: MCP passes the value, or the file's
-        // rows, under the input's name (DES-REQUEST-INPUTS).
-        if schema["type"] == "object" {
-            let (input, given) = value.split_once('=').expect("`<name>=<value>`");
-            let given = match given.strip_prefix('@') {
-                Some(file) => {
-                    let path = cwd.join(file);
-                    let text = fs::read(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
-                    serde_json::from_slice(&text).expect("a JSON file")
-                }
-                None => json!(given),
-            };
-            let entry = arguments.entry(key).or_insert_with(|| json!({}));
-            entry[input] = given;
-            continue;
-        }
-        let kind = match schema["type"].as_str() {
-            Some("array") => schema["items"]["type"].as_str(),
-            kind => kind,
-        };
-        let value = match kind {
-            Some("integer") => json!(value.parse::<i64>().expect("a whole number")),
-            Some("string") => json!(value),
-            _ => panic!("no parameter {key} of {name}: {tool}"),
-        };
-        if schema["type"] == "array" {
-            arguments
-                .entry(key)
-                .or_insert_with(|| json!([]))
-                .as_array_mut()
-                .unwrap()
-                .push(value);
-        } else {
-            arguments.insert(key, value);
-        }
-    }
-    (name, Value::Object(arguments))
-}
-
-/// The MID of each anchor line, by path and line.
-pub fn anchors(files: &Files) -> BTreeMap<(String, usize), String> {
-    let mut out = BTreeMap::new();
-    for (path, bytes) in files {
-        let Ok(text) = std::str::from_utf8(bytes) else {
-            continue;
-        };
-        for (index, line) in text.lines().enumerate() {
-            let mid = line
-                .trim()
-                .strip_prefix("<a id=\"")
-                .and_then(|rest| rest.strip_suffix("\"></a>"));
-            if let Some(mid) = mid.filter(|mid| mid.len() == 26) {
-                out.insert((path.clone(), index + 1), mid.to_owned());
-            }
-        }
-    }
-    out
 }
 
 /// A project of the engineering template with one need and one requirement that satisfies it.

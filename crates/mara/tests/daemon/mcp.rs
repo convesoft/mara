@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
+use crate::parity::requests::tool_result;
 use crate::{STOPPED, Test, mara, signal};
 
 /// The read that the cases send, as a CLI call and as a tool call.
@@ -95,14 +96,24 @@ impl Server {
         self.send("tools/call", json!({"name": TOOL, "arguments": {}}));
     }
 
-    /// The text of a call of `tool` with `arguments`, and whether it is an error.
-    fn call_tool(&mut self, tool: &str, arguments: Value) -> (String, bool) {
+    /// The tools of `tools/list`, on one page.
+    pub(crate) fn tools(&mut self) -> Vec<Value> {
+        self.send("tools/list", json!({}));
+        let response = self.receive(crate::RUN_WAIT).expect("an answer");
+        assert!(response["result"].get("nextCursor").is_none(), "{response}");
+        response["result"]["tools"]
+            .as_array()
+            .expect("tools")
+            .clone()
+    }
+
+    /// The text of a call of `tool` with `arguments`, and whether it is an error, from a response
+    /// that has exactly the form DES-MCP-SERVER gives it ([`tool_result`]).
+    pub(crate) fn call_tool(&mut self, tool: &str, arguments: Value) -> (String, bool) {
         self.send("tools/call", json!({"name": tool, "arguments": arguments}));
         let response = self.receive(crate::RUN_WAIT).expect("an answer");
-        let result = &response["result"];
-        let text = result["content"][0]["text"].as_str();
-        let text = text.unwrap_or_else(|| panic!("{response}"));
-        (text.to_owned(), result["isError"] == true)
+        assert_eq!(response["id"], self.next - 1, "{response}");
+        tool_result(&response)
     }
 
     /// The text of the call's result, which must succeed.

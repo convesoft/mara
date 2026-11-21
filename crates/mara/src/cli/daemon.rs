@@ -20,8 +20,8 @@ use super::{Args, Context, FORMAT_VERSION, Failure, Operation, Response, Run, SU
 
 pub const STATUS: Operation = Operation {
     words: &["daemon", "status"],
-    summary: "Prints whether the daemon of this build runs, its process ID and the root of each \
-              open session.",
+    summary: "Prints whether the daemon of this build runs, its process ID, the root of each open \
+              session and how many operation requests it has served.",
     arguments: &[],
     options: &[],
     run: Run::Command(status),
@@ -54,6 +54,8 @@ const START_POLL: Duration = Duration::from_millis(20);
 struct Running {
     pid: u64,
     sessions: Vec<String>,
+    /// Operation requests it has run and answered.
+    served: u64,
 }
 
 /// This build, and its runtime directory or why it has none.
@@ -114,6 +116,7 @@ fn running(runtime: &Runtime, build: &Build) -> io::Result<Option<Running>> {
     Ok(Some(Running {
         pid: answer["pid"].as_u64().unwrap_or_default(),
         sessions,
+        served: answer["served"].as_u64().unwrap_or_default(),
     }))
 }
 
@@ -153,8 +156,9 @@ fn status(_: &mut Context, _: &Args) -> Result<Response, Failure> {
         (Ok(_), None) => "No daemon of this build runs.\n".to_owned(),
         (Ok(_), Some(running)) => {
             let mut text = format!(
-                "The daemon of this build runs as process {}.\n",
-                running.pid
+                "The daemon of this build runs as process {} and has served {} operation \
+                 requests.\n",
+                running.pid, running.served
             );
             if running.sessions.is_empty() {
                 text.push_str("Sessions: none\n");
@@ -191,6 +195,11 @@ fn status(_: &mut Context, _: &Args) -> Result<Response, Failure> {
         found.as_ref().map(|running| running.pid),
     );
     object.array("sessions", sessions.iter().map(String::as_str));
+    null_or_number(
+        &mut object,
+        "served",
+        found.as_ref().map(|running| running.served),
+    );
     object.optional_string("socket", paths.as_ref().map(|paths| paths.0.as_str()));
     object.optional_string("lock", paths.as_ref().map(|paths| paths.1.as_str()));
     object.optional_string(
