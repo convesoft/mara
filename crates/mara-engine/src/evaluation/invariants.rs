@@ -1,7 +1,7 @@
 //! The rows of an invariant as diagnostics (DES-RULE-CONSUMERS in `docs/rules/index.mara.md`).
 
 use crate::config::{CONFIG_PATH, Consumer, Entry};
-use crate::diagnostic::{Diagnostic, intern};
+use crate::diagnostic::Diagnostic;
 use crate::facts::Value;
 use crate::snapshot::Snapshot;
 
@@ -29,7 +29,6 @@ pub fn invariant_findings(
     else {
         return Vec::new();
     };
-    let code = intern(&entry.name);
     rows.iter()
         .map(|row| {
             let mid = match row.first() {
@@ -42,8 +41,12 @@ pub fn invariant_findings(
                     let document = snapshot.items()[index].document;
                     let path = &snapshot.documents()[document].path;
                     let found = snapshot.item(index);
-                    let mut diagnostic =
-                        Diagnostic::error(code, path.clone(), found.line, message.clone());
+                    let mut diagnostic = Diagnostic::error(
+                        entry.name.clone(),
+                        path.clone(),
+                        found.line,
+                        message.clone(),
+                    );
                     diagnostic.id = found.value("id").map(str::to_owned);
                     diagnostic.mid = Some(found.mid.clone());
                     diagnostic
@@ -54,7 +57,7 @@ pub fn invariant_findings(
                         relation.name,
                         crate::validation::quote(mid)
                     );
-                    Diagnostic::error(code, CONFIG_PATH, relation.line, message)
+                    Diagnostic::error(entry.name.clone(), CONFIG_PATH, relation.line, message)
                 }
             };
             diagnostic.severity = *severity;

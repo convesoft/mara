@@ -21,7 +21,7 @@ fn parsed(text: &str) -> Document {
 fn problems(document: &Document) -> Vec<(usize, &'static str)> {
     document
         .diagnostics("a.mara.md")
-        .map(|diagnostic| (diagnostic.line, diagnostic.code))
+        .map(|diagnostic| (diagnostic.line, diagnostic.built_in_code()))
         .collect()
 }
 
@@ -568,7 +568,7 @@ fn refuses_an_inserted_item_that_would_not_read_back() {
         );
         let diagnostic = misread.diagnostic("a.mara.md");
         assert_eq!(
-            (diagnostic.code, diagnostic.path.as_str()),
+            (&*diagnostic.code, diagnostic.path.as_str()),
             (UNREADABLE_EDIT, "a.mara.md")
         );
     }

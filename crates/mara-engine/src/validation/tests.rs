@@ -79,7 +79,8 @@ fn found(snapshot: &Snapshot) -> Vec<(String, usize, &'static str, Option<String
         .filter(|finding| finding.primary)
         .map(|finding| {
             let d = finding.diagnostic;
-            (d.path, d.line, d.code, d.mid)
+            let code = d.built_in_code();
+            (d.path, d.line, code, d.mid)
         })
         .collect()
 }
@@ -210,7 +211,7 @@ fn reports_identity_problems_at_the_later_item_and_to_each_item() {
     let first: Vec<_> = findings
         .iter()
         .filter(|finding| finding.item == Some(0))
-        .map(|finding| (finding.diagnostic.code, finding.primary))
+        .map(|finding| (&*finding.diagnostic.code, finding.primary))
         .collect();
     assert_eq!(first, [("duplicate-mid", false), ("duplicate-id", false)]);
     assert!(findings[..].iter().all(|f| f.diagnostic.mid.is_some()));
@@ -295,7 +296,7 @@ fn reports_disallowed_targets_and_each_cycle_once() {
     let findings = check(&snapshot, &mut WorkCounts::default());
     let mut reported: Vec<_> = findings
         .iter()
-        .map(|f| (f.diagnostic.line, f.diagnostic.code, f.primary))
+        .map(|f| (f.diagnostic.line, &*f.diagnostic.code, f.primary))
         .collect();
     reported.sort();
     // A → B → C → A and C → C are one cycle; C → NOTE-N and NOTE-N → NOTE-N leave their types.

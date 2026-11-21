@@ -105,7 +105,7 @@ impl ReadError {
             ReadError::UnknownNode(_) => "unknown-node",
             ReadError::UnknownDeclaration(_) => "unknown-declaration",
             ReadError::StaleCursor => "stale-cursor",
-            ReadError::TooLarge(diagnostic) => diagnostic.code,
+            ReadError::TooLarge(_) => TOO_LARGE,
             ReadError::NotText(_) => "invalid-utf8",
         }
     }

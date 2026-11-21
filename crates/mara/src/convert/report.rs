@@ -157,7 +157,7 @@ mod tests {
         ] {
             let diagnostic = read(contents.as_bytes()).unwrap_err();
             assert_eq!(
-                (diagnostic.code, diagnostic.path.as_str()),
+                (&*diagnostic.code, diagnostic.path.as_str()),
                 (code, REPORT_PATH),
                 "{contents}"
             );

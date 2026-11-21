@@ -451,7 +451,10 @@ mod tests {
     }
 
     fn codes(diagnostics: &[Diagnostic]) -> Vec<(usize, &'static str)> {
-        diagnostics.iter().map(|d| (d.line - 5, d.code)).collect()
+        diagnostics
+            .iter()
+            .map(|d| (d.line - 5, d.built_in_code()))
+            .collect()
     }
 
     /// The example of DES-RULE-CONSUMERS in `docs/rules/index.mara.md` loads as written.

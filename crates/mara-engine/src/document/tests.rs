@@ -14,7 +14,7 @@ fn parse_text(text: &str) -> Document {
 fn problems(document: &Document) -> Vec<(usize, &'static str)> {
     document
         .diagnostics("docs/a.mara.md")
-        .map(|diagnostic| (diagnostic.line, diagnostic.code))
+        .map(|diagnostic| (diagnostic.line, diagnostic.built_in_code()))
         .collect()
 }
 

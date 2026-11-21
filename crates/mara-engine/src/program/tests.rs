@@ -475,7 +475,7 @@ fn a_refusal_is_a_diagnostic_with_a_caret() {
     let refusal = admit_text(".decl r(x:number)\n\tr(10 / 2).").unwrap_err();
     let diagnostic = refusal.diagnostic();
     assert_eq!(
-        (diagnostic.path.as_str(), diagnostic.line, diagnostic.code),
+        (diagnostic.path.as_str(), diagnostic.line, &*diagnostic.code),
         ("p.dl", 2, "program-refused")
     );
     assert_eq!(

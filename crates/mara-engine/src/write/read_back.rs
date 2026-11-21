@@ -6,6 +6,7 @@
 //! reference and footnote definitions are document-wide, so this compares the whole document,
 //! with no exemption for an item or narrative that a splice merely touches.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -567,7 +568,7 @@ impl<'r> Reading<'r> {
             .iter()
             .map(|&(_, first, last)| (first, last))
             .collect();
-        let mut problems: HashMap<&str, usize> = HashMap::new();
+        let mut problems: HashMap<Cow<'static, str>, usize> = HashMap::new();
         for problem in self.old.document.diagnostics("") {
             if !within(problem.line, &removed) {
                 *problems.entry(problem.code).or_default() += 1;
@@ -578,7 +579,7 @@ impl<'r> Reading<'r> {
             if within(problem.line, &inserted) {
                 continue;
             }
-            match problems.get_mut(problem.code) {
+            match problems.get_mut(&*problem.code) {
                 Some(count) if *count > 0 => *count -= 1,
                 _ => added.push(problem),
             }

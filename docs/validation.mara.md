@@ -134,6 +134,7 @@ Conditional obligations, such as "an accepted Verification verifies an accepted 
 
 - A diagnostic has a code, a severity (`error` or `warning`), a message, a path and a line, and the ID and MID of the item it concerns.
 - Codes are stable kebab-case names such as `stale-link-path`. An invariant violation carries the invariant's name.
+- A diagnostic owns its strings, except the code of a built-in check, which is a constant of the program and is not allocated; a process keeps none of the others once the result that carries the diagnostic is dropped.
 - Every built-in check failure is an error. A warning comes only from an invariant that declares that severity.
 - A result carries the project's validity and its error and warning counts, then one page of diagnostics in path and line order.
 - The CLI prints each diagnostic as `<path>:<line>: <severity>[<code>]: <message>`.

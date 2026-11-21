@@ -101,7 +101,7 @@ fn a_compile_warning_alone_is_an_error() {
     let diagnostic = &fault.diagnostics(&program, 9)[0];
     assert_eq!(diagnostic.severity, Severity::Error);
     assert_eq!(
-        (diagnostic.code, diagnostic.path.as_str(), diagnostic.line),
+        (&*diagnostic.code, diagnostic.path.as_str(), diagnostic.line),
         ("program-error", "rules/main.dl", 5)
     );
     assert!(
@@ -118,7 +118,7 @@ fn anything_else_soufflé_prints_is_a_fault() {
     let fault = interpret(&program, exit(false), b"", runtime.as_bytes(), limits()).unwrap_err();
     let diagnostic = &fault.diagnostics(&program, 9)[0];
     assert_eq!(
-        (diagnostic.code, diagnostic.path.as_str(), diagnostic.line),
+        (&*diagnostic.code, diagnostic.path.as_str(), diagnostic.line),
         ("program-fault", "rules/main.dl", 5)
     );
     assert!(

@@ -51,7 +51,8 @@ fn problems(files: &Files) -> Vec<(String, usize, &'static str)> {
         .into_iter()
         .map(|finding| {
             let diagnostic = finding.diagnostic;
-            (diagnostic.path, diagnostic.line, diagnostic.code)
+            let code = diagnostic.built_in_code();
+            (diagnostic.path, diagnostic.line, code)
         })
         .collect()
 }

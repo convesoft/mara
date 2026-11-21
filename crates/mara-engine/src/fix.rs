@@ -6,6 +6,7 @@
 #[cfg(test)]
 mod tests;
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
@@ -224,7 +225,7 @@ impl<'s> Planner<'s> {
             definitions: HashMap::new(),
             users: None,
         };
-        let mut flagged: HashMap<&str, HashSet<usize>> = HashMap::new();
+        let mut flagged: HashMap<Cow<'static, str>, HashSet<usize>> = HashMap::new();
         for diagnostic in page.parsed.diagnostics("") {
             flagged
                 .entry(diagnostic.code)

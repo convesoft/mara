@@ -291,7 +291,10 @@ mod tests {
     use super::*;
 
     fn codes(diagnostics: &[Diagnostic]) -> Vec<(usize, &'static str)> {
-        diagnostics.iter().map(|d| (d.line, d.code)).collect()
+        diagnostics
+            .iter()
+            .map(|d| (d.line, d.built_in_code()))
+            .collect()
     }
 
     fn patterns(config: &Config) -> Vec<&str> {

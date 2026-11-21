@@ -15,6 +15,7 @@ mod scan;
 mod schema;
 mod yaml;
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -68,7 +69,13 @@ impl Refusal {
     /// A problem of one file.
     fn file(diagnostic: Diagnostic) -> Refusal {
         let message = format!("{}; nothing was written", diagnostic.message);
-        Refusal::new(diagnostic.code, message, vec![diagnostic])
+        // The conversion's own checks name static codes; only an invariant's name is owned, and
+        // the conversion runs no invariant.
+        let code = match diagnostic.code {
+            Cow::Borrowed(code) => code,
+            Cow::Owned(_) => "invalid-project",
+        };
+        Refusal::new(code, message, vec![diagnostic])
     }
 }
 

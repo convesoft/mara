@@ -294,7 +294,7 @@ fn reports_a_missing_schema_at_the_line_that_names_it() {
     assert_eq!(project.diagnostics.len(), 1);
     let diagnostic = &project.diagnostics[0];
     assert_eq!(
-        (diagnostic.path.as_str(), diagnostic.line, diagnostic.code),
+        (diagnostic.path.as_str(), diagnostic.line, &*diagnostic.code),
         (".mara/config.toml", 2, "io-error")
     );
     assert!(

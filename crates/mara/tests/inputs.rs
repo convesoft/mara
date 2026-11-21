@@ -489,7 +489,7 @@ fn symbolic_links_are_never_followed() {
     let found: Vec<(&str, &str)> = generation
         .diagnostics
         .iter()
-        .map(|diagnostic| (diagnostic.path.as_str(), diagnostic.code))
+        .map(|diagnostic| (diagnostic.path.as_str(), &*diagnostic.code))
         .collect();
     assert_eq!(
         found,
@@ -545,7 +545,7 @@ fn inputs_that_cannot_be_read_are_reported() {
     let found: Vec<(&str, &str)> = generation
         .diagnostics
         .iter()
-        .map(|diagnostic| (diagnostic.path.as_str(), diagnostic.code))
+        .map(|diagnostic| (diagnostic.path.as_str(), &*diagnostic.code))
         .collect();
     assert_eq!(
         found,
@@ -839,7 +839,7 @@ fn a_gitignore_the_crate_cannot_compile_keeps_its_directory_out() {
     let found: Vec<(&str, usize, &str)> = generation
         .diagnostics
         .iter()
-        .map(|diagnostic| (diagnostic.path.as_str(), diagnostic.line, diagnostic.code))
+        .map(|diagnostic| (diagnostic.path.as_str(), diagnostic.line, &*diagnostic.code))
         .collect();
     assert_eq!(
         found,

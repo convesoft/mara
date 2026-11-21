@@ -582,7 +582,10 @@ mod tests {
         assert!(diagnostics.iter().all(|d| d.path == PATH));
         (
             schema,
-            diagnostics.iter().map(|d| (d.line, d.code)).collect(),
+            diagnostics
+                .iter()
+                .map(|d| (d.line, d.built_in_code()))
+                .collect(),
         )
     }
 
