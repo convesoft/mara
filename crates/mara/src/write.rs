@@ -34,6 +34,7 @@ pub struct WriteLock {
 }
 
 impl WriteLock {
+    // @mara implements REQ-WRITERS-SERIALIZED
     /// Takes the write lock of the project at `root`, the canonical root that selection
     /// returns, waiting while another process holds it. A `.mara` that is a symbolic link is
     /// refused, never followed (DES-PROJECT-CONFIGURATION).
@@ -238,6 +239,9 @@ impl Refusal {
     }
 }
 
+// @mara implements REQ-REFUSED-EDIT-CHANGES-NOTHING
+// @mara implements REQ-INTERRUPTED-EDIT-LOSES-NOTHING
+// @mara implements REQ-WRITERS-SERIALIZED
 /// Writes the edit `files` into the locked project (DES-WRITE-PROCEDURE): checks that every
 /// file still has its basis, which refuses the whole edit otherwise, then replaces each file in
 /// order through a temporary file in its directory, checked once more just before its rename.
@@ -365,6 +369,7 @@ impl<'r> Target<'r> {
         }
     }
 
+    // @mara implements REQ-MINIMAL-REWRITE
     /// Step 3 for this file: its missing directories created, its temporary file written,
     /// checked once more and renamed into place. A failure after the temporary file exists
     /// removes it and says when that removal is not confirmed.

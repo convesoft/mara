@@ -57,6 +57,9 @@ pub struct Move {
     pub item: usize,
 }
 
+// @mara implements REQ-MOVE-ITEM
+// @mara implements REQ-STABLE-IDENTITY
+// @mara implements REQ-INTERRUPTED-EDIT-LOSES-NOTHING
 /// Moves the item that `reference`, an ID or a MID, names into the document at `destination`:
 /// before line `line` of it, which lies outside every item, or at its end. Its bytes stay, except
 /// that its own links name the same files from the destination; every link to it elsewhere
@@ -176,6 +179,8 @@ pub struct Rename {
     pub old_id: String,
 }
 
+// @mara implements REQ-RENAME-ID
+// @mara implements REQ-STABLE-IDENTITY
 /// Renames the ID of the item that `reference`, an ID or a MID, names to `new_id`: its `ID` rows
 /// that hold the old ID, the text of every mention of it whose text is the old ID, and the text
 /// of every relation link to it. Refused when `new_id` lacks the form of an ID or the prefix of

@@ -228,6 +228,7 @@ fn required<'a>(args: &'a Args, operation: &str, option: &Opt) -> Result<&'a str
     })
 }
 
+// @mara implements REQ-CREATE-ITEM
 fn item_create(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let title = required(args, "item create", &TITLE)?;
     let body = required(args, "item create", &BODY)?;

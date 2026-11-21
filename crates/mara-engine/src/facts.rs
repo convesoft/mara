@@ -257,6 +257,7 @@ impl CodeFacts {
         }
     }
 
+    // @mara implements REQ-UNAVAILABLE-NOT-PARTIAL
     /// `source_complete` with `complete` and, when all code was read, `code`.
     pub fn source_complete(&self, complete: &Relation) -> Relation {
         let mut rows = complete.rows.clone();

@@ -22,6 +22,7 @@ pub const PROJECT: Operation = Operation {
     run: Run::Document(project_fix),
 };
 
+// @mara implements REQ-ONE-FIX-OPERATION
 /// Repairs every problem that fix may repair, in one edit of the documents that have any
 /// (DES-WRITE-PROCEDURE).
 fn project_fix(context: &mut Context, _: &super::Args) -> Result<Response, Failure> {

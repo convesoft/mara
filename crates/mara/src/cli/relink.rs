@@ -280,6 +280,8 @@ fn item_move(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     ))
 }
 
+// @mara implements REQ-RENAME-ID
+// @mara implements REQ-INTERRUPTED-EDIT-LOSES-NOTHING
 fn item_rename(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let reference = args.argument(0);
     let new_id = args.argument(1);

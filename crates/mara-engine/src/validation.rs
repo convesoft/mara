@@ -133,6 +133,7 @@ impl Report {
         &self.diagnostics
     }
 
+    // @mara implements REQ-BOUNDED-PAGES
     /// The page of at most `limit` diagnostics whose path is one of `paths` or below one,
     /// every diagnostic when `paths` is empty, from `cursor` on.
     pub fn page(

@@ -54,6 +54,7 @@ cli: Run `{{project convert}}`: it rewrites the `:::mara` blocks in place as ite
 mcp: Call `{{project convert}}`: it rewrites the `:::mara` blocks in place as items, writes `.mara/config.toml` and the schema, and reports what it changed or left out. Review the report and the diff; the workflow comes with these instructions once the server starts in the converted project.
 ";
 
+// @mara implements REQ-AGENT-GUIDE
 /// The guide for the project found from `start`, or named by `project` relative to it, as
 /// `surface` shows it: the full guide in a project, a note on initializing one outside every
 /// project, and a note on converting a 0.3.0 project. A project whose configuration has an

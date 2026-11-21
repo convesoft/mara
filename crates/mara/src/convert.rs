@@ -85,6 +85,8 @@ impl From<WriteError> for Refusal {
     }
 }
 
+// @mara implements REQ-CONVERT-DIRECTIVE-CORPUS
+// @mara implements REQ-INTERRUPTED-EDIT-LOSES-NOTHING
 /// Converts the 0.3.0 project at `root`, the canonical root that selection returns. Items
 /// without a status get `status`, a status name or label.
 pub fn convert(

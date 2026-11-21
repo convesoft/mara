@@ -153,6 +153,7 @@ fn declarations(schema: &Schema) -> impl Iterator<Item = Declaration<'_>> {
     types.chain(relations)
 }
 
+// @mara implements REQ-SCHEMA-INSPECTION
 /// `schema list`: every declared type and relation, types first, each by name.
 pub fn schema_list<'s>(
     layer: &SchemaLayer<'s>,
@@ -163,6 +164,7 @@ pub fn schema_list<'s>(
     pages(layer, key, paging, all, Declaration::summary_json)
 }
 
+// @mara implements REQ-SCHEMA-INSPECTION
 /// `schema get`: the type and the relation that `name` names, as loaded. A relation is named by
 /// its forward or inverse name; names match as labels do (DES-METADATA-TABLE).
 pub fn schema_get<'s>(

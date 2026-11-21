@@ -576,6 +576,9 @@ impl Inputs {
         self.generation(now, work, CodeReads::None)
     }
 
+    // @mara implements REQ-WORK-FOLLOWS-CHANGE
+    // @mara implements REQ-NEVER-STALE
+    // @mara implements REQ-READS-DURING-VALIDATION
     /// [`Inputs::snapshot`], doing with code files what `code` says. [`CodeReads::Scan`] lists
     /// the code files with the inputs, then scans them ([`Inputs::scan_listed`]), so that a
     /// view holds the session's inputs only for the listing.
@@ -1026,6 +1029,7 @@ struct Code {
 }
 
 impl Code {
+    // @mara implements REQ-ONLY-CODE-ADD-DOWNLOADS
     /// What a walk does with code files. With [`CodeReads::Scan`], reads them against
     /// `previous`, the code files as last read, loads the grammar of each language that pins
     /// one, and puts the `unavailable-grammar` diagnostic of each that cannot be used into
@@ -1190,6 +1194,7 @@ impl<'w> Walk<'w> {
         }
     }
 
+    // @mara implements REQ-ONE-PROJECT-PER-OPERATION
     fn directory(&mut self, directory: Directory, pending: &mut Vec<Directory>) {
         let Directory {
             path,

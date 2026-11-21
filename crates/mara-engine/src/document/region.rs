@@ -987,6 +987,7 @@ impl<'t> Reader<'t> {
         });
     }
 
+    // @mara implements REQ-INVALID-ROWS-REPORTED
     /// The rows of the metadata table `table` that have a key and a value, reporting malformed
     /// ones, with the text of each value and where its pieces start. `next` is where the block
     /// after the table

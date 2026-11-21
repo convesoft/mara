@@ -92,6 +92,7 @@ fn template(name: &str) -> Option<&'static [(&'static str, &'static str)]> {
     }
 }
 
+// @mara implements REQ-PROJECT-INIT
 /// Writes the template's files into the working directory or the one `--project` names,
 /// which is created when missing. Refuses to overwrite any file, and reports those it created.
 fn project_init(context: &mut Context, args: &Args) -> Result<Response, Failure> {

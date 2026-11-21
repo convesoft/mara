@@ -115,6 +115,7 @@ pub struct Location<'a> {
 }
 
 impl ScannedFile {
+    // @mara implements REQ-CODE-MARKER-LINKS
     /// Scans `contents` at the basic level for markers with the comment prefixes `prefixes`,
     /// and counts one code scan in `work`. The file is read as bytes in lines that end at a line
     /// feed.
@@ -155,6 +156,7 @@ impl ScannedFile {
         scanned
     }
 
+    // @mara implements REQ-CODE-MARKER-LINKS
     /// Scans `contents` at the grammar level, from what its grammar found in it (`syntax`), and
     /// counts one code scan in `work`. A comment starts where its node starts, and on each later
     /// line of the node at the line's first text: a marker there starts with one of `prefixes`,
@@ -420,6 +422,7 @@ pub struct CodeLinks {
 }
 
 impl CodeLinks {
+    // @mara implements REQ-CODE-MARKER-LINKS
     /// Resolves every marker of `layer` against `snapshot`: one pass over the markers, each
     /// looked up by hash. A project without a schema has no code links and only the markers
     /// whose words are malformed as problems.
@@ -586,6 +589,7 @@ pub struct CodeEdit {
     pub contents: Vec<u8>,
 }
 
+// @mara implements REQ-MINIMAL-REWRITE
 /// The edits that rename the ID `old_id` to `new_id` in every marker of `layer` that names it:
 /// only the ID's bytes change. A file with no such marker is not edited.
 ///

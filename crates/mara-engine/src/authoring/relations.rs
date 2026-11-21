@@ -12,6 +12,7 @@ use crate::validation;
 use crate::work::WorkCounts;
 use crate::write::{self, ReadBack, Splice, label};
 
+// @mara implements REQ-EDIT-RELATIONS
 /// Adds the row of relation `relation` from the item `source` to the item `target`: the
 /// relation's label and a canonical link (DES-RELATION-LINKS), after the last row of the
 /// source's table. Refused for an inverse name, a relation that the schema does not lead from
@@ -101,6 +102,7 @@ pub fn relation_add(
     })
 }
 
+// @mara implements REQ-EDIT-RELATIONS
 /// Removes each row of relation `relation` on the item `source` that links to the item `target`
 /// (REQ-EDIT-RELATIONS). Refused for an inverse name and when there is none.
 pub fn relation_remove(

@@ -428,6 +428,7 @@ fn wait_until_stopping(daemon: &Daemon) {
     }
 }
 
+// @mara implements REQ-READS-DURING-VALIDATION
 /// Accepts connections of this user, each on a thread of its own.
 fn accept(daemon: &Arc<Daemon>, listener: &UnixListener) {
     for stream in listener.incoming() {

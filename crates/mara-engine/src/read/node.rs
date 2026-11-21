@@ -318,6 +318,7 @@ impl RowPart {
 /// The smallest room that lets a page take part of a value or a line: one escaped character.
 const LEAST_ROOM: usize = 6;
 
+// @mara implements REQ-READ-NODE
 /// `get`: the node that `address` names ([`resolve`]), its metadata rows first, then its
 /// content, in consecutive pages of at most [`PAGE_BYTES`] of JSON. A line is cut only when it
 /// does not fit an empty page, and then at a character boundary; so is a row's value. A
@@ -442,6 +443,7 @@ fn line_starts(contents: &[u8], line: usize) -> Option<usize> {
     (line >= 1 && start < contents.len()).then_some(start)
 }
 
+// @mara implements REQ-BOUNDED-PAGES
 /// One page, at `cursor`, of a node's `rows` and then its `content`.
 fn page_of(
     node: NodeSummary,

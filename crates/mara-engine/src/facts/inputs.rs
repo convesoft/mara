@@ -76,6 +76,7 @@ impl fmt::Display for InputError {
     }
 }
 
+// @mara implements REQ-EXTERNAL-RECORDS-AS-SUPPLIED
 /// Checks the `supplied` inputs, each with its name, against the inputs a consumer lists:
 /// every listed input supplied once and nothing else, and every row's column count and values
 /// ([`check_rows`]). `complete` names the inputs that hold every record of their source; each

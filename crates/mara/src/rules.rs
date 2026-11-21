@@ -41,6 +41,7 @@ pub fn write_facts(dir: &Path, facts: &Facts, inputs: &Inputs) -> io::Result<()>
     Ok(())
 }
 
+// @mara implements REQ-EXTERNAL-RECORDS-AS-SUPPLIED
 /// The input that one `--input` argument supplies: `<name>=<value>` for one value inline, or
 /// `<name>=@<file>` for a JSON file of rows, relative to `base`, the directory the command runs
 /// in. A file that cannot be read or is not JSON refuses the request. Counts a file read.
@@ -134,6 +135,7 @@ impl Evaluations {
     }
 }
 
+// @mara implements REQ-PROJECT-AUTHORED-LOGIC
 /// Evaluates `run.program` with Soufflé as a child process, in a new private directory under
 /// the system's temporary directory that is removed when it ends: the parsed copies of the
 /// program's files, the facts and inputs it reads and the generated wrapper, run as
@@ -251,6 +253,7 @@ fn bounded_read(path: &Path) -> Vec<u8> {
     bytes
 }
 
+// @mara implements REQ-UNAVAILABLE-NOT-PARTIAL
 /// Starts Soufflé on the wrapper in `dir` and waits for it, at most the time limit: the one
 /// place where Mara starts a process. Its standard error goes to a file in `dir`. Without a
 /// console, so does its standard output, and its standard input is empty; with one, Soufflé

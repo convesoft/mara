@@ -106,6 +106,8 @@ impl fmt::Display for SelectError {
 
 impl std::error::Error for SelectError {}
 
+// @mara implements REQ-ONE-PROJECT-PER-OPERATION
+// @mara implements REQ-CONVERT-DIRECTIVE-CORPUS
 /// Selects the canonical project root: the directory `project` names, resolved from `start`,
 /// or else the nearest of `start` and its ancestors that is a project root. A 0.3.0 project is
 /// refused.

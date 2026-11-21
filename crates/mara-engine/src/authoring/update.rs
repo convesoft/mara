@@ -23,6 +23,8 @@ pub struct Update<'r> {
     pub body: Option<&'r str>,
 }
 
+// @mara implements REQ-UPDATE-ITEM
+// @mara implements REQ-STABLE-IDENTITY
 /// Replaces the title, the rows of each field given and the body of an item, and removes the rows
 /// of each field cleared, and nothing else (REQ-UPDATE-ITEM): its anchor, its `Type` and `ID`
 /// rows, its relations and every other row stay as they are.

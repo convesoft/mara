@@ -74,6 +74,8 @@ pub fn direct_mode(flag: bool) -> bool {
     flag || ci || no_daemon
 }
 
+// @mara implements REQ-FIRST-CALL-IN-PROCESS
+// @mara implements REQ-SAME-RESULT-ON-EVERY-HOST
 /// Runs the document operation `operation` for a client: through the daemon of this build when
 /// one runs, otherwise in-process after starting one. The work the daemon reports is added to
 /// `context.work`; the client adds none of its own to it.
@@ -337,6 +339,7 @@ fn start_daemon(cwd: PathBuf, project: Option<PathBuf>) {
     }
 }
 
+// @mara implements REQ-SAME-RESULT-ON-EVERY-HOST
 /// The daemon's answer to an operation request: the reply and the work counts of the request's
 /// session since its previous response, or a refusal, which runs nothing, when the request
 /// names no operation the daemon serves or carries arguments that the operation does not take.

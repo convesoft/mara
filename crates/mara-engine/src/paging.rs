@@ -69,6 +69,7 @@ pub fn fill(records: impl Iterator<Item = String>, limit: usize) -> Result<Fille
     fill_within(records, limit, ENVELOPE_BYTES)
 }
 
+// @mara implements REQ-BOUNDED-PAGES
 /// [`fill`] for a page whose JSON form holds at most `envelope` bytes besides its records, such
 /// as a result that repeats the node it reads or carries diagnostics.
 pub fn fill_within(

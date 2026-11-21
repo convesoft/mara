@@ -80,6 +80,7 @@ pub fn consume_explained(
     consume_with(generation, entry, supplied, complete, code, work, explain)
 }
 
+// @mara implements REQ-WORK-FOLLOWS-CHANGE
 /// The entry's program planned and its inputs checked as [`consume`] says, then run by `run`
 /// with the evaluation's key.
 fn consume_with<T>(

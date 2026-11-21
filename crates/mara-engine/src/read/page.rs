@@ -124,6 +124,7 @@ pub(crate) fn too_large(what: &str, path: &str, line: usize) -> ReadError {
     ReadError::TooLarge(Box::new(Diagnostic::error(TOO_LARGE, path, line, message)))
 }
 
+// @mara implements REQ-BOUNDED-PAGES
 /// The page that `paging` names of the result of `key`, of `total` records. `record` gives
 /// record `index` with its JSON form; a record that cannot fit an empty page fails the read
 /// with the error that `too_large` gives for it, and so does a head that leaves no room. Every

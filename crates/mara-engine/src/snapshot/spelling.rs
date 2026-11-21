@@ -19,6 +19,7 @@ pub const LONGEST_TOLERANT: usize = 18;
 /// The lengths of the query words allowed each number of edits.
 const TIERS: [(usize, RangeInclusive<usize>); 2] = [(1, 4..=7), (2, 8..=LONGEST_TOLERANT)];
 
+// @mara implements REQ-TYPO-TOLERANT-SEARCH
 /// The edits that a query word of `length` characters may be away from a word it matches: one
 /// from 4 to 7 characters, two from 8 to [`LONGEST_TOLERANT`], and none otherwise.
 pub fn edits_allowed(length: usize) -> usize {

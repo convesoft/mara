@@ -324,6 +324,7 @@ impl Build {
 }
 
 impl Evaluated {
+    // @mara implements REQ-WORK-FOLLOWS-CHANGE
     /// The outcome of `run`, whose key is `key`: one that an earlier run with that key and the
     /// same Soufflé executable left, else evaluated ([`rules::evaluate`]) without holding the
     /// store, so that no request waits for another's evaluation.

@@ -43,6 +43,7 @@ pub struct DocumentFix {
     pub repairs: Vec<Repair>,
 }
 
+// @mara implements REQ-ONE-FIX-OPERATION
 /// The repairs of every document of `snapshot` that has any, in path order. `new_mid` gives a
 /// new MID for each anchor that fix adds; one that an item of the snapshot or an earlier anchor
 /// already has is drawn again.

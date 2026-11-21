@@ -128,6 +128,7 @@ impl ServerHandler for Server {
         Ok(ListToolsResult::with_all_items(tools))
     }
 
+    // @mara implements REQ-CLI-MCP-PARITY
     /// Runs the tool's operation on the blocking pool. A failure, rejected arguments included,
     /// is a tool result with `isError`; an unknown tool is a protocol error.
     async fn call_tool(
@@ -187,6 +188,7 @@ fn find(name: &str) -> Option<(&'static Operation, Document)> {
     })
 }
 
+// @mara implements REQ-CLI-MCP-PARITY
 /// The tool of `operation`: its positional arguments and options as parameters, and `project`
 /// when the server is not bound to one.
 fn tool(operation: &Operation, project: bool) -> Tool {
@@ -239,6 +241,7 @@ fn parameter(kind: &str, repeatable: bool, help: &str) -> Value {
     }
 }
 
+// @mara implements REQ-CLI-MCP-PARITY
 /// The operation's arguments and the project of the call, from the tool's arguments, checked
 /// as the CLI checks its own. A null stands for a parameter left out, as clients that send
 /// every parameter write it.

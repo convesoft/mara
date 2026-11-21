@@ -82,6 +82,7 @@ fn input_keys(generation: &mara::inputs::Generation, evaluations: &[Hash]) -> Ve
     keys
 }
 
+// @mara implements REQ-REPORT-EVERY-PROBLEM
 /// Every problem of the project: configuration, schema, inventory, built-in checks, code
 /// markers (DES-CODE-READERS), programs and invariants.
 fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Failure> {
@@ -122,6 +123,7 @@ fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Fail
     respond(Report::new(diagnostics, key), &paths, args)
 }
 
+// @mara implements REQ-REPORT-EVERY-PROBLEM
 /// The problems of one item, named by its ID or MID, checked against the whole project. Code
 /// is listed, and read only when an invariant's program uses code links (DES-CODE-READERS); the
 /// problems of reading it are then the item's too.
@@ -211,6 +213,7 @@ fn schema_problems(project: &Project) -> Vec<Diagnostic> {
         .collect()
 }
 
+// @mara implements REQ-VALIDITY-COVERS-WHOLE-PROJECT
 /// The page that `args` ask for, in both forms, with the exit status of the whole report.
 fn respond(report: Report, paths: &[&str], args: &Args) -> Result<Response, Failure> {
     let page = report

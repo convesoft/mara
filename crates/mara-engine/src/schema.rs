@@ -69,6 +69,7 @@ impl Schema {
     }
 }
 
+// @mara implements REQ-SCHEMA-DEFINES-VOCABULARY
 /// Reads the contents of the schema file at `path`, relative to the project root. Every
 /// problem becomes a diagnostic. There is no schema when the file is not TOML or has another
 /// format version.

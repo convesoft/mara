@@ -84,6 +84,7 @@ impl<'s> ReadBack<'s> {
         }
     }
 
+    // @mara implements REQ-MINIMAL-REWRITE
     /// Applies `splices`, in byte order and not overlapping, to the document `old` and reads the
     /// result back, parsing contents that no document of this edit had before and counting the
     /// parse in `work` (DES-ITEM-WRITER). Refuses it unless the front matter is the same, every
@@ -264,6 +265,7 @@ pub fn table(rows: &[String], eol: &str) -> String {
     lines.join(eol)
 }
 
+// @mara implements REQ-SOURCE-IS-PUBLISHED-FORM
 /// The relation link from the document at `from` to the item with ID `id` and MID `mid` in the
 /// document at `to`, both relative to the project root (DES-RELATION-LINKS).
 pub fn link(id: &str, mid: &str, from: &str, to: &str) -> String {
@@ -307,6 +309,7 @@ pub fn relative(from: &str, to: &str) -> String {
     path
 }
 
+// @mara implements REQ-SOURCE-IS-PUBLISHED-FORM
 /// A complete item: the anchor of `mid`, the heading of `level` and `title`, the table of
 /// `rows` and `body`, whose line endings become `eol`. Neither starts nor ends with a line
 /// ending; [`insert`] places it in a document.

@@ -75,6 +75,8 @@ pub struct GateOutcome {
     pub items: Vec<ItemOutcome>,
 }
 
+// @mara implements REQ-PROGRAM-FAULTS-REPORTED
+// @mara implements REQ-UNAVAILABLE-NOT-PARTIAL
 /// Judges each of `items` by the rows of the gate `entry`'s relations whose first column is the
 /// item's MID: none in a subject relation, not applicable; any in a condition relation, failed;
 /// otherwise any in an unavailable relation, unavailable; otherwise passed. Each item lists the

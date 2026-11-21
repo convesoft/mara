@@ -313,6 +313,7 @@ impl Document {
 /// longer document is refused before it is read (DES-REGIONS).
 pub const MAX_DOCUMENT_BYTES: usize = u32::MAX as usize;
 
+// @mara implements REQ-SOURCE-IS-PUBLISHED-FORM
 /// Parses the contents of one document and counts one parse in `work`.
 pub fn parse(bytes: &[u8], work: &mut WorkCounts) -> Document {
     parse_within(bytes, MAX_DOCUMENT_BYTES, work)

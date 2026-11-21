@@ -153,6 +153,7 @@ impl Entry {
     }
 }
 
+// @mara implements REQ-PROJECT-AUTHORED-LOGIC
 /// Reads `[rules]` and the entry tables of the configuration's top level `root`. Every problem
 /// becomes a diagnostic, and an entry with one is left out.
 pub(super) fn read(file: &mut TomlFile, root: &Table) -> Option<Rules> {

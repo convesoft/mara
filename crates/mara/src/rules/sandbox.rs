@@ -21,6 +21,7 @@ pub(super) struct Sandbox {
 }
 
 impl Sandbox {
+    // @mara implements REQ-PROGRAMS-ONLY-COMPUTE
     /// The sandbox of Soufflé at `souffle` running in the private directory `dir`. Refuses,
     /// and the evaluation does not start, where the kernel has no Landlock or no seccomp
     /// filter, or Mara has no filter for the architecture (ADR-SANDBOX-REQUIRED in
@@ -94,6 +95,7 @@ impl Sandbox {
         Ok(())
     }
 
+    // @mara implements REQ-PROGRAMS-ONLY-COMPUTE
     /// Makes `command`'s child enter the sandbox after the other steps between fork and exec:
     /// every descriptor from 3 up marked close-on-exec, no-new-privileges, the Landlock
     /// domain, then the seccomp filter. A step that fails stops the child before `exec`, with

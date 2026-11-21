@@ -14,6 +14,7 @@ pub struct Exit {
     pub limit: Option<Limit>,
 }
 
+// @mara implements REQ-PROGRAM-FAULTS-REPORTED
 /// Whether a run of `program` evaluated it, from how Soufflé ended and what it printed, or the
 /// fault that makes the outcome unavailable: a compile diagnostic, a warning included, a stop
 /// at a limit, a failed exit, and anything else Soufflé prints on either stream, also with

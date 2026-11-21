@@ -44,6 +44,7 @@ use mara::project::{self, SelectError};
 use mara::session::Session;
 use mara::write::WriteError;
 
+// @mara implements REQ-CLI-MCP-PARITY
 /// Every operation, in the order the usage lists them.
 const OPERATIONS: &[Operation] = &[
     validate::PROJECT,
@@ -570,6 +571,7 @@ fn requested_json(arguments: &[OsString]) -> bool {
     json
 }
 
+// @mara implements REQ-CLI-MCP-PARITY
 /// The operation that `arguments` name, if any, and its checked arguments. Global options may
 /// stand anywhere; an operation's options follow its words.
 fn parse(arguments: &[OsString]) -> Result<(Option<&'static Operation>, Args), Failure> {

@@ -11,6 +11,7 @@ use crate::validation;
 use crate::work::WorkCounts;
 use crate::write::{self, ReadBack, label};
 
+// @mara implements REQ-DELETE-ITEM
 /// Removes the item that `address` names, with one separator next to it (DES-ITEM-WRITER),
 /// unless a relation or mention in another item or in narrative targets its MID, or a code
 /// marker of `code` names its ID (REQ-DELETE-ITEM, DES-CODE-READERS). The refusal has a

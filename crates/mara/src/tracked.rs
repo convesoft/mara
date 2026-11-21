@@ -194,6 +194,7 @@ impl Reads {
     }
 }
 
+// @mara implements REQ-NEVER-STALE
 /// Checks the regular file at `path`, whose metadata without following links is `metadata`, in
 /// a request that began at `now`. Reads and hashes it, counting one file read and one hash in
 /// `work`, unless the stat is unchanged and `previous` was settled or `reads` keeps it

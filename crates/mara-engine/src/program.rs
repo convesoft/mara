@@ -140,6 +140,7 @@ impl Location {
 }
 
 impl Refusal {
+    // @mara implements REQ-PROGRAM-FAULTS-REPORTED
     /// The error diagnostic of a refusal: a compile error's form, its message ending with the
     /// source line and a caret under the column (DES-RULE-EXECUTION in
     /// `docs/rules/evaluation.mara.md`).
@@ -278,6 +279,8 @@ impl Program {
     }
 }
 
+// @mara implements REQ-PROGRAMS-ONLY-COMPUTE
+// @mara implements REQ-PROJECT-AUTHORED-LOGIC
 /// Parses the declared program at `path` with every file it includes, resolves its types and
 /// admits it, or refuses it at the place the reading stopped. Every relation that `mara.dl`
 /// declares is checked as one that crosses the boundary.

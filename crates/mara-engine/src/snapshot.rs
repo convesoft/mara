@@ -440,6 +440,7 @@ impl Snapshot {
         });
     }
 
+    // @mara implements REQ-STABLE-IDENTITY
     /// Adds the edge of `link` when its fragment is a MID.
     fn add_edge(&mut self, document: usize, item: Option<usize>, source: EdgeSource, link: &Link) {
         let Some(mid) = link.fragment.as_deref().filter(|fragment| is_mid(fragment)) else {

@@ -159,6 +159,8 @@ impl<'s, 'w> Checker<'s, 'w> {
         }
     }
 
+    // @mara implements REQ-SCHEMA-DEFINES-VOCABULARY
+    // @mara implements REQ-INTERRUPTED-EDIT-LOSES-NOTHING
     /// The identity of the item at `index`, and each of its rows.
     fn item(&mut self, index: usize) {
         self.work.check_steps += 1;
@@ -222,6 +224,7 @@ impl<'s, 'w> Checker<'s, 'w> {
         }
     }
 
+    // @mara implements REQ-INVALID-ROWS-REPORTED
     /// One row of the item at `index`, whose type is `kind`, declared as `declared`, and how
     /// it repeats an earlier row.
     fn row(
@@ -392,6 +395,8 @@ impl<'s, 'w> Checker<'s, 'w> {
         }
     }
 
+    // @mara implements REQ-SCHEMA-DEFINES-VOCABULARY
+    // @mara implements REQ-INTERRUPTED-EDIT-LOSES-NOTHING
     /// The target, path and link text of one edge, and for a relation the target's type.
     fn edge(&mut self, edge: &'s Edge) {
         self.work.check_steps += 1;

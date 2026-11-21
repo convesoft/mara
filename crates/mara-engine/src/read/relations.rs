@@ -77,6 +77,8 @@ pub struct RelationPage {
     pub page: Page<Connection>,
 }
 
+// @mara implements REQ-DIRECT-NEIGHBOURS
+// @mara implements REQ-CODE-MARKER-LINKS
 /// `relation list`: the connections one hop from the item or narrative unit that `address`
 /// names. For an item, its outgoing relations in row order and its mentions in source order,
 /// then the relations and mentions that target it in path and source order, a relation under
@@ -372,6 +374,7 @@ fn outgoing(
     );
 }
 
+// @mara implements REQ-STABLE-IDENTITY
 /// A connection to each item that `link`, in the document at `document`, targets, or to its MID
 /// when no item has it.
 fn targets(

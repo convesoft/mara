@@ -261,6 +261,7 @@ impl QueryWord {
         QueryWord { text, chars, edits }
     }
 
+    // @mara implements REQ-TYPO-TOLERANT-SEARCH
     /// The nodes whose text holds this word exactly, from the token index, or within its edits,
     /// outside the ID and MID, from the candidates of the vocabulary index.
     fn nodes(&self, snapshot: &Snapshot) -> HashMap<Node, WordMatch> {
@@ -304,6 +305,8 @@ struct Hit {
     at: Option<usize>,
 }
 
+// @mara implements REQ-SEARCH-ITEMS-AND-NARRATIVE
+// @mara implements REQ-SEARCH-RANKING
 /// Search: the items and narrative units whose own text holds every word of `query`, exactly
 /// or within the allowed edits, that `filters` match. Nodes that match every word exactly come
 /// first; within each group, nodes with more words matched in the ID, title or a heading, then
@@ -522,6 +525,7 @@ pub(crate) fn too_large(node: &NodeSummary) -> ReadError {
     ReadError::TooLarge(Box::new(Diagnostic::error(TOO_LARGE, path, line, message)))
 }
 
+// @mara implements REQ-LIST-ITEMS
 /// `item list`: a summary of each item that `filters` match, in path and source order.
 pub fn item_list(
     documents: &Documents<'_>,

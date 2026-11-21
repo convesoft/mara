@@ -41,6 +41,7 @@ pub struct Explained {
     pub settled: bool,
 }
 
+// @mara implements REQ-EXPLAIN-OUTCOMES
 /// Runs `run.program` once in provenance mode: when the evaluation ends, `select` chooses the
 /// rows to explain from its outputs, and each is explained in turn. A fault of the evaluation
 /// leaves it without rows, as [`super::evaluate`] reports it; the console failing after the
