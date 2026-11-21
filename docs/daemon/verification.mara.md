@@ -24,6 +24,7 @@ A call is served in-process when its stats line holds the counts of a cold reque
 | The test holds the build's daemon lock as a starting daemon holds it; a read through the CLI | Returns its result while the lock is still held, so that no daemon of the test can have answered it |
 | Ten reads sent at once with no daemon running | Each returns the result of CLI direct mode; once all have exited and `mara daemon status` reports a daemon, it is the only daemon of the test |
 | `CI` set, `MARA_NO_DAEMON=1` set, and the direct-mode flag, each with no daemon running and with one | Served in-process; no daemon of the test starts |
+| With a daemon running, a read whose option's value is the direct-mode flag's text, `item list --id --no-daemon`; then `project validate -- --no-daemon` | The read is served by the daemon with the result of direct mode; the second is rejected with `invalid-argument` as in direct mode |
 | The runtime directory's base naming no directory, or so long that the socket path would pass 108 bytes | Served in-process; no daemon of the test starts; nothing is created there |
 | A base of 60 bytes | As with the test's usual directory |
 | A daemon of the test killed with SIGKILL, leaving its socket | The next call is served in-process and starts a new daemon, which serves the calls after it |

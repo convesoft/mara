@@ -462,11 +462,8 @@ fn args(operation: &Operation, request: &Value) -> Result<Args, String> {
             .chain(operation.options)
             .find(|option| option.name == name)
             .ok_or_else(|| format!("unknown option `{name}`"))?;
-        (option.check)(value)?;
-        if !option.repeatable && args.value(option.name).is_some() {
-            return Err(format!("`{name}` is given twice"));
-        }
-        args.options.push((option.name, value.to_owned()));
+        args.push(option, value)
+            .map_err(|reason| format!("`{name}`: {reason}"))?;
     }
     for pair in request["supplied"]
         .as_array()

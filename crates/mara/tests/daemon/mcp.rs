@@ -95,6 +95,16 @@ impl Server {
         self.send("tools/call", json!({"name": TOOL, "arguments": {}}));
     }
 
+    /// The text of a call of `tool` with `arguments`, and whether it is an error.
+    fn call_tool(&mut self, tool: &str, arguments: Value) -> (String, bool) {
+        self.send("tools/call", json!({"name": tool, "arguments": arguments}));
+        let response = self.receive(crate::RUN_WAIT).expect("an answer");
+        let result = &response["result"];
+        let text = result["content"][0]["text"].as_str();
+        let text = text.unwrap_or_else(|| panic!("{response}"));
+        (text.to_owned(), result["isError"] == true)
+    }
+
     /// The text of the call's result, which must succeed.
     pub(crate) fn result(&self, wait: Duration) -> Option<String> {
         let response = self.receive(wait)?;
@@ -219,4 +229,28 @@ fn a_server_in_direct_mode_reaches_and_starts_no_daemon() {
         server.finish();
     }
     assert_eq!(test.daemons(), [pid]);
+}
+
+/// DES-OPERATIONS: a parameter of an option that does not repeat takes one value, so two are
+/// rejected, by a server in direct mode and by one with a daemon to send its calls to alike.
+#[test]
+fn a_repeated_option_is_rejected_in_direct_mode_and_with_a_daemon_alike() {
+    let test = Test::new();
+    let project = test.project();
+    let repeated = json!({"limit": [1, 2]});
+    let mut direct = Server::start(&test, &project, &["--no-daemon"], &[]);
+    let (text, failed) = direct.call_tool(TOOL, repeated.clone());
+    direct.finish();
+    assert!(failed, "{text}");
+    let error: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(error["error"]["code"], "invalid-argument", "{text}");
+
+    let pid = test.start_in(&project, &[]);
+    test.wait_for_session(&project);
+    let mut server = Server::start(&test, &project, &[], &[]);
+    assert_eq!(server.call_tool(TOOL, repeated), (text, true));
+    // The server does send its calls to that daemon.
+    let (direct_text, _) = self::direct(&test, &project);
+    assert_eq!(server.call_served_by(pid), direct_text);
+    server.finish();
 }

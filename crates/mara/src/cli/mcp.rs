@@ -280,8 +280,8 @@ fn args(
             };
             for value in values {
                 let value = scalar(option, value)?;
-                (option.check)(&value).map_err(|reason| rejected(format!("`{name}`: {reason}")))?;
-                args.options.push((option.name, value));
+                (args.push(option, &value))
+                    .map_err(|reason| rejected(format!("`{name}`: {reason}")))?;
             }
         } else if name == PROJECT.name && per_call {
             project = Some(PathBuf::from(string(name, value)?));

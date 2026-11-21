@@ -133,6 +133,97 @@ fn direct_mode_reaches_and_starts_no_daemon() {
     assert_eq!(test.daemons(), [pid]);
 }
 
+/// DES-OPERATIONS: a command line means what it means in direct mode when the daemon serves it.
+/// The direct-mode flag's text as an option's value is that value, and an option that does not
+/// repeat, given twice, is rejected by the CLI before it sends a request, and the daemon refuses
+/// a request that repeats it.
+#[test]
+fn arguments_mean_the_same_through_the_daemon_as_in_direct_mode() {
+    use mara::daemon::{PROTOCOL_VERSION, read_frame, write_frame};
+    let test = Test::new();
+    let project = test.project();
+    let pid = test.start_in(&project, &[]);
+    test.wait_for_session(&project);
+
+    // Served by the daemon (VER-DAEMON-START): the first call reports the opening of the
+    // session; the same request again on unchanged files reports no work, which direct mode
+    // never does.
+    let value: &[&str] = &[
+        "--debug-stats",
+        "--format",
+        "json",
+        "item",
+        "list",
+        "--id",
+        "--no-daemon",
+    ];
+    let direct = test.direct(&project, value);
+    assert!(!crate::nothing(&crate::stats(&direct)), "{direct:?}");
+    thread::sleep(Duration::from_secs(2));
+    assert_direct_but_counts(&test.run_in(&project, value, &[]), &direct);
+    thread::sleep(Duration::from_secs(2));
+    let served = test.run_in(&project, value, &[]);
+    assert_direct_but_counts(&served, &direct);
+    assert!(crate::nothing(&crate::stats(&served)), "{served:?}");
+
+    let rejected: [&[&str]; 2] = [
+        &[
+            "--format", "json", "item", "list", "--limit", "1", "--limit", "2",
+        ],
+        &[
+            "--format",
+            "json",
+            "project",
+            "validate",
+            "--",
+            "--no-daemon",
+        ],
+    ];
+    for args in rejected {
+        let direct = test.direct(&project, args);
+        assert_eq!(direct.status.code(), Some(2), "{direct:?}");
+        assert_eq!(direct.json()["error"]["code"], "invalid-argument");
+        assert_eq!(test.in_process(pid, &project, args, &[]), direct);
+    }
+
+    // The daemon checks a request's arguments again by the same rule, and refuses one that
+    // repeats `--limit` without running it.
+    let request = json!({
+        "version": PROTOCOL_VERSION,
+        "build": crate::build_key(),
+        "request": "operation",
+        "words": ["item", "list"],
+        "arguments": [],
+        "options": [["limit", "1"], ["limit", "2"]],
+        "supplied": [],
+        "project": null,
+        "cwd": project,
+        "umask": 0o022,
+        "temp_dir": test.path(),
+        "json": true,
+    });
+    let (socket, _) = test.paths_of(&mara());
+    let mut stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
+    write_frame(&mut stream, request.to_string().as_bytes()).unwrap();
+    let answer = loop {
+        let frame = read_frame(&mut stream).unwrap().expect("an answer");
+        let frame: Value = serde_json::from_slice(&frame).unwrap();
+        if frame["working"] != true {
+            break frame;
+        }
+    };
+    assert_eq!(answer["error"], "malformed-request", "{answer}");
+    let reason = "`limit`: given twice, but it takes one value";
+    assert_eq!(answer["message"], reason);
+    let cli = test.direct(&project, rejected[0]).json();
+    let message = cli["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains(&format!("`--{}", &reason[1..])),
+        "{message}"
+    );
+    assert_eq!(test.daemons(), [pid]);
+}
+
 #[test]
 fn without_a_runtime_directory_a_read_runs_in_process_and_creates_nothing() {
     let missing = Test::with_base(|dir| dir.join("missing"));

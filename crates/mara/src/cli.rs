@@ -270,9 +270,24 @@ pub struct Args {
     /// The inputs an MCP call passes as values ([`Kind::Inputs`]); the CLI gives them as
     /// option values.
     supplied: Vec<(String, Supplied)>,
+    /// Whether the CLI read the direct-mode flag (DES-DAEMON-LIFECYCLE).
+    no_daemon: bool,
 }
 
 impl Args {
+    /// Adds `value` of `option`, which the CLI, the daemon and MCP all check this way
+    /// (DES-OPERATIONS): the option's own check, then a value of an option that does not
+    /// repeat given before. The reason it is rejected names no option: each caller names it as
+    /// its request does.
+    pub fn push(&mut self, option: &Opt, value: &str) -> Result<(), String> {
+        (option.check)(value)?;
+        if !option.repeatable && self.value(option.name).is_some() {
+            return Err("given twice, but it takes one value".to_owned());
+        }
+        self.options.push((option.name, value.to_owned()));
+        Ok(())
+    }
+
     /// The value of the option `name`, if given.
     pub fn value(&self, name: &str) -> Option<&str> {
         self.values(name).next()
@@ -506,9 +521,7 @@ pub fn run(arguments: &[OsString], work: &mut WorkCounts) -> u8 {
                 now: SystemTime::now(),
                 project: args.value(PROJECT.name).map(PathBuf::from),
                 cwd: working_directory(),
-                direct: client::direct_mode(
-                    arguments.iter().any(|argument| argument == "--no-daemon"),
-                ),
+                direct: client::direct_mode(args.no_daemon),
                 caller,
                 session: None,
             };
@@ -578,6 +591,7 @@ fn parse(arguments: &[OsString]) -> Result<(Option<&'static Operation>, Args), F
                 if inline.is_some() {
                     return Err(Failure::rejected(format!("`--{name}` takes no value")));
                 }
+                args.no_daemon |= name == NO_DAEMON;
                 continue;
             }
             let own = operation.map_or(&[][..], |operation| operation.options);
@@ -606,12 +620,8 @@ fn parse(arguments: &[OsString]) -> Result<(Option<&'static Operation>, Args), F
                     }
                 },
             };
-            (option.check)(value)
+            args.push(option, value)
                 .map_err(|reason| Failure::rejected(format!("`--{name}`: {reason}")))?;
-            if !option.repeatable && args.value(option.name).is_some() {
-                return Err(Failure::rejected(format!("`--{name}` is given twice")));
-            }
-            args.options.push((option.name, value.to_owned()));
         } else if argument.starts_with('-') {
             return Err(Failure::rejected(format!("unknown option `{argument}`")));
         } else if let Some(operation) = operation {
@@ -761,7 +771,11 @@ mod tests {
             ),
             (
                 "project validate --limit 1 --limit 2",
-                "`--limit` is given twice",
+                "`--limit`: given twice, but it takes one value",
+            ),
+            (
+                "--format json project validate --format json",
+                "`--format`: given twice",
             ),
             (
                 "project validate --cursor x",
@@ -773,10 +787,30 @@ mod tests {
             ),
             ("--debug-stats=1", "takes no value"),
             ("--no-daemon=1", "`--no-daemon` takes no value"),
+            ("project validate -- --no-daemon", "unknown option `--`"),
         ] {
             let message = rejected(text);
             assert!(message.contains(expected), "{text:?}: {message}");
         }
+    }
+
+    /// Direct mode comes from the parsed flag, wherever it stands, and never from an option's
+    /// value that reads as the flag.
+    #[test]
+    fn reads_the_direct_mode_flag_only_where_it_is_a_flag() {
+        for (text, flag) in [
+            ("--no-daemon item list", true),
+            ("item list --no-daemon --limit 2", true),
+            ("item list", false),
+            ("item list --path --no-daemon", false),
+            ("item list --path=--no-daemon", false),
+            ("query view v --input x=--no-daemon", false),
+        ] {
+            let (_, args) = parse(&arguments(text)).unwrap();
+            assert_eq!(args.no_daemon, flag, "{text:?}");
+        }
+        let (_, args) = parse(&arguments("item list --path --no-daemon")).unwrap();
+        assert_eq!(args.value("path"), Some("--no-daemon"));
     }
 
     #[test]
