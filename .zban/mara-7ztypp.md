@@ -29,3 +29,6 @@ One line per decision made on the maintainer's behalf under the rule of 2026-11-
 
 - Orchestrator, 2026-11-20 (mara-s9gak4): a pinned `.wasm` that is valid WebAssembly but no tree-sitter grammar aborts the process inside the tree-sitter runtime. Rated exotic (only a pin whose checksum names such a file reaches it; ADR-GRAMMAR-TRUST-ON-FIRST-USE): the worker fixes it if small, otherwise states the limit in DES-GRAMMAR-ASSETS and files a backlog issue. Undo: do that backlog issue.
 - Orchestrator, 2026-11-20: mara-hk2arx is started before mara-jm5ecb and mara-s9gak4 are integrated; it rebases over both.
+
+- Orchestrator, 2026-11-21 (mara-gqvffn, review): a grammar load that ends after its 10 s limit keeps what it loaded: its thread parks and never tears its WebAssembly code down, as for a parse that does not answer. The worker had filed it as backlog (mara-dn4bkp); the reviewer judged that a loaded machine reaches the crash at exit, and the fix is two lines, so it is done in mara-gqvffn. Rests on ADR-GRAMMAR-WATCHDOG-THREAD and ADR-LIMIT-STOPS-NOT-CRASHES. Undo: let the late thread drop what it loaded and make exit safe another way.
+- Orchestrator, 2026-11-21 (mara-0x04mn): the agent guide gets a short code-links section, within VER-AGENT-GUIDE's 3,800 characters. Rests on REQ-CODE-MARKER-LINKS and DES-CODE-MARKERS. Undo: remove the section.
