@@ -121,7 +121,17 @@ pub fn invariants(
             limits,
         );
         outcome.keys.push(key);
-        match evaluations.evaluate(key, &run, work) {
+        // A session's request reads what an earlier request of the session ran
+        // (DES-DAEMON-SESSIONS).
+        let kept;
+        let evaluated = match &generation.evaluated {
+            Some(evaluated) => {
+                kept = evaluated.evaluate(key, &run, work);
+                &*kept
+            }
+            None => evaluations.evaluate(key, &run, work),
+        };
+        match evaluated {
             Ok(rows) => {
                 for entry in invariants {
                     let relation = &entry.relations()[0].name;

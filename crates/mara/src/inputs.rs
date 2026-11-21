@@ -13,12 +13,14 @@
 //! keeps one between requests does work only for what changed. The daemon keeps one per session
 //! and gives each request a view of it ([`Inputs::shared`]): the view checks and derives on the
 //! session's inputs, holding them only for that, and keeps what that check found for the rest
-//! of the request, so that an edit is computed and checked against the same contents.
+//! of the request, so that an edit is computed and checked against the same contents. After a
+//! write, the view gives the session what the write read back ([`Inputs::written`]).
 
 mod admit;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -37,8 +39,9 @@ use mara_engine::work::WorkCounts;
 
 use crate::grammar::{self, Grammar, ParseFailure};
 use crate::project::{Project, ProjectFiles, SYMBOLIC_LINK, SelectError, recognize};
-use crate::tracked::{self, Check, Kind, Listing, Reads, Tracked};
-use crate::write::{Basis, TEMPORARY_PREFIX, Version};
+use crate::session::{Deriving, Evaluated};
+use crate::tracked::{self, Check, Keep, Kind, Listing, Reads, Stat, Tracked};
+use crate::write::{self, Basis, FileWrite, TEMPORARY_PREFIX, Version, WriteError, WriteLock};
 
 pub use admit::{Inadmissible, NOT_AN_INPUT};
 
@@ -59,6 +62,11 @@ pub struct Inputs {
     snapshot: Option<Arc<Snapshot>>,
     /// The inputs that a view checks and derives on: those of a daemon's session.
     shared: Option<Arc<Mutex<Inputs>>>,
+    /// The outcomes of the session's evaluations, for a view.
+    evaluated: Option<Arc<Evaluated>>,
+    /// The session's background derivation, which a write served by a view keeps out of its
+    /// window ([`Inputs::apply`]).
+    deriving: Option<Arc<Deriving>>,
 }
 
 /// What the inventory found, by path relative to the project root.
@@ -115,6 +123,18 @@ pub struct Generation {
     /// With [`CodeReads::List`], the listing's problems that may hide code, for
     /// [`Inputs::scan_listed`].
     listed_unread: Vec<Diagnostic>,
+    /// For a request in a daemon's session, the outcomes of the session's evaluations, which
+    /// an evaluation reads before it runs Soufflé (DES-DAEMON-SESSIONS).
+    pub(crate) evaluated: Option<Arc<Evaluated>>,
+}
+
+/// A document that a write put on disk, as the session takes it ([`Inputs::written`]).
+#[derive(Debug)]
+struct Written {
+    absolute: PathBuf,
+    stat: Stat,
+    hash: Hash,
+    file: Arc<ParsedFile>,
 }
 
 impl Inputs {
@@ -129,6 +149,8 @@ impl Inputs {
             state: Arc::default(),
             snapshot: None,
             shared: None,
+            evaluated: None,
+            deriving: None,
         }
     }
 
@@ -136,11 +158,19 @@ impl Inputs {
     /// [`Inputs::generation`] check and derive on them, holding their lock only meanwhile, so a
     /// request never repeats work that another did and waits only for a check in progress. The
     /// view then answers [`Inputs::basis`] and [`Inputs::admits`] from what its own check found,
-    /// whatever later requests find.
-    pub fn shared(shared: Arc<Mutex<Inputs>>) -> Inputs {
+    /// whatever later requests find. Its generations carry `evaluated`, the outcomes of the
+    /// session's evaluations, and its writes keep `deriving`, the session's background
+    /// derivation, out of their window ([`Inputs::apply`]).
+    pub fn shared(
+        shared: Arc<Mutex<Inputs>>,
+        evaluated: Arc<Evaluated>,
+        deriving: Arc<Deriving>,
+    ) -> Inputs {
         let root = lock(&shared).root.clone();
         Inputs {
             shared: Some(shared),
+            evaluated: Some(evaluated),
+            deriving: Some(deriving),
             ..Inputs::new(root)
         }
     }
@@ -177,26 +207,28 @@ impl Inputs {
     pub fn project(&mut self, now: SystemTime, work: &mut WorkCounts) -> Arc<Project> {
         if let Some(shared) = self.shared.clone() {
             let mut shared = lock(&shared);
-            let project = shared.project_for(self.request, now, work);
+            let project = shared.project_for(self.request, now, work, Keep::None);
             self.adopt(&shared);
             return project;
         }
-        self.project_for(self.request, now, work)
+        self.project_for(self.request, now, work, Keep::None)
     }
 
-    /// [`Inputs::project`] for the request numbered `request`.
+    /// [`Inputs::project`] for the request numbered `request`, keeping unsettled files as
+    /// `keep` says.
     fn project_for(
         &mut self,
         request: u64,
         now: SystemTime,
         work: &mut WorkCounts,
+        keep: Keep,
     ) -> Arc<Project> {
         if let Some((loaded, project)) = &self.project
             && *loaded == request
         {
             return Arc::clone(project);
         }
-        self.reads = Reads::default();
+        self.reads = Reads::new(keep);
         let project = self
             .files
             .load(self.root.clone(), now, work, &mut self.reads);
@@ -351,12 +383,14 @@ impl Inputs {
         let mut generation = match self.shared.clone() {
             Some(shared) => {
                 let mut shared = lock(&shared);
-                let generation = shared.generation_for(self.request, now, work, listing);
+                let derivation = Derivation::Request(listing);
+                let generation = shared.generation_for(self.request, now, work, derivation);
                 self.adopt(&shared);
                 generation
             }
             None => {
-                let generation = self.generation_for(self.request, now, work, listing);
+                let derivation = Derivation::Request(listing);
+                let generation = self.generation_for(self.request, now, work, derivation);
                 // A generation ends its request: the next call on this value begins another.
                 self.request = next_request();
                 generation
@@ -368,25 +402,125 @@ impl Inputs {
             generation.diagnostics.extend(diagnostics);
             (generation.diagnostics).sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
         }
+        generation.evaluated.clone_from(&self.evaluated);
         generation
     }
 
-    /// [`Inputs::generation`] for the request numbered `request`.
+    /// [`Inputs::snapshot`] as the daemon's background derivation after a watched change does it
+    /// (DES-DAEMON-SESSIONS), on a session's view: a file whose stat is that of its last check
+    /// and that a check at `now` would still leave unsettled is not read again. Such a read
+    /// could not settle it, so the next request's own check reads it all the same; that check,
+    /// never this one, finds an edit made in the timestamp tick of the last (REQ-NEVER-STALE).
+    /// The configuration and the schema are kept alike. `publish` gets the work done while the
+    /// session's inputs are still held, so that it reaches the response of the next request
+    /// that uses what this derived.
+    pub fn rederive(&mut self, now: SystemTime, publish: impl FnOnce(&WorkCounts)) {
+        let derivation = Derivation::Background;
+        let mut work = WorkCounts::default();
+        match self.shared.clone() {
+            Some(shared) => {
+                let mut shared = lock(&shared);
+                drop(shared.generation_for(self.request, now, &mut work, derivation));
+                publish(&work);
+            }
+            None => {
+                drop(self.generation_for(self.request, now, &mut work, derivation));
+                self.request = next_request();
+                publish(&work);
+            }
+        }
+    }
+
+    /// Writes the edit `files` into the project that `lock` locks ([`write::apply`]), in the
+    /// request that began at `now`. `parsed` holds the read-back parse of each document of the
+    /// edit, which a session's view then hands over ([`Inputs::written`]). From before the
+    /// first rename until that hand-over, the session's background derivation does not run: one
+    /// in progress is waited for, and the next waits for the hand-over, so that none reads and
+    /// parses a file that the hand-over brings with its read-back parse.
+    pub fn apply(
+        &self,
+        lock: &WriteLock,
+        files: &[FileWrite],
+        parsed: impl IntoIterator<Item = (String, ParsedFile)>,
+        now: SystemTime,
+        work: &mut WorkCounts,
+    ) -> Result<(), WriteError> {
+        let _window = self.deriving.as_ref().map(Deriving::window);
+        write::apply(lock, files, work)?;
+        self.written(parsed, now, work);
+        Ok(())
+    }
+
+    /// After the renames of a write that the request which began at `now` made, on a session's
+    /// view: gives the session `files`, each document the write put on disk with its read-back
+    /// parse (ADR-READ-BACK-EVERY-EDIT), and derives the session's snapshot from them
+    /// (DES-WRITE-PROCEDURE step 4). Hashes each file's contents, counting one hash and no file
+    /// read, and parses nothing; every other input whose stat is that of its last check is kept
+    /// without reading it, since the write changed none ([`Keep::Unchanged`]). Each file's stat is taken now but recorded as checked at
+    /// `now`, before the renames, so the next check reads and hashes it again until a check
+    /// settles it (DES-INPUTS-AND-KEYS): a change made by another program after the rename is
+    /// never taken for the written contents. A file that is no longer a regular file is left
+    /// to the next check. Outside a session it does nothing: a direct CLI call derives nothing
+    /// after the renames (ADR-NO-REDERIVATION-IN-CLI).
+    fn written(
+        &self,
+        files: impl IntoIterator<Item = (String, ParsedFile)>,
+        now: SystemTime,
+        work: &mut WorkCounts,
+    ) {
+        let Some(shared) = self.shared.clone() else {
+            return;
+        };
+        let mut written = Vec::new();
+        for (path, file) in files {
+            let absolute = self.root.join(path);
+            let Ok(metadata) = fs::symlink_metadata(&absolute) else {
+                continue;
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+            written.push(Written {
+                absolute,
+                stat: Stat::of(&metadata),
+                hash: Hash::of_file(&file.contents, work),
+                file: Arc::new(file),
+            });
+        }
+        let derivation = Derivation::Written(written);
+        drop(lock(&shared).generation_for(self.request, now, work, derivation));
+    }
+
+    /// [`Inputs::generation`] for the request numbered `request`, deriving as `derivation`
+    /// says.
     fn generation_for(
         &mut self,
         request: u64,
         now: SystemTime,
         work: &mut WorkCounts,
-        code: CodeReads,
+        derivation: Derivation,
     ) -> Generation {
-        let project = self.project_for(request, now, work);
+        let (code, keep, written) = match derivation {
+            Derivation::Request(code) => (code, Keep::None, Vec::new()),
+            Derivation::Background => (CodeReads::None, Keep::Unsettleable, Vec::new()),
+            Derivation::Written(written) => (CodeReads::None, Keep::Unchanged, written),
+        };
+        let project = self.project_for(request, now, work, keep);
+        self.reads.keep = keep;
         // Copied only while a view of an earlier check still holds it.
         let previous = Arc::unwrap_or_clone(std::mem::take(&mut self.state));
+        for file in &written {
+            let contents = Arc::from(&*file.file.contents);
+            (self.reads).insert(file.absolute.clone(), file.stat, file.hash, contents);
+        }
         let reads = &mut self.reads;
         let config = &project.config;
         let mut grammar_problems = Vec::new();
         let code = Code::new(config, code, &previous, &mut grammar_problems);
         let mut walk = Walk::new(&self.root, config, code, previous, now, work, reads);
+        for file in written {
+            walk.parsed.insert(DocumentKey::new(file.hash), file.file);
+        }
         walk.diagnostics.extend(grammar_problems);
         walk.run();
         let Walk {
@@ -433,8 +567,19 @@ impl Inputs {
             code: layer,
             code_paths,
             listed_unread,
+            evaluated: None,
         }
     }
+}
+
+/// What a derivation of the inputs does.
+enum Derivation {
+    /// A request's, with code files as [`CodeReads`] says.
+    Request(CodeReads),
+    /// The daemon's background derivation ([`Inputs::rederive`]).
+    Background,
+    /// After a write ([`Inputs::written`]): the documents it wrote are not read again.
+    Written(Vec<Written>),
 }
 
 /// Reads, hashes and scans the code files that `generation` listed, against `previous`, the
@@ -656,6 +801,13 @@ impl<'w> Walk<'w> {
         }
     }
 
+    /// Checks the file at `absolute` against `previous` ([`tracked::check`]).
+    fn check<T>(&mut self, absolute: &Path, previous: Option<Tracked<T>>) -> io::Result<Check<T>> {
+        let metadata = fs::symlink_metadata(absolute)?;
+        let (now, work, reads) = (self.now, &mut *self.work, &mut *self.reads);
+        tracked::check(absolute, &metadata, previous, now, work, reads, false)
+    }
+
     /// Lists the project root and every directory below it in which a pattern can match.
     fn run(&mut self) {
         let at = self.patterns.start();
@@ -832,10 +984,7 @@ impl<'w> Walk<'w> {
         let previous = self.previous.code.remove(&path).filter(|tracked| {
             tracked.value.key == MarkerKey::new(self.code.keys[language], tracked.hash)
         });
-        let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
-            let (now, work, reads) = (self.now, &mut *self.work, &mut *self.reads);
-            tracked::check(&absolute, &metadata, previous, now, work, reads, false)
-        });
+        let checked = self.check(&absolute, previous);
         let tracked = match checked {
             Ok(Check::Kept(tracked)) => tracked,
             Ok(Check::Read(read)) => {
@@ -955,10 +1104,7 @@ impl<'w> Walk<'w> {
         let path = join(directory, ".gitignore");
         let absolute = self.root.join(&path);
         let previous = self.previous.gitignores.remove(directory);
-        let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
-            let (now, work, reads) = (self.now, &mut *self.work, &mut *self.reads);
-            tracked::check(&absolute, &metadata, previous, now, work, reads, false)
-        });
+        let checked = self.check(&absolute, previous);
         let tracked = match checked {
             Ok(Check::Kept(tracked)) => tracked,
             Ok(Check::Read(read)) => {
@@ -988,10 +1134,7 @@ impl<'w> Walk<'w> {
     fn document(&mut self, path: String) {
         let absolute = self.root.join(&path);
         let previous = self.previous.documents.remove(&path);
-        let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
-            let (now, work, reads) = (self.now, &mut *self.work, &mut *self.reads);
-            tracked::check(&absolute, &metadata, previous, now, work, reads, false)
-        });
+        let checked = self.check(&absolute, previous);
         let tracked = match checked {
             Ok(Check::Kept(tracked)) => tracked,
             Ok(Check::Read(mut read)) => {
@@ -1024,10 +1167,7 @@ impl<'w> Walk<'w> {
     fn program(&mut self, path: String) {
         let absolute = self.root.join(&path);
         let previous = self.previous.programs.remove(&path);
-        let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
-            let (now, work, reads) = (self.now, &mut *self.work, &mut *self.reads);
-            tracked::check(&absolute, &metadata, previous, now, work, reads, false)
-        });
+        let checked = self.check(&absolute, previous);
         let tracked = match checked {
             Ok(Check::Kept(tracked)) => tracked,
             Ok(Check::Read(mut read)) => {
@@ -1178,12 +1318,12 @@ mod tests {
         let mut work = WorkCounts::default();
         let now = SystemTime::now();
         let hash = |session: &Mutex<Inputs>| lock(session).state.code["src/lib.rs"].hash;
-        let first =
-            Inputs::shared(Arc::clone(&session)).generation(now, &mut work, CodeReads::Scan);
+        let first = Inputs::shared(Arc::clone(&session), Arc::default(), Arc::default())
+            .generation(now, &mut work, CodeReads::Scan);
         let read_a = hash(&session);
         // A request scans B without the lock; B is replaced by C before it gives back.
         fs::write(&lib, "// @mara implements REQ-B\n").unwrap();
-        let mut view = Inputs::shared(Arc::clone(&session));
+        let mut view = Inputs::shared(Arc::clone(&session), Arc::default(), Arc::default());
         let listed = view.generation(now, &mut work, CodeReads::List);
         let previous = lock(&session).state.code.clone();
         let (code, _, _) = scan(&root, &listed, previous, now, &mut work);
@@ -1192,7 +1332,11 @@ mod tests {
         give_back(&session, &root, &code);
         assert_eq!(hash(&session), read_a, "the overtaken scan of B was kept");
         // The next request reads C.
-        let next = Inputs::shared(Arc::clone(&session)).generation(now, &mut work, CodeReads::Scan);
+        let next = Inputs::shared(Arc::clone(&session), Arc::default(), Arc::default()).generation(
+            now,
+            &mut work,
+            CodeReads::Scan,
+        );
         let markers = |generation: &Generation| format!("{:?}", generation.code.as_ref().unwrap());
         assert!(markers(&next).contains("REQ-CC"), "{}", markers(&next));
         assert!(markers(&first).contains("REQ-A"));
@@ -1211,7 +1355,8 @@ mod tests {
         let session = Arc::new(Mutex::new(Inputs::new(root.to_owned())));
         let mut work = WorkCounts::default();
         let mut documents = |now: SystemTime| {
-            let generation = Inputs::shared(Arc::clone(&session)).snapshot(now, &mut work);
+            let generation = Inputs::shared(Arc::clone(&session), Arc::default(), Arc::default())
+                .snapshot(now, &mut work);
             generation.snapshot.documents().len()
         };
         let now = SystemTime::now();

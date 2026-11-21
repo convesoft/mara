@@ -123,14 +123,60 @@ impl Read {
 
 /// The project files read so far in one request, by path, so that a file with another role as
 /// well, such as a schema that a pattern also matches as a document, is read and hashed once
-/// per request (DES-INPUTS-AND-KEYS).
+/// per request (DES-INPUTS-AND-KEYS); and which unsettled files a derivation that serves no
+/// request keeps without reading ([`Keep`]).
 #[derive(Debug, Default)]
-pub(crate) struct Reads(HashMap<PathBuf, (Stat, Hash, Arc<[u8]>)>);
+pub(crate) struct Reads {
+    files: HashMap<PathBuf, (Stat, Hash, Arc<[u8]>)>,
+    pub(crate) keep: Keep,
+}
+
+/// Which files whose stat is that of their last check, but which that check did not settle, a
+/// derivation keeps without reading them again. Only a derivation that answers no request
+/// keeps any (DES-DAEMON-SESSIONS): the next request's own check reads them, since their record
+/// stays unsettled (REQ-NEVER-STALE).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Keep {
+    /// None: a request's check.
+    #[default]
+    None,
+    /// Those that a check now would still leave unsettled, which reading could not settle: the
+    /// daemon's background derivation.
+    Unsettleable,
+    /// Every one: the derivation after a write, which re-derives only the files it wrote.
+    Unchanged,
+}
+
+impl Reads {
+    /// Whether an unsettled file of stat `stat`, unchanged since its last check, is kept
+    /// without reading at `now`.
+    fn keeps(&self, stat: &Stat, now: SystemTime) -> bool {
+        match self.keep {
+            Keep::None => false,
+            Keep::Unsettleable => !stat.settled_at(now),
+            Keep::Unchanged => true,
+        }
+    }
+
+    /// Reads of a request with the policy `keep`.
+    pub(crate) fn new(keep: Keep) -> Reads {
+        Reads {
+            files: HashMap::new(),
+            keep,
+        }
+    }
+
+    /// Records `contents`, with hash `hash`, as those of the file at `path` while it has the
+    /// stat `stat`, as a read of this request would.
+    pub(crate) fn insert(&mut self, path: PathBuf, stat: Stat, hash: Hash, contents: Arc<[u8]>) {
+        self.files.insert(path, (stat, hash, contents));
+    }
+}
 
 /// Checks the regular file at `path`, whose metadata without following links is `metadata`, in
 /// a request that began at `now`. Reads and hashes it, counting one file read and one hash in
-/// `work`, unless `previous` was settled and the stat is unchanged, or `reads` holds the same
-/// file read in this request. With `share`, what it reads joins `reads`. Contents that hash as
+/// `work`, unless the stat is unchanged and `previous` was settled or `reads` keeps it
+/// ([`Keep`]), or `reads` holds the same file read in this request. With `share`, what it reads joins `reads`. Contents that hash as
 /// before keep the previous value.
 pub(crate) fn check<T>(
     path: &Path,
@@ -143,7 +189,10 @@ pub(crate) fn check<T>(
 ) -> io::Result<Check<T>> {
     let stat = Stat::of(metadata);
     let previous = match previous {
-        Some(previous) if previous.stat == stat && stat.settled_at(previous.checked) => {
+        Some(previous)
+            if previous.stat == stat
+                && (stat.settled_at(previous.checked) || reads.keeps(&stat, now)) =>
+        {
             return Ok(Check::Kept(previous));
         }
         previous => previous,
@@ -151,7 +200,7 @@ pub(crate) fn check<T>(
     if !metadata.is_file() {
         return Err(io::Error::other("it is not a regular file"));
     }
-    let (hash, contents) = match reads.0.get(path) {
+    let (hash, contents) = match reads.files.get(path) {
         Some((read, hash, contents)) if *read == stat => (*hash, contents.to_vec()),
         _ => {
             let contents = fs::read(path)?;
@@ -159,7 +208,7 @@ pub(crate) fn check<T>(
             let hash = Hash::of_file(&contents, work);
             if share {
                 let shared = (stat, hash, Arc::from(contents.as_slice()));
-                reads.0.insert(path.to_owned(), shared);
+                reads.files.insert(path.to_owned(), shared);
             }
             (hash, contents)
         }

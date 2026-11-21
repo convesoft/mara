@@ -18,7 +18,7 @@ use std::fmt;
 use std::ops::Range;
 
 use crate::diagnostic::Diagnostic;
-use crate::document::{Item, label_name};
+use crate::document::{Document, Item, label_name};
 use crate::json::Object;
 use crate::read::{self, ItemSummary, Named, ReadError};
 use crate::schema::{FieldKind, Schema, TypeDecl};
@@ -101,6 +101,9 @@ pub struct WrittenFile {
     /// Relative to the project root.
     pub path: String,
     pub contents: Box<[u8]>,
+    /// The parse of `contents` by the read-back, which a host that keeps state between requests
+    /// keeps (DES-WRITE-PROCEDURE step 4).
+    pub document: Document,
     /// No document was there: the edit creates it.
     pub created: bool,
 }

@@ -3,9 +3,10 @@
 //! disk by the write procedure (DES-WRITE-PROCEDURE in `docs/authoring/writes.mara.md`).
 
 use std::fmt::Write as _;
+use std::time::SystemTime;
 
 use mara::inputs::{CodeReads, Generation, Inputs};
-use mara::write::{self, Basis, FileWrite, WriteLock};
+use mara::write::{Basis, FileWrite, WriteLock};
 use mara_engine::code::{self, CodeEdit};
 use mara_engine::diagnostic::Diagnostic;
 use mara_engine::document::{Document, Item, label_name};
@@ -101,6 +102,8 @@ struct Session {
     lock: WriteLock,
     inputs: Inputs,
     generation: Generation,
+    /// When the request began.
+    now: SystemTime,
 }
 
 impl Session {
@@ -126,6 +129,7 @@ impl Session {
             lock,
             inputs,
             generation,
+            now: context.now,
         })
     }
 
@@ -150,9 +154,9 @@ impl Session {
         let edits = steps;
         let snapshot = &self.generation.snapshot;
         let empty = ParsedFile::default();
-        let mut read_back = ReadBack::default();
+        let mut read_back = ReadBack::knowing(snapshot);
         let mut files = Vec::with_capacity(edits.len());
-        let mut written = Vec::with_capacity(edits.len());
+        let mut parsed: Vec<(String, ParsedFile)> = Vec::with_capacity(edits.len());
         for step in edits {
             let edit = match step {
                 Step::Document(edit) => edit,
@@ -182,16 +186,20 @@ impl Session {
                         ),
                     )
                 })?;
-            let ParsedFile { contents, document } = new;
             files.push(FileWrite {
                 basis: self.inputs.basis(&edit.path).unwrap_or(Basis::Absent),
                 path: edit.path.clone(),
-                contents: contents.into_vec(),
+                contents: new.contents.to_vec(),
             });
-            written.push((edit.path, document));
+            parsed.push((edit.path, new));
         }
+        let written = (parsed.iter())
+            .map(|(path, file)| (path.clone(), file.document.clone()))
+            .collect();
         if !files.is_empty() {
-            write::apply(&self.lock, &files, work)?;
+            // A session keeps what the edit read back (DES-WRITE-PROCEDURE step 4).
+            self.inputs
+                .apply(&self.lock, &files, parsed, self.now, work)?;
         }
         Ok(written)
     }

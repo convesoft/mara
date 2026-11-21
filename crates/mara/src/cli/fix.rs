@@ -8,6 +8,7 @@ use std::fmt::Write as _;
 
 use mara::write::{self, FileWrite, WriteLock};
 use mara_engine::fix::{self, Repair};
+use mara_engine::snapshot::ParsedFile;
 use mara_engine::write::ReadBack;
 
 use super::{Context, Failure, Operation, Response, Run, SUCCESS};
@@ -45,8 +46,9 @@ fn project_fix(context: &mut Context, _: &super::Args) -> Result<Response, Failu
             format!("cannot read random bits for a new MID: {error}"),
         )
     })?;
-    let mut read_back = ReadBack::default();
+    let mut read_back = ReadBack::knowing(snapshot);
     let mut files = Vec::with_capacity(plan.len());
+    let mut parsed: Vec<(String, ParsedFile)> = Vec::with_capacity(plan.len());
     let mut repairs: Vec<Repair> = Vec::new();
     for document_fix in plan {
         let document = &snapshot.documents()[document_fix.document];
@@ -67,12 +69,14 @@ fn project_fix(context: &mut Context, _: &super::Args) -> Result<Response, Failu
         files.push(FileWrite {
             path: path.clone(),
             basis: inputs.basis(path).expect("a document of the snapshot"),
-            contents: new.contents.into_vec(),
+            contents: new.contents.to_vec(),
         });
+        parsed.push((path.clone(), new));
         repairs.extend(document_fix.repairs);
     }
     if !files.is_empty() {
-        write::apply(&lock, &files, context.work)?;
+        // A session keeps what the edit read back (DES-WRITE-PROCEDURE step 4).
+        inputs.apply(&lock, &files, parsed, context.now, context.work)?;
     }
     Ok(respond(&repairs, files.len()))
 }

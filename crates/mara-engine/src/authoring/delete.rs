@@ -82,7 +82,7 @@ pub fn delete(
     let item = snapshot.item(index);
     let splice = write::remove(text, item.span.clone());
     let new = read_back(
-        &mut ReadBack::default(),
+        &mut ReadBack::knowing(snapshot),
         &document.path,
         &document.file,
         &[splice],
@@ -92,6 +92,7 @@ pub fn delete(
         files: vec![WrittenFile {
             path: document.path.clone(),
             contents: new.contents,
+            document: new.document,
             created: false,
         }],
         item: summary,

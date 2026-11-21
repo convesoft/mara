@@ -172,7 +172,7 @@ pub fn update(
         written = start..start + splices[at].text.len();
     }
     let old_problems = problems_of(path, file, item);
-    let new = read_back(&mut ReadBack::default(), path, file, &splices, work)?;
+    let new = read_back(&mut ReadBack::knowing(snapshot), path, file, &splices, work)?;
     // Every change comes after the anchor, which stays where it is.
     let found = own_item(path, &new, item.span.start, written, old_problems)?;
     let files = match *new.contents == *file.contents {
@@ -180,6 +180,7 @@ pub fn update(
         false => vec![WrittenFile {
             path: path.to_owned(),
             contents: new.contents.clone(),
+            document: new.document.clone(),
             created: false,
         }],
     };

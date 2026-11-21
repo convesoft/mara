@@ -7,7 +7,7 @@ use mara::write::{self, Basis, FileWrite, WriteLock};
 use mara_engine::authoring::{self, Create, EditError, Update, Written};
 use mara_engine::code::{CodeLayer, CodeLinks};
 use mara_engine::document::label_name;
-use mara_engine::snapshot::Snapshot;
+use mara_engine::snapshot::{ParsedFile, Snapshot};
 use mara_engine::work::WorkCounts;
 use mara_engine::write::{cell, heading, label};
 
@@ -335,8 +335,9 @@ fn relation_remove(context: &mut Context, args: &Args) -> Result<Response, Failu
 
 /// Runs the write procedure (DES-WRITE-PROCEDURE) for the edit that `compute` makes: takes the
 /// write lock, loads the project, refusing one whose configuration or schema has an error, and
-/// builds the snapshot; then puts the files of the edit on disk. Nothing is read, hashed, parsed
-/// or built after that (ADR-NO-REDERIVATION-IN-CLI).
+/// builds the snapshot; then puts the files of the edit on disk. In direct mode nothing is read,
+/// hashed, parsed or built after that (ADR-NO-REDERIVATION-IN-CLI); a daemon's session keeps the
+/// read-back parses of the files written (DES-WRITE-PROCEDURE step 4).
 fn edit(
     context: &mut Context,
     code: CodeReads,
@@ -378,7 +379,12 @@ fn edit(
         })
         .collect();
     if !files.is_empty() {
-        write::apply(&lock, &files, context.work)?;
+        let parsed = written.files.iter().map(|file| {
+            let contents = file.contents.clone();
+            let document = file.document.clone();
+            (file.path.clone(), ParsedFile { contents, document })
+        });
+        inputs.apply(&lock, &files, parsed, context.now, context.work)?;
     }
     Ok(written)
 }

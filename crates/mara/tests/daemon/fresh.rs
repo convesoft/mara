@@ -54,7 +54,7 @@ fn document(items: &[(u32, &str, &str)]) -> String {
 
 /// A project in `name/` of the test's directory with programs, a query with an input, code
 /// and two documents, its files settled.
-fn project(test: &Test, name: &str) -> PathBuf {
+pub(crate) fn project(test: &Test, name: &str) -> PathBuf {
     let root = test.path().join(name);
     for directory in [".mara/rules", "docs", "src"] {
         fs::create_dir_all(root.join(directory)).unwrap();
@@ -125,7 +125,7 @@ fn save_by_rename(path: &Path, contents: &str) {
 }
 
 /// A started daemon serving the project at `root`, whose session is open and settled.
-fn daemon(test: &Test, root: &Path) -> u32 {
+pub(crate) fn daemon(test: &Test, root: &Path) -> u32 {
     let pid = test.start_in(root, &[]);
     test.wait_for_session(root);
     for args in READS {

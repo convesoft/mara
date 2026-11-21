@@ -14,7 +14,7 @@ use std::ops::Range;
 
 use crate::diagnostic::Diagnostic;
 use crate::document::{self, Document, Item, Row, front_matter, lines};
-use crate::snapshot::ParsedFile;
+use crate::snapshot::{ParsedFile, Snapshot};
 use crate::work::WorkCounts;
 
 /// The bytes `range` of a file, to be replaced by `text`, and what the result must read as.
@@ -66,13 +66,24 @@ impl Misread {
 
 /// The read-back of the documents of one edit, before anything is written
 /// (ADR-READ-BACK-EVERY-EDIT): each distinct new content is parsed once, as VER-WORK-COUNTERS
-/// counts it.
+/// counts it, and not at all when a document of the snapshot the edit was computed against
+/// ([`ReadBack::knowing`]) has those contents (DES-INPUTS-AND-KEYS).
 #[derive(Debug, Default)]
-pub struct ReadBack {
+pub struct ReadBack<'s> {
     parsed: HashMap<Box<[u8]>, Document>,
+    known: Option<&'s Snapshot>,
 }
 
-impl ReadBack {
+impl<'s> ReadBack<'s> {
+    /// A read-back that takes the parse of a document of `snapshot` whose contents an edit
+    /// gives another document, instead of parsing them again.
+    pub fn knowing(snapshot: &'s Snapshot) -> ReadBack<'s> {
+        ReadBack {
+            parsed: HashMap::new(),
+            known: Some(snapshot),
+        }
+    }
+
     /// Applies `splices`, in byte order and not overlapping, to the document `old` and reads the
     /// result back, parsing contents that no document of this edit had before and counting the
     /// parse in `work` (DES-ITEM-WRITER). Refuses it unless the front matter is the same, every
@@ -90,7 +101,12 @@ impl ReadBack {
         let document = match self.parsed.get(&contents) {
             Some(document) => document.clone(),
             None => {
-                let document = document::parse(&contents, work);
+                let known = (self.known.map_or(&[][..], Snapshot::documents).iter())
+                    .find(|known| *known.file.contents == *contents);
+                let document = match known {
+                    Some(known) => known.file.document.clone(),
+                    None => document::parse(&contents, work),
+                };
                 self.parsed.insert(contents.clone(), document.clone());
                 document
             }

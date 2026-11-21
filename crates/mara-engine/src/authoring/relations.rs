@@ -77,7 +77,7 @@ pub fn relation_add(
     let splice = write::add_row(text, source_item, &name, &link);
     let splices = [splice];
     let new = read_back(
-        &mut ReadBack::default(),
+        &mut ReadBack::knowing(snapshot),
         &document.path,
         &document.file,
         &splices,
@@ -95,6 +95,7 @@ pub fn relation_add(
         files: vec![WrittenFile {
             path: document.path.clone(),
             contents: new.contents,
+            document: new.document,
             created: false,
         }],
     })
@@ -164,7 +165,7 @@ pub fn relation_remove(
         )));
     }
     let new = read_back(
-        &mut ReadBack::default(),
+        &mut ReadBack::knowing(snapshot),
         &document.path,
         &document.file,
         &splices,
@@ -178,6 +179,7 @@ pub fn relation_remove(
         files: vec![WrittenFile {
             path: document.path.clone(),
             contents: new.contents,
+            document: new.document,
             created: false,
         }],
     })

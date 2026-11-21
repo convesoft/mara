@@ -45,11 +45,15 @@ fn a_release_build_has_no_pause_points() {
         "the release build paused"
     );
     let binary = std::fs::read(env!("CARGO_BIN_EXE_mara")).expect("read the mara binary");
-    let variable = b"MARA_TEST_PAUSE";
-    assert!(
-        !binary
-            .windows(variable.len())
-            .any(|bytes| bytes == variable),
-        "the release binary holds the name of the pause variable"
-    );
+    // The pause points, and the report of the daemon's background derivations
+    // (DES-DAEMON-SESSIONS).
+    for variable in [&b"MARA_TEST_PAUSE"[..], b"MARA_TEST_DERIVED"] {
+        assert!(
+            !binary
+                .windows(variable.len())
+                .any(|bytes| bytes == variable),
+            "the release binary holds {}",
+            String::from_utf8_lossy(variable)
+        );
+    }
 }

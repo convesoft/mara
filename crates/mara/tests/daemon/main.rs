@@ -37,6 +37,7 @@ mod client;
 mod deadlines;
 mod fresh;
 mod mcp;
+mod warm;
 mod watches;
 mod writes;
 

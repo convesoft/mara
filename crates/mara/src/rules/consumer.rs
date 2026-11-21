@@ -51,8 +51,11 @@ pub fn consume(
     evaluations: &mut Evaluations,
     work: &mut WorkCounts,
 ) -> Result<Consumed, InputError> {
-    let evaluate =
-        |run: &Run, key, work: &mut WorkCounts| evaluations.evaluate(key, run, work).clone();
+    // A session's request reads what an earlier request of the session ran (DES-DAEMON-SESSIONS).
+    let evaluate = |run: &Run, key, work: &mut WorkCounts| match &generation.evaluated {
+        Some(evaluated) => (*evaluated.evaluate(key, run, work)).clone(),
+        None => evaluations.evaluate(key, run, work).clone(),
+    };
     consume_with(generation, entry, supplied, complete, code, work, evaluate)
 }
 

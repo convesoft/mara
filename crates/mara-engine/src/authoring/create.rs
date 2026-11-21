@@ -129,7 +129,13 @@ pub fn create(
         unreachable!("an insertion expects an item");
     };
     let start = splice.range.start + offset;
-    let new = read_back(&mut ReadBack::default(), path, &old, &[splice], work)?;
+    let new = read_back(
+        &mut ReadBack::knowing(snapshot),
+        path,
+        &old,
+        &[splice],
+        work,
+    )?;
     let written = own_item(path, &new, start, start..start + len, 0)?;
     let new_item = &new.document.items[written];
     let read: Vec<(String, String)> = new_item
@@ -148,6 +154,7 @@ pub fn create(
         files: vec![WrittenFile {
             path: path.to_owned(),
             contents: new.contents,
+            document: new.document,
             created: index.is_none(),
         }],
         relation: None,
