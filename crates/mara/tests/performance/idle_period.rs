@@ -1,7 +1,7 @@
 //! The case of DES-PERFORMANCE-HARNESS and ADR-TEST-IDLE-PERIOD (`docs/daemon/index.mara.md`)
 //! that finds no trace of the test idle period in a release build: a daemon started with the
-//! variable set keeps the session it opened past that period, and the binary does not hold the
-//! variable's name.
+//! variable set keeps the session it opened past that period. That the binary does not hold the
+//! variable's name is the one check of `pause_points.rs`.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -69,12 +69,4 @@ fn a_release_build_has_no_test_idle_period() {
     assert_eq!(daemons.running().len(), 1);
     mara(runtime, &["daemon", "stop"], &[]);
     assert!(daemons.running().is_empty(), "the daemon outlived `stop`");
-    let binary = std::fs::read(env!("CARGO_BIN_EXE_mara")).expect("read the mara binary");
-    let variable = b"MARA_TEST_IDLE_SECONDS";
-    assert!(
-        !binary
-            .windows(variable.len())
-            .any(|bytes| bytes == variable),
-        "the release binary holds the name of the idle variable"
-    );
 }

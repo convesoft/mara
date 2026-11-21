@@ -2,11 +2,11 @@
 //! pins, where its two files are fetched from, their checksum, and what declares the language in a
 //! configuration that lacks it.
 //!
-//! The shipped catalog, `catalog.toml`, is empty until its entries are decided (the open question
-//! of DES-GRAMMAR-ASSETS); a language it lacks needs `--repository`. Debug builds read another
-//! catalog from the file that `MARA_TEST_GRAMMAR_CATALOG` names, so that tests fetch from a
-//! loopback server of their own.
+//! The shipped catalog is `catalog.toml` (DES-GRAMMAR-ASSETS). Debug builds read another catalog
+//! from the file that `MARA_TEST_GRAMMAR_CATALOG` names, so that tests fetch from a loopback server
+//! of their own.
 
+use mara::hooks::{self, Hook};
 use mara_engine::config::{check_repository, is_grammar_version, is_language_name};
 use mara_engine::hash::Hash;
 
@@ -32,9 +32,7 @@ const BUILT_IN: &str = include_str!("catalog.toml");
 /// The catalog: the built-in one, or in a debug build the one that `MARA_TEST_GRAMMAR_CATALOG`
 /// names. An error is why it cannot be read.
 pub fn load() -> Result<Vec<Entry>, String> {
-    #[cfg(debug_assertions)]
-    if let Some(path) = std::env::var_os("MARA_TEST_GRAMMAR_CATALOG").filter(|p| !p.is_empty()) {
-        let path = std::path::PathBuf::from(path);
+    if let Some(path) = hooks::path(Hook::GrammarCatalog) {
         let text = std::fs::read_to_string(&path)
             .map_err(|error| format!("cannot read the test catalog {}: {error}", path.display()))?;
         return parse(&text).map_err(|why| format!("the test catalog {}: {why}", path.display()));

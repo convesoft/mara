@@ -17,6 +17,7 @@ use mara_engine::diagnostic::Diagnostic;
 use mara_engine::work::WorkCounts;
 
 use crate::caller;
+use crate::hooks::{self, Hook};
 use crate::project::SYMBOLIC_LINK;
 use crate::tracked::{self, Check, Reads, Tracked};
 
@@ -261,7 +262,8 @@ pub fn apply(
         );
     }
     let first = files.first().map_or("", |file| file.path.as_str());
-    pause(None).map_err(|error| Refusal::Io(error).into_error(first, &[], None))?;
+    hooks::pause(Hook::Pause, "")
+        .map_err(|error| Refusal::Io(error).into_error(first, &[], None))?;
     let mut checked = Vec::with_capacity(files.len());
     for file in files {
         let target = Target::new(&lock.root, &file.path);
@@ -411,7 +413,7 @@ impl<'r> Target<'r> {
                 handle.set_permissions(mode)?;
             }
             handle.sync_all()?;
-            pause(Some(self.path))
+            hooks::pause(Hook::Pause, self.path)
         })();
         drop(handle);
         written.map_err(|error| removed(Refusal::Io(error)))?;
@@ -484,29 +486,4 @@ pub fn new_mid() -> io::Result<String> {
     let mut random = [0; 10];
     File::open("/dev/urandom")?.read_exact(&mut random)?;
     Ok(mara_engine::write::mid(millis, random))
-}
-
-/// A pause point for tests, in debug builds only (ADR-DEBUG-PAUSE-POINT): when the environment
-/// variable names a directory, creates `paused` there, whole, holding `path` or nothing, and
-/// waits until it is gone.
-#[cfg(debug_assertions)]
-fn pause(path: Option<&str>) -> io::Result<()> {
-    let Some(directory) = std::env::var_os("MARA_TEST_PAUSE").filter(|value| !value.is_empty())
-    else {
-        return Ok(());
-    };
-    let directory = PathBuf::from(directory);
-    let paused = directory.join("paused");
-    let staged = directory.join(format!(".paused-{}", std::process::id()));
-    fs::write(&staged, path.unwrap_or_default())?;
-    fs::rename(&staged, &paused)?;
-    while fs::symlink_metadata(&paused).is_ok() {
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    Ok(())
-}
-
-#[cfg(not(debug_assertions))]
-fn pause(_: Option<&str>) -> io::Result<()> {
-    Ok(())
 }

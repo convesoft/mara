@@ -5,6 +5,8 @@ pub mod caller;
 pub mod convert;
 pub mod daemon;
 pub mod grammar;
+#[doc(hidden)]
+pub mod hooks;
 pub mod inputs;
 pub mod project;
 pub mod rules;

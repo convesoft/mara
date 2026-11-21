@@ -25,6 +25,7 @@ use mara_engine::program::Program;
 use mara_engine::work::WorkCounts;
 
 use crate::caller;
+use crate::hooks::{self, Hook};
 
 /// Writes `mara.dl`, every fact relation of `facts`, every relation of `inputs` and an empty
 /// `code_link` into `dir`, the evaluation's private directory, each relation to the file
@@ -164,36 +165,15 @@ impl Started {
             _running: cancel::Running::begin(),
             _interrupts: interrupt::Deferred::begin(),
         };
-        pause_evaluation();
+        // A pause point for tests (ADR-DEBUG-PAUSE-POINT): before the check of whether the
+        // daemon stops.
+        let _ = hooks::pause(Hook::PauseEvaluation, "");
         if cancel::cancelled() {
             return Err(host("cannot run Soufflé", &cancel::error()));
         }
         Ok(started)
     }
 }
-
-/// A pause point for tests, in debug builds only (ADR-DEBUG-PAUSE-POINT in
-/// `docs/authoring/writes.mara.md`): when `MARA_TEST_PAUSE_EVALUATION` names a directory, an
-/// evaluation that began creates `paused` there and waits until it is gone, before it checks
-/// whether the daemon stops.
-#[cfg(debug_assertions)]
-fn pause_evaluation() {
-    let Some(directory) =
-        std::env::var_os("MARA_TEST_PAUSE_EVALUATION").filter(|value| !value.is_empty())
-    else {
-        return;
-    };
-    let paused = Path::new(&directory).join("paused");
-    if fs::write(&paused, "").is_err() {
-        return;
-    }
-    while fs::symlink_metadata(&paused).is_ok() {
-        std::thread::sleep(Duration::from_millis(5));
-    }
-}
-
-#[cfg(not(debug_assertions))]
-fn pause_evaluation() {}
 
 /// Runs Soufflé on the prepared private directory `dir` and reads its outcome.
 fn run_in(run: &Run, dir: &Path, work: &mut WorkCounts) -> Result<Rows, Fault> {

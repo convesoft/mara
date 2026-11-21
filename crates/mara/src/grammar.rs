@@ -33,6 +33,8 @@ use tree_sitter::{
     QueryCursorOptions, StreamingIterator, Tree, WasmStore, wasmtime,
 };
 
+use crate::hooks::{self, Hook};
+
 /// A pinned grammar that is not in the cache, does not match its pin or cannot be used.
 pub const UNAVAILABLE_GRAMMAR: &str = "unavailable-grammar";
 /// The grammar's WebAssembly module in its cache directory.
@@ -199,7 +201,6 @@ pub fn get(language: &Language) -> Option<Result<Arc<Grammar>, Diagnostic>> {
         Ok(loaded) => loaded,
         Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
         Err(TryLockError::WouldBlock) => {
-            #[cfg(debug_assertions)]
             event("wait", &key.0);
             lock(&slot.loaded)
         }
@@ -500,26 +501,15 @@ impl Grammar {
 
 /// The time a grammar may take to load.
 fn load_limit() -> Duration {
-    #[cfg(debug_assertions)]
-    if let Some(millis) = std::env::var("MARA_TEST_GRAMMAR_LOAD_MS")
-        .ok()
-        .and_then(|value| value.parse().ok())
-    {
-        return Duration::from_millis(millis);
-    }
-    LOAD_LIMIT
+    hooks::number(Hook::GrammarLoadMs).map_or(LOAD_LIMIT, Duration::from_millis)
 }
 
 /// The time a grammar may take on a file of `length` bytes.
 fn budget(length: usize) -> Duration {
-    #[cfg(debug_assertions)]
-    if let Some(millis) = std::env::var("MARA_TEST_GRAMMAR_BUDGET_MS")
-        .ok()
-        .and_then(|value| value.parse().ok())
-    {
-        return Duration::from_millis(millis);
-    }
-    BASE_BUDGET + Duration::from_secs((length / BYTES_PER_SECOND) as u64)
+    hooks::number(Hook::GrammarBudgetMs).map_or_else(
+        || BASE_BUDGET + Duration::from_secs((length / BYTES_PER_SECOND) as u64),
+        Duration::from_millis,
+    )
 }
 
 /// The parser, its WebAssembly store and the tags query of one grammar, on its own thread.
@@ -534,7 +524,6 @@ struct Worker {
 impl Worker {
     /// Loads the grammar, calling `answer` before a failure drops anything it loaded.
     fn load(symbol: &str, wasm: &[u8], tags: &str, answer: &dyn Fn()) -> Result<Worker, String> {
-        #[cfg(debug_assertions)]
         stall_load(symbol);
         let failed = |reason: String| {
             answer();
@@ -574,7 +563,6 @@ impl Worker {
 
     fn run(&mut self, jobs: Receiver<Job>) {
         while let Ok(job) = jobs.recv() {
-            #[cfg(debug_assertions)]
             stall(&job.contents);
             let deadline = Instant::now() + job.budget;
             let outline = self.outline(&job.contents, deadline);
@@ -667,12 +655,10 @@ fn nodes(tree: &Tree, syntax: &mut Syntax) {
     }
 }
 
-/// A grammar that never returns, for tests in debug builds: with `MARA_TEST_GRAMMAR_STALL` set,
-/// a file whose contents hold its value is never parsed.
-#[cfg(debug_assertions)]
+/// A grammar that never returns, for tests in debug builds (ADR-DEBUG-PAUSE-POINT): with
+/// `MARA_TEST_GRAMMAR_STALL` set, a file whose contents hold its value is never parsed.
 fn stall(contents: &[u8]) {
-    let Some(text) = std::env::var_os("MARA_TEST_GRAMMAR_STALL").filter(|text| !text.is_empty())
-    else {
+    let Some(text) = hooks::value(Hook::GrammarStall) else {
         return;
     };
     let text = text.into_encoded_bytes();
@@ -688,40 +674,28 @@ fn park_forever() -> ! {
     }
 }
 
-/// A load to hold, for tests in debug builds: records the event `load`, and with
-/// `MARA_TEST_GRAMMAR_LOAD_STALL` set to the grammar's tree-sitter name, its thread stops before
-/// it loads anything: until `hold` is gone from the directory that `MARA_TEST_GRAMMAR_EVENTS`
-/// names, or for the rest of the process without that directory.
-#[cfg(debug_assertions)]
+/// A load to hold, for tests in debug builds (ADR-DEBUG-PAUSE-POINT): records the event `load`,
+/// and with `MARA_TEST_GRAMMAR_LOAD_STALL` set to the grammar's tree-sitter name, its thread
+/// stops before it loads anything: until `hold` is gone from the directory that
+/// `MARA_TEST_GRAMMAR_EVENTS` names, or for the rest of the process without that directory.
 fn stall_load(symbol: &str) {
     event("load", symbol);
-    if std::env::var_os("MARA_TEST_GRAMMAR_LOAD_STALL").is_none_or(|name| name != symbol) {
+    if hooks::value(Hook::GrammarLoadStall).is_none_or(|name| name != symbol) {
         return;
     }
-    let Some(events) = std::env::var_os("MARA_TEST_GRAMMAR_EVENTS") else {
+    let Some(events) = hooks::path(Hook::GrammarEvents) else {
         park_forever();
     };
-    let hold = Path::new(&events).join("hold");
+    let hold = events.join("hold");
     while hold.exists() {
         thread::sleep(Duration::from_millis(10));
     }
 }
 
-/// Records `what` for the grammar `name`, for tests in debug builds: with
-/// `MARA_TEST_GRAMMAR_EVENTS` naming a directory, appends the line `<what> <name>` to its file
-/// `events`. The events are `load`, when a grammar's thread starts to load it, and `wait`, when
-/// a request finds a load of the grammar it needs in progress and waits for it.
-#[cfg(debug_assertions)]
+/// Records `what` for the grammar `name`, for tests in debug builds (ADR-DEBUG-PAUSE-POINT):
+/// with `MARA_TEST_GRAMMAR_EVENTS` naming a directory, appends the line `<what> <name>` to its
+/// file `events`. The events are `load`, when a grammar's thread starts to load it, and `wait`,
+/// when a request finds a load of the grammar it needs in progress and waits for it.
 fn event(what: &str, name: &str) {
-    use std::io::Write;
-    let Some(events) = std::env::var_os("MARA_TEST_GRAMMAR_EVENTS") else {
-        return;
-    };
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(Path::new(&events).join("events"));
-    if let Ok(mut file) = file {
-        let _ = file.write_all(format!("{what} {name}\n").as_bytes());
-    }
+    hooks::append(Hook::GrammarEvents, format_args!("{what} {name}"));
 }

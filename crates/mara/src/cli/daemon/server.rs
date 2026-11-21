@@ -27,6 +27,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use mara::daemon::{self, Build, PROTOCOL_VERSION, Runtime};
+use mara::hooks::{self, Hook};
 use mara::rules;
 use mara::session::Sessions;
 use mara::watch::Watcher;
@@ -42,17 +43,8 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The idle period: in a debug build, `MARA_TEST_IDLE_SECONDS` when it holds a whole number
 /// (ADR-TEST-IDLE-PERIOD).
-#[cfg(debug_assertions)]
 fn idle_period() -> Duration {
-    std::env::var("MARA_TEST_IDLE_SECONDS")
-        .ok()
-        .and_then(|seconds| seconds.parse().ok())
-        .map_or(IDLE_PERIOD, Duration::from_secs)
-}
-
-#[cfg(not(debug_assertions))]
-fn idle_period() -> Duration {
-    IDLE_PERIOD
+    hooks::number(Hook::IdleSeconds).map_or(IDLE_PERIOD, Duration::from_secs)
 }
 
 /// Forks the daemon, which inherits `lock`, already taken, and opens the session of the project

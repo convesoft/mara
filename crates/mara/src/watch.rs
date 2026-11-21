@@ -88,6 +88,7 @@ mod linux {
     use std::time::{Duration, Instant};
 
     use super::{DEBOUNCE, LONGEST_DELAY, Watcher};
+    use crate::hooks::{self, Hook};
     use crate::session::Session;
 
     /// What a directory's watch reports: entries created, deleted, moved or changed, and the
@@ -132,29 +133,6 @@ mod linux {
     fn lock(state: &Mutex<State>) -> MutexGuard<'_, State> {
         state.lock().unwrap_or_else(PoisonError::into_inner)
     }
-
-    /// A pause point for tests, in debug builds only (ADR-DEBUG-PAUSE-POINT in
-    /// `docs/authoring/writes.mara.md`): when `MARA_TEST_PAUSE_WATCH` names a directory,
-    /// [`Inner::sync`] creates `paused` there before its lookups and new watches, while it holds
-    /// no lock, and goes on once it is gone.
-    #[cfg(debug_assertions)]
-    fn pause_sync() {
-        let Some(directory) =
-            std::env::var_os("MARA_TEST_PAUSE_WATCH").filter(|value| !value.is_empty())
-        else {
-            return;
-        };
-        let paused = Path::new(&directory).join("paused");
-        if std::fs::write(&paused, "").is_err() {
-            return;
-        }
-        while std::fs::symlink_metadata(&paused).is_ok() {
-            thread::sleep(Duration::from_millis(5));
-        }
-    }
-
-    #[cfg(not(debug_assertions))]
-    fn pause_sync() {}
 
     /// The watches of `root` while `session` is the one registered for it.
     fn owned<'s>(
@@ -246,7 +224,9 @@ mod linux {
                     self.unwatch(&mut state, watch.wd, &root);
                 }
             }
-            pause_sync();
+            // A pause point for tests (ADR-DEBUG-PAUSE-POINT): before the lookups and new
+            // watches, while no lock is held.
+            let _ = hooks::pause(Hook::PauseWatch, "");
             for directory in directories {
                 // Looked up before the watch is added: a directory replaced in between is
                 // found by the next sync, whose lookup tells another inode.
