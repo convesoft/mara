@@ -1,6 +1,6 @@
 ---
 title: "Daemon housekeeping: watcher lock, one parse per frame, lock file name, WorkCounts sum, caller umask and mode"
-status: todo
+status: in-progress
 type: task
 parent: mara-0mxw21
 created_at: 2026-11-20T20:22:51Z
