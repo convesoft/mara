@@ -1,6 +1,6 @@
 ---
 title: Compare CLI-direct and daemon results
-status: todo
+status: in-progress
 type: task
 parent: mara-0mxw21
 blocked_by:
