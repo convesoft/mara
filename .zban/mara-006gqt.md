@@ -16,3 +16,5 @@ Context: mara-cp1skx (commit `b561961`) linked 43 of the 51 Accepted requirement
 
 - [ ] Mark the code that implements the designs satisfying REQ-NEAR-LINEAR-SCALING and REQ-READS-NEVER-WRITE, where such a design has a place, and say in the summary which of the two then counts as implemented
 - [ ] Decide how a new source directory under `crates/mara-engine/src/` is kept from going unscanned (move the test data that reads as markers so that `crates/**/src/**/*.rs` can be the pattern, or a check), without adding exclude patterns to the product
+
+Note from the orchestrator, 2026-11-21 (architecture audit after alpha.5): the auditor's way for the second item: build the marker-shaped literals of `crates/mara-engine/src/code/tests.rs` so that no source line reads as a marker (for example `concat!("@", "mara ")`), or move that test data under `crates/mara-engine/tests/`; `[code]` then needs two patterns, `crates/mara/src/**/*.rs` and `crates/mara-engine/src/**/*.rs`, and no new directory goes unscanned.

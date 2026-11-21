@@ -19,3 +19,5 @@ Goal: `session.rs` holds sessions and their derivation; `cli.rs` holds the opera
 Context: Found by the architecture audit after 0.4.0-alpha.4 (Gemini, at `2fa2c1b`, 2026-11-21); locations are as of that commit. Wave: split. More than two thirds of `crates/mara/src/session.rs` (about 870 lines) is the bounded store of evaluation and report outcomes (`Evaluated`, `Kept`, `Outcome`, `Build`, the size estimates and their tests), independent of `Sessions`, `Session` and `Deriving`: move it to `session/evaluated.rs`. `crates/mara/src/cli.rs` (about 850 lines) mixes the operation table and `run` with argument parsing: move `parse`, `requested_json`, `describe_arguments`, `usage` and their tests to `cli/arguments.rs`.
 
 - [ ] Both moves made; no behaviour changes
+
+Note from the orchestrator, 2026-11-21 (architecture audit after alpha.5): move `Evaluated` and its tests (about 510 lines) to `session/evaluated.rs`; `Deriving` stays with `Session::derive_in_background`.

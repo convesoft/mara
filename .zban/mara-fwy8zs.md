@@ -17,3 +17,5 @@ Context: Found by the architecture audit after 0.4.0-alpha.4 (Gemini, at `2fa2c1
 
 - [ ] An operation's entry in `cli.rs` says whether it writes and whether it runs in the client; `client.rs` and the tests read it
 - [ ] `WorkCounts` offers its fields for decoding; the client parses each frame once
+
+Note from the orchestrator, 2026-11-21 (architecture audit after alpha.5): worse since alpha.5. `crates/mara/tests/code/main.rs` (near 371–381) adds a fourth hand-kept list of in-process operations, and `crates/mara/tests/performance/code_add.rs` (near 286–312) a list of 25 operations.

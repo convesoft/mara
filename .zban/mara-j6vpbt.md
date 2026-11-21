@@ -17,3 +17,5 @@ Context: Found by the architecture audit after 0.4.0-alpha.4 (Gemini, at `2fa2c1
 
 - [ ] One helper each; the tests use them
 - [ ] `guide.rs` compares the two instruction texts for equality after substituting the project sentence
+
+Note from the orchestrator, 2026-11-21 (architecture audit after alpha.5): worse since alpha.5. New copies: a daemon harness (`Daemon`) and an MCP client (`Mcp`) in `crates/mara/tests/code/main.rs`, two inline daemon harnesses in `crates/mara/tests/performance/code_get.rs`, and `Runtime` in `crates/mara/tests/performance/daemon.rs`. mara-xh6mp6 (alpha.6) fixes the macOS build of the first; mara-5d6pcs shares the CLI-to-MCP translation and the fixture-grammar installer.
