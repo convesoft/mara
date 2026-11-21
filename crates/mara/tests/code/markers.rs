@@ -253,6 +253,31 @@ fn ignores_what_is_no_marker_or_no_input() {
     assert_eq!(refused["error"]["code"], "unknown-item");
 }
 
+/// DES-CODE-READERS: `get` of a path that a code include pattern matches, hidden by a
+/// `.gitignore` on the way to it that Mara cannot apply, fails as not found and says why.
+#[test]
+fn get_of_code_hidden_by_a_problem_reports_it() {
+    let project = Project::new();
+    project.write("src/.gitignore", "[z-a].rs\n");
+    project.write("src/lib.rs", "// @mara implements REQ-LOGIN\nfn lib() {}\n");
+    for address in ["src/lib.rs", "src/lib.rs:2"] {
+        let refused = project.json(&["get", address], 1);
+        assert_eq!(refused["error"]["code"], "unknown-item", "{refused}");
+        let diagnostics = refused["error"]["diagnostics"].as_array().unwrap();
+        let found: Vec<(&str, &str, u64)> = (diagnostics.iter())
+            .map(|d| {
+                let field = |name: &str| d[name].as_str().unwrap();
+                (field("code"), field("path"), d["line"].as_u64().unwrap())
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [("unsupported-gitignore", "src/.gitignore", 1)],
+            "{refused}"
+        );
+    }
+}
+
 #[test]
 fn links_copies_and_repeated_ids_to_each() {
     let project = Project::new();

@@ -776,8 +776,9 @@ fn the_project_through_a_symbolic_link_is_the_same_session() {
     assert_eq!(status["sessions"], json!([root]), "{status}");
 }
 
-/// `get` of a code location checks the file against the contents of the session's latest check
-/// of it: here a scan of the file's new contents, after an earlier `get` kept the old ones.
+/// `get` of a code location checks the file against the contents the session keeps of it that
+/// a check keeps, those whose stat is the file's and whose check settled it: here a scan of the
+/// file's new contents, after an earlier `get` kept the old ones.
 #[test]
 fn a_code_location_after_a_scan_of_its_new_contents_reads_nothing() {
     let warm = Warm::start();

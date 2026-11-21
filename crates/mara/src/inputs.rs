@@ -18,7 +18,7 @@
 
 mod admit;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -85,6 +85,13 @@ struct State {
     /// The grammar-level scans that [`Inputs::scan_code`] made, so that the same contents of
     /// the same file are not scanned again.
     code_scans: HashMap<String, Scan>,
+    /// The listings and `.gitignore` files of the directories on the way to the paths that
+    /// [`Inputs::code_file`] checked, so that a session lists and reads them again only when a
+    /// check would, also after a derivation that lists no code dropped them from the inventory.
+    /// Every walk takes a record from here when it is the one a check keeps, and brings the
+    /// records of the directories it lists up to date; a listing of the code files drops the
+    /// directories it does not list ([`refresh_ancestors`]). No daemon watches them.
+    ancestors: Inventory,
 }
 
 /// What the inventory found.
@@ -287,7 +294,9 @@ impl Inputs {
     /// Checks the code file at `path`, which the last request listed ([`CodeReads::List`]), in
     /// the request that began at `now`, reading and hashing it unless the contents an earlier
     /// call or scan kept still hold (DES-INPUTS-AND-KEYS): its hash and contents, or the
-    /// `io-error` of a file that cannot be read. A view keeps them in the session's inputs.
+    /// `io-error` of a file that cannot be read. A view keeps them in the session's inputs. It
+    /// is called after [`Inputs::code_file`] found the file in the same request, which admitted
+    /// the directories on the way to it.
     pub fn read_code(
         &mut self,
         path: &str,
@@ -295,23 +304,23 @@ impl Inputs {
         work: &mut WorkCounts,
     ) -> Result<(Hash, Vec<u8>), Box<Diagnostic>> {
         let absolute = self.root.join(path);
-        // The contents of the session's latest check of the file: an earlier call's, or the
-        // last scan's, which keeps them for a file with markers.
+        // The contents an earlier call kept, and the last scan's, which keeps them for a file
+        // with markers: the one a check keeps answers, never the one checked last by the clock.
         let kept = |state: &State| {
             let got = state.code_contents.get(path).cloned();
             let scanned = (state.code.get(path))
                 .and_then(|scan| Some(scan.with_value(scan.value.file.contents.clone()?)));
-            match (got, scanned) {
-                (Some(got), Some(scanned)) if scanned.checked() > got.checked() => Some(scanned),
-                (got, scanned) => got.or(scanned),
-            }
+            [got, scanned]
         };
-        let previous = match &self.shared {
+        let kept = match &self.shared {
             Some(shared) => kept(&lock(shared).state),
             None => kept(&self.state),
         };
+        let metadata = fs::symlink_metadata(&absolute);
+        let previous = (metadata.as_ref().ok())
+            .and_then(|metadata| held(kept, |tracked| tracked.holds(metadata)));
         let before = previous.as_ref().map(|previous| previous.with_value(()));
-        let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
+        let checked = metadata.and_then(|metadata| {
             let reads = &mut Reads::default();
             tracked::check(&absolute, &metadata, previous, now, work, reads, false)
         });
@@ -412,16 +421,17 @@ impl Inputs {
     }
 
     /// The index of the language of the code file at `path`, in the configuration, as the
-    /// request that began at `now` lists it, with the listing's diagnostics: what `get` of a code
-    /// location reads instead of a [`Generation`] (DES-CODE-READERS). `None` when the
-    /// configuration declares no code file at `path`: no language's include pattern matches it,
-    /// or it is a document, a program or a temporary file, which lists nothing; or the listing
-    /// does not find it. Lists only the directories where a code include pattern can match, as
-    /// [`CodeReads::List`] does, and reads no document or program and builds no snapshot. The
-    /// listing starts from the directories and `.gitignore` files of the last check, each
-    /// listed or read again only when its stat says so, and changes nothing that these inputs
-    /// or a session keep, except that they forget what `get` kept of each code file that the
-    /// listing no longer finds as one, a document or a program now included ([`Inputs::forget_code`]).
+    /// request that began at `now` finds it, with the diagnostics of the directories on the way
+    /// to it and of the path itself: what `get` of a code location reads instead of a
+    /// [`Generation`] (DES-CODE-READERS). `None` when the configuration declares no code file at
+    /// `path`: no language's include pattern matches it, or it is a document, a program or a
+    /// temporary file, which lists nothing; or the path is not found as one. Lists only the
+    /// project root and the directories on the way to `path`, and reads only their `.gitignore`
+    /// files, as a listing of the code files would, and reads no document or program and builds
+    /// no snapshot. Each directory is listed and each `.gitignore` read again only when no record
+    /// of it, the inventory's or the session's [`State::ancestors`], holds, judged where the
+    /// walk reaches it ([`Walk::kept`]); what it listed or read is kept in the session's
+    /// inputs. When `path` is no code file, they forget what `get` kept of it.
     pub fn code_file(
         &mut self,
         path: &str,
@@ -440,14 +450,13 @@ impl Inputs {
         let documents = patterns(&mut config.include.iter().flatten());
         let programs = patterns(&mut config.rules.iter().flat_map(|rules| &rules.programs));
         let code = patterns(&mut config.code.iter().flat_map(|language| &language.include));
-        // Whether a listed path has another role, which the walk below does not tell.
-        let excluded = |path: &str| {
-            let name = path.rsplit('/').next().unwrap_or(path);
-            (name.ends_with(".mara.md") && documents.matches(path))
-                || programs.matches(path)
-                || name.starts_with(TEMPORARY_PREFIX)
-        };
-        if excluded(path) || !code.matches(path) {
+        // A path with another role, which the walk below does not tell.
+        let name = path.rsplit('/').next().unwrap_or(path);
+        let excluded = (name.ends_with(".mara.md") && documents.matches(path))
+            || programs.matches(path)
+            || name.starts_with(TEMPORARY_PREFIX);
+        if excluded || !code.matches(path) {
+            self.forget_code_file(path);
             return (None, Vec::new());
         }
         let config = Config {
@@ -455,34 +464,70 @@ impl Inputs {
             rules: None,
             ..config.clone()
         };
-        let previous = Inventory {
-            directories: self.state.inventory.directories.clone(),
-            gitignores: self.state.inventory.gitignores.clone(),
-            ..Inventory::default()
+        // The directories on the way to the path, the root first.
+        let directories: Vec<&str> = std::iter::once("")
+            .chain(path.match_indices('/').map(|(end, _)| &path[..end]))
+            .collect();
+        // The records of those directories, the inventory's and the session's; the walk chooses
+        // between them where it reaches each one.
+        let records = |inventory: &Inventory| {
+            let mut records = Inventory::default();
+            for directory in &directories {
+                let listing = inventory.directories.get(*directory).cloned();
+                let read = inventory.gitignores.get(*directory).cloned();
+                records
+                    .directories
+                    .extend(listing.map(|l| (directory.to_string(), l)));
+                records
+                    .gitignores
+                    .extend(read.map(|r| (directory.to_string(), r)));
+            }
+            records
         };
+        let kept = match &self.shared {
+            Some(shared) => records(&lock(shared).state.ancestors),
+            None => records(&self.state.ancestors),
+        };
+        let previous = records(&self.state.inventory);
         let mut problems = Vec::new();
         let code = Code::new(&config, CodeReads::List, Arc::default(), &mut problems);
         let mut reads = Reads::default();
         let mut walk = Walk::new(&self.root, &config, code, previous, now, work, &mut reads);
+        walk.only = Some(path);
+        walk.kept = Some(&kept);
         walk.run();
         let Walk {
             code: found,
             mut diagnostics,
+            next,
             ..
         } = walk;
-        let listed = (found.paths.iter()).find(|(listed, _)| listed == path);
-        let language = listed.map(|&(_, language)| language);
-        let paths: HashSet<&str> = (found.paths.iter())
-            .map(|(path, _)| &**path)
-            .filter(|path| !excluded(path))
-            .collect();
+        let language = (found.paths.iter())
+            .find(|(listed, _)| listed == path)
+            .map(|&(_, language)| language);
         match &self.shared {
-            Some(shared) => lock(shared).forget_code(|path| paths.contains(path)),
-            None => self.forget_code(|path| paths.contains(path)),
+            Some(shared) => keep_ancestors(&mut lock(shared).state.ancestors, next),
+            None => keep_ancestors(&mut self.state.ancestors, next),
+        }
+        if language.is_none() {
+            self.forget_code_file(path);
         }
         diagnostics.extend(problems);
         diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
         (language, diagnostics)
+    }
+
+    /// Forgets what `get` kept of the code file at `path`, as [`Inputs::forget_code`] does, in
+    /// the session's inputs for a view: two removals by key, whatever the session keeps.
+    fn forget_code_file(&mut self, path: &str) {
+        let forget = |state: &mut State| {
+            state.code_contents.remove(path);
+            state.code_scans.remove(path);
+        };
+        match &self.shared {
+            Some(shared) => forget(&mut lock(shared).state),
+            None => forget(&mut self.state),
+        }
     }
 
     /// Reads, hashes and scans every code file that `generation`, of the request that began at
@@ -684,6 +729,7 @@ impl Inputs {
         let mut grammar_problems = Vec::new();
         let code = Code::new(config, code, Arc::default(), &mut grammar_problems);
         let mut walk = Walk::new(&self.root, config, code, previous, now, work, reads);
+        walk.kept = Some(&self.state.ancestors);
         for file in written {
             walk.parsed.insert(DocumentKey::new(file.hash), file.file);
         }
@@ -697,6 +743,8 @@ impl Inputs {
             code: found,
             ..
         } = walk;
+        let all = found.reads == Some(CodeReads::List);
+        refresh_ancestors(&mut self.state.ancestors, &next, all);
         self.state.inventory = Arc::new(next);
         self.reads = Reads::default();
         diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
@@ -861,6 +909,56 @@ fn give_back(shared: &Mutex<Inputs>, root: &Path, scanned: &Scanned) {
     code.extend(current);
 }
 
+/// Of `records`, records of one file or directory, the one that `holds` says a check keeps,
+/// else the first: a check then reads it again whichever it gets. No record is chosen by its
+/// check time (DES-DAEMON-SESSIONS).
+fn held<R>(records: [Option<R>; 2], holds: impl Fn(&R) -> bool) -> Option<R> {
+    match records {
+        [Some(first), _] if holds(&first) => Some(first),
+        [_, Some(second)] if holds(&second) => Some(second),
+        [first, second] => first.or(second),
+    }
+}
+
+/// Keeps in `ancestors` what [`Inputs::code_file`] found of the directories it listed, `next`:
+/// each listing, and its `.gitignore` record, none when it found none.
+fn keep_ancestors(ancestors: &mut Inventory, mut next: Inventory) {
+    for (directory, listing) in next.directories {
+        match next.gitignores.remove(&directory) {
+            Some(read) => ancestors.gitignores.insert(directory.clone(), read),
+            None => ancestors.gitignores.remove(&directory),
+        };
+        ancestors.directories.insert(directory, listing);
+    }
+}
+
+/// Brings `ancestors` up to date with a walk of the inventory that found `next`: each of its
+/// directories that the walk listed takes the walk's listing and `.gitignore` record, none when
+/// it found none. With `all`, the walk listed the code files, which reaches every directory
+/// that may hold one, and a directory it did not list leaves. Costs one lookup per directory of
+/// `ancestors`.
+fn refresh_ancestors(ancestors: &mut Inventory, next: &Inventory, all: bool) {
+    let Inventory {
+        directories,
+        gitignores,
+        ..
+    } = ancestors;
+    directories.retain(|directory, kept| {
+        let Some(listing) = next.directories.get(directory) else {
+            if all {
+                gitignores.remove(directory);
+            }
+            return !all;
+        };
+        *kept = listing.clone();
+        match next.gitignores.get(directory) {
+            Some(read) => gitignores.insert(directory.clone(), read.clone()),
+            None => gitignores.remove(directory),
+        };
+        true
+    });
+}
+
 /// Whether `a` and `b` are the same check of a code file, with the same scan.
 fn same_scan(a: &Tracked<Scan>, b: &Tracked<Scan>) -> bool {
     a.same_check(b) && a.value.key == b.value.key && Arc::ptr_eq(&a.value.file, &b.value.file)
@@ -989,6 +1087,14 @@ struct Walk<'w> {
     programs: BTreeMap<String, Vec<u8>>,
     diagnostics: Vec<Diagnostic>,
     code: Code,
+    /// The one path to walk to: only the directories above it are listed, and only it and
+    /// those directories are taken as inputs ([`Inputs::code_file`]).
+    only: Option<&'w str>,
+    /// Records of directories and `.gitignore` files besides `previous`, the session's
+    /// [`State::ancestors`]: where the walk reaches a directory or `.gitignore`, after its parent
+    /// admitted it, it takes whichever of the two records a check keeps, judged from the
+    /// metadata it fetched there ([`held`]), so no record is checked through a symbolic link.
+    kept: Option<&'w Inventory>,
 }
 
 /// A directory to list: its path, where the document and code include patterns stand there,
@@ -1034,6 +1140,8 @@ impl<'w> Walk<'w> {
             programs: BTreeMap::new(),
             diagnostics: Vec::new(),
             code,
+            only: None,
+            kept: None,
         }
     }
 
@@ -1073,8 +1181,14 @@ impl<'w> Walk<'w> {
         let code_here = self.code.patterns.can_continue(&code_at);
         let absolute = self.root.join(&path);
         let previous = self.previous.directories.remove(&path);
-        let listed = fs::symlink_metadata(&absolute)
-            .and_then(|metadata| tracked::list(&absolute, &metadata, previous, self.now));
+        let kept = self
+            .kept
+            .and_then(|kept| kept.directories.get(&path))
+            .cloned();
+        let listed = fs::symlink_metadata(&absolute).and_then(|metadata| {
+            let previous = held([previous, kept], |listing| listing.holds(&metadata));
+            tracked::list(&absolute, &metadata, previous, self.now)
+        });
         let listing = match listed {
             Ok(listing) => listing,
             Err(error) => {
@@ -1123,6 +1237,15 @@ impl<'w> Walk<'w> {
                 continue;
             }
             let child = join(&path, &entry.name);
+            if let Some(only) = self.only {
+                let on_the_way = match entry.kind {
+                    Kind::Directory => above(&child, only),
+                    _ => child == only,
+                };
+                if !on_the_way {
+                    continue;
+                }
+            }
             let next = self.patterns.advance(&at, &entry.name);
             let code_next = self.code.patterns.advance(&code_at, &entry.name);
             if entry.kind == Kind::Directory {
@@ -1341,7 +1464,15 @@ impl<'w> Walk<'w> {
         let path = join(directory, ".gitignore");
         let absolute = self.root.join(&path);
         let previous = self.previous.gitignores.remove(directory);
-        let checked = self.check(&absolute, previous);
+        let kept = self
+            .kept
+            .and_then(|kept| kept.gitignores.get(directory))
+            .cloned();
+        let (now, work, reads) = (self.now, &mut *self.work, &mut *self.reads);
+        let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
+            let previous = held([previous, kept], |read| read.holds(&metadata));
+            tracked::check(&absolute, &metadata, previous, now, work, reads, false)
+        });
         let tracked = match checked {
             Ok(Check::Kept(tracked)) => tracked,
             Ok(Check::Read(read)) => {
@@ -1457,6 +1588,12 @@ impl<'w> Walk<'w> {
 fn key_of(language: &Language, grammar: bool) -> LanguageKey {
     let checksum = language.grammar.as_ref().map(|pin| &pin.checksum);
     LanguageKey::new(language, checksum.filter(|_| grammar))
+}
+
+/// Whether `path` names a directory above `to`.
+fn above(path: &str, to: &str) -> bool {
+    to.strip_prefix(path)
+        .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// `name` in the directory at `directory`, the project root when empty.
@@ -1598,6 +1735,33 @@ mod tests {
         Inputs::shared(Arc::clone(session), Arc::default(), Arc::default())
     }
 
+    /// `get` of a code location answers from the record of the file that a check keeps, never
+    /// from the one checked last by the clock: here the clock stepped back between an earlier
+    /// `get`, which kept the old contents, and a scan of the new ones (DES-DAEMON-SESSIONS).
+    #[test]
+    fn kept_contents_are_chosen_by_stat_not_by_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = ("src/lib.rs", "// @mara implements REQ-A\n");
+        let session = code_project(dir.path(), &[lib]);
+        let root = lock(&session).root.clone();
+        // Late enough that every check settles what it read.
+        let later = |hours: u64| SystemTime::now() + Duration::from_secs(3600 * hours);
+        let mut work = WorkCounts::default();
+        view(&session)
+            .read_code(lib.0, later(2), &mut work)
+            .unwrap();
+        // Another size, so that the stat changes whatever the timestamps' resolution.
+        let edited = "// @mara implements REQ-BB\n";
+        fs::write(root.join(lib.0), edited).unwrap();
+        view(&session).generation(later(1), &mut work, CodeReads::Scan);
+        let mut work = WorkCounts::default();
+        let (_, contents) = view(&session)
+            .read_code(lib.0, later(3), &mut work)
+            .unwrap();
+        assert_eq!(contents, edited.as_bytes());
+        assert_eq!(work, WorkCounts::default(), "the file was read again");
+    }
+
     /// A warm scan gives the session only what it read again: one that read nothing leaves the
     /// session's record of the code files as it was, and none copies the inventory, which
     /// the view of the request holds too.
@@ -1677,9 +1841,10 @@ mod tests {
     }
 
     /// A code file deleted, renamed, ignored, or now a document leaves the session: the contents
-    /// and grammar-level scan that a `get` kept when a listing, a request's or `get`'s, no longer
-    /// finds it as code, and its markers at the next scan, which first reuses by key the scan
-    /// of a file that was only renamed: the new path is read and hashed, and not scanned.
+    /// and grammar-level scan that a `get` kept when a request's listing no longer finds it as
+    /// code, or `get` of its path finds no code file there, and its markers at the next scan,
+    /// which first reuses by key the scan of a file that was only renamed: the new path is read
+    /// and hashed, and not scanned.
     #[test]
     fn a_code_file_that_left_is_forgotten() {
         let dir = tempfile::tempdir().unwrap();
@@ -1716,8 +1881,8 @@ mod tests {
         let scanned = paths(&["src/c.rs", "src/notes.mara.md"]);
         assert_eq!(kept(&session), [scanned.clone(), notes.clone(), notes]);
 
-        // Renamed again, and the other file now a document; then `get` of the new path, which
-        // lists the code files itself.
+        // Renamed again, and the other file now a document; then `get` of each path, which
+        // checks only that path and forgets what `get` kept of it when it is no code file.
         as_get(&session);
         fs::rename(root.join("src/c.rs"), root.join("src/e.rs")).unwrap();
         let config = fs::read_to_string(root.join(".mara/config.toml")).unwrap();
@@ -1727,6 +1892,16 @@ mod tests {
         let mut work = WorkCounts::default();
         let (language, _) = view(&session).code_file("src/e.rs", now, &mut work);
         assert_eq!(language, Some(0));
+        assert_eq!(
+            kept(&session),
+            [scanned.clone(), scanned.clone(), scanned.clone()]
+        );
+        let (language, _) = view(&session).code_file("src/c.rs", now, &mut work);
+        assert_eq!(language, None);
+        let notes = paths(&["src/notes.mara.md"]);
+        assert_eq!(kept(&session), [scanned.clone(), notes.clone(), notes]);
+        let (language, _) = view(&session).code_file("src/notes.mara.md", now, &mut work);
+        assert_eq!(language, None);
         assert_eq!(kept(&session), [scanned, vec![], vec![]]);
         let mut work = WorkCounts::default();
         view(&session).generation(now, &mut work, CodeReads::Scan);

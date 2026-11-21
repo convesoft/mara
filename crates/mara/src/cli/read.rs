@@ -322,12 +322,19 @@ fn get(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let code =
         code_path(address).map(|path| (path, inputs.code_file(path, context.now, context.work)));
     let Some((path, (Some(language), listed))) = code else {
+        // What the check of a path that a code include pattern matches found on the way to it,
+        // which may be why it is no code file: a failure carries it (DES-CODE-READERS).
+        let listed = code.map(|(_, (_, listed))| listed).unwrap_or_default();
         let generation = inputs.snapshot(context.now, context.work);
         let documents = Documents {
             snapshot: &generation.snapshot,
             diagnostics: &generation.diagnostics,
         };
-        let portion = read::get(&documents, address, cursor.as_ref()).map_err(failure)?;
+        let portion = read::get(&documents, address, cursor.as_ref()).map_err(|error| {
+            let mut failure = failure(error);
+            failure.diagnostics.extend(listed);
+            failure
+        })?;
         let human = |out: &mut String| portion_lines(out, &portion);
         let next = portion.next_cursor;
         return Ok(respond(

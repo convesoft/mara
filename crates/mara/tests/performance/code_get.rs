@@ -1,8 +1,9 @@
-//! The `get` row of VER-CODE-WORK-COUNTERS (`docs/code/verification.mara.md`): `get` of a code
-//! location parses no document and builds no snapshot, at the basic and at the grammar level,
-//! cold in direct mode and warm through a daemon the test starts, whose session keeps its
-//! snapshot and reads a code file as it is on disk now (REQ-NEVER-STALE). `get` of a document
-//! reads no code, cold and warm (DES-CODE-READERS).
+//! The `get` rows of VER-CODE-WORK-COUNTERS (`docs/code/verification.mara.md`): `get` of a code
+//! location parses no document and builds no snapshot, and checks only the directories on the
+//! way to the file, at the basic and at the grammar level, cold in direct mode and warm through
+//! a daemon the test starts, whose session keeps its snapshot and what `get` listed, and reads a
+//! code file as it is on disk now (REQ-NEVER-STALE). `get` of a document reads no code, cold and
+//! warm (DES-CODE-READERS).
 
 use std::fs;
 use std::path::Path;
@@ -30,10 +31,15 @@ fn level(corpus: &Corpus, grammar: bool) -> Option<tempfile::TempDir> {
     grammar.then(|| install_rust_grammar(corpus.root()))
 }
 
+/// DES-CODE-READERS: `get` of a code location reads no document, and of the code tree only
+/// the `.gitignore` files on the way to the file and the file: neither the `.gitignore` of
+/// another code directory nor the problem below the file's directory, which a listing of the
+/// code files reads and reports ([`code_tree_with_a_problem`]).
 #[test]
 fn cold_get_of_code_reads_no_document() {
     for grammar in [false, true] {
         let corpus = Corpus::generate(1, SEED);
+        code_tree_with_a_problem(&corpus);
         let home = level(&corpus, grammar);
         let env: Vec<(&str, &Path)> = home.iter().map(|h| ("HOME", h.path())).collect();
         let (line, file) = addresses(&corpus);
@@ -44,16 +50,18 @@ fn cold_get_of_code_reads_no_document() {
                 &env,
                 0,
             );
-            // The configuration, the schema, the root `.gitignore` and that code file.
+            // The configuration, the schema, the root `.gitignore`, the `.gitignore` of the code
+            // file's directory and that code file.
             let expected = WorkCounts {
-                file_reads: 4,
-                hashes: 4,
+                file_reads: 5,
+                hashes: 5,
                 code_scans: u64::from(grammar),
                 ..WorkCounts::default()
             };
             assert_eq!(run.work, expected, "get {address}, grammar {grammar}");
             let result: Value = serde_json::from_slice(&run.output.stdout).unwrap();
             assert_eq!(result["node"]["kind"], "code", "{result}");
+            assert_eq!(diagnostics(&result), &Value::Array(Vec::new()), "{result}");
             if grammar && address == &line {
                 assert!(result["node"]["declaration"].is_string(), "{result}");
             }
@@ -61,15 +69,47 @@ fn cold_get_of_code_reads_no_document() {
     }
 }
 
-/// Gives the corpus a code tree whose listing reads a file and reports a problem: a
-/// `.gitignore` in the directory of its first code file, and a `.gitignore` that is a directory
-/// below it. A request that lists code reads and hashes the first and reports the second.
+/// DES-CODE-READERS: `get` of a path that a code include pattern matches and that names a
+/// directory lists only the directories above it, not that directory, whose `.gitignore` it
+/// does not read: it does what `get` of a path that is not there does, and fails alike.
+#[test]
+fn cold_get_of_a_directory_lists_only_above_it() {
+    let corpus = Corpus::generate(1, SEED);
+    let directory = corpus.code_files[0]
+        .rsplit_once('/')
+        .expect("a code directory")
+        .0;
+    let named = format!("{directory}/example.rs");
+    fs::create_dir_all(corpus.root().join(&named)).unwrap();
+    fs::write(corpus.root().join(&named).join(".gitignore"), "*.tmp\n").unwrap();
+    let get = |address: &str| {
+        let run = cli::run_with(corpus.root(), &["--format", "json", "get", address], &[], 1);
+        let result: Value = serde_json::from_slice(&run.output.stdout).unwrap();
+        (run.work, result)
+    };
+    let (absent, refused) = get(&format!("{directory}/missing.rs"));
+    let (work, result) = get(&named);
+    assert_eq!(work, absent, "get {named}");
+    assert_eq!(
+        result["error"]["code"], refused["error"]["code"],
+        "{result}"
+    );
+    assert_eq!(diagnostics(&result), &Value::Array(Vec::new()), "{result}");
+}
+
+/// Gives the corpus a code tree whose listing reads files and reports a problem: a
+/// `.gitignore` in the directory of its first code file and one in `tests/`, another code
+/// directory, and a `.gitignore` that is a directory below the first code file's directory. A
+/// request that lists code reads and hashes the first two and reports the third; `get` of the
+/// first code file reads only the first.
 fn code_tree_with_a_problem(corpus: &Corpus) {
     let path = &corpus.code_files[0];
     let directory = corpus
         .root()
         .join(path.rsplit_once('/').expect("a code directory").0);
+    assert!(path.starts_with("src/"), "{path}");
     fs::write(directory.join(".gitignore"), "*.tmp\n").unwrap();
+    fs::write(corpus.root().join("tests/.gitignore"), "*.tmp\n").unwrap();
     fs::create_dir_all(directory.join("hidden/.gitignore")).unwrap();
 }
 
@@ -104,7 +144,10 @@ fn cold_get_of_a_document_reads_no_code() {
         let corpus = Corpus::generate(1, SEED);
         code_tree_with_a_problem(&corpus);
         let home = level(&corpus, grammar);
-        let env: Vec<(&str, &Path)> = home.iter().map(|h| ("HOME", h.path())).collect();
+        // The temporary directory of the evaluations that `project validate` runs.
+        let scratch = tempfile::tempdir().expect("create a temporary directory");
+        let mut env: Vec<(&str, &Path)> = home.iter().map(|h| ("HOME", h.path())).collect();
+        env.push(("TMPDIR", scratch.path()));
         let validate = ["--format", "json", "project", "validate"];
         let validated = cli::run_any(corpus.root(), &validate, &env);
         let validated: Value = serde_json::from_slice(&validated.output.stdout).unwrap();
@@ -185,7 +228,12 @@ fn warm_get_of_a_document_reads_no_code() {
     assert!(daemons.running().is_empty(), "a daemon runs after `stop`");
 }
 
-// The warm case finds the daemons of a test in `/proc`.
+/// [`cold_get_of_code_reads_no_document`] through a daemon the test starts, at both levels, in
+/// a session that holds the snapshot and never listed code: the first `get` of a code location
+/// reads the `.gitignore` of its directory and the file, and the same `get` again reads
+/// nothing, since the session keeps what `get` listed and read, also after `project validate`
+/// and a request that reads documents only. The warm case finds the daemons
+/// of a test in `/proc`.
 #[cfg(target_os = "linux")]
 #[test]
 fn warm_get_of_code_reads_no_document() {
@@ -204,6 +252,7 @@ fn warm_get_of_code_reads_no_document() {
     let daemons = Daemons::new(runtime.path(), None);
     for grammar in [false, true] {
         let corpus = Corpus::generate(1, SEED);
+        code_tree_with_a_problem(&corpus);
         let home = level(&corpus, grammar);
         let home = home.as_ref().map_or(runtime.path(), |home| home.path());
         let env = [
@@ -212,9 +261,17 @@ fn warm_get_of_code_reads_no_document() {
             ("HOME", home),
         ];
         let run = |args: &[&str]| cli::run_with(corpus.root(), args, &env, 0);
+        let served = || {
+            let status = run(&["--format", "json", "daemon", "status"]);
+            let status: Value = serde_json::from_slice(&status.output.stdout).unwrap();
+            status["served"].as_u64().expect("a running daemon's count")
+        };
         let get = |address: &str| {
+            let before = served();
             let run = run(&["--format", "json", "get", address]);
+            assert_eq!(served(), before + 1, "the daemon served get {address}");
             let result: Value = serde_json::from_slice(&run.output.stdout).unwrap();
+            assert_eq!(diagnostics(&result), &Value::Array(Vec::new()), "{result}");
             (run.work, result)
         };
         settle(SystemTime::now());
@@ -225,19 +282,31 @@ fn warm_get_of_code_reads_no_document() {
 
         let (line, file) = addresses(&corpus);
         let (work, _) = get(&line);
-        let expected = WorkCounts {
-            file_reads: 1,
-            hashes: 1,
+        // The `.gitignore` of the code file's directory and the code file.
+        let first = WorkCounts {
+            file_reads: 2,
+            hashes: 2,
             code_scans: u64::from(grammar),
             ..WorkCounts::default()
         };
-        assert_eq!(work, expected, "warm get {line}, grammar {grammar}");
-        // The same request again: the session keeps the file's contents and its scan.
+        assert_eq!(work, first, "warm get {line}, grammar {grammar}");
+        // The same request again: the session keeps the listings and `.gitignore` files on the
+        // way to the file, its contents and its scan.
         let (work, _) = get(&line);
         assert_eq!(
             work,
             WorkCounts::default(),
             "warm get {line} again, grammar {grammar}"
+        );
+        // A listing of the code files, then a request that reads documents only and drops the
+        // code directories from the inventory: the session still keeps what `get` checks.
+        cli::run_any(corpus.root(), &["project", "validate"], &env);
+        run(&["item", "list"]);
+        let (work, _) = get(&line);
+        assert_eq!(
+            work,
+            WorkCounts::default(),
+            "warm get {line} after a listing of the code files, grammar {grammar}"
         );
 
         // A code file changed on disk is read as it is now.
@@ -246,6 +315,12 @@ fn warm_get_of_code_reads_no_document() {
         code.push_str("// changed after the session opened\n");
         fs::write(&absolute, &code).unwrap();
         let (work, result) = get(&file);
+        let expected = WorkCounts {
+            file_reads: 1,
+            hashes: 1,
+            code_scans: u64::from(grammar),
+            ..WorkCounts::default()
+        };
         assert_eq!(
             work, expected,
             "warm get {file} after a change, grammar {grammar}"

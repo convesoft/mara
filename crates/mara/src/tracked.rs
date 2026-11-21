@@ -61,6 +61,12 @@ impl Stat {
     }
 }
 
+/// Whether a check of the file or directory whose metadata is `metadata` keeps what a check at
+/// `checked` found with the stat `stat`: the stat is unchanged, and that check settled it.
+fn kept_by(metadata: &Metadata, stat: Stat, checked: SystemTime) -> bool {
+    Stat::of(metadata) == stat && stat.settled_at(checked)
+}
+
 /// A file's contents as of a check, with the value derived from them.
 #[derive(Clone, Debug)]
 pub(crate) struct Tracked<T> {
@@ -100,9 +106,13 @@ impl<T> Tracked<T> {
         (self.stat, self.checked, self.hash) == (other.stat, other.checked, other.hash)
     }
 
-    /// When the check that read the contents began.
-    pub(crate) fn checked(&self) -> SystemTime {
-        self.checked
+    /// Whether a check of the file whose metadata, without following a link, is `metadata`
+    /// keeps these contents without reading it: the file has the stat they were read with, and
+    /// their check settled them. Of several records of one file, this tells the one that
+    /// answers, whatever their check times. The caller takes the metadata only where the check
+    /// would, after the walk admitted the file's directories.
+    pub(crate) fn holds(&self, metadata: &Metadata) -> bool {
+        kept_by(metadata, self.stat, self.checked)
     }
 
     /// The same check of the same contents, with another value.
@@ -262,6 +272,13 @@ pub(crate) enum Kind {
     SymbolicLink,
     /// A socket, pipe or device, or a type that cannot be determined.
     Other,
+}
+
+impl Listing {
+    /// [`Tracked::holds`] for a directory: a check keeps this listing.
+    pub(crate) fn holds(&self, metadata: &Metadata) -> bool {
+        kept_by(metadata, self.stat, self.checked)
+    }
 }
 
 /// Lists the directory at `path`, whose metadata is `metadata`, in a request that began at
