@@ -8,10 +8,9 @@ include = ["docs/**/*.mara.md"]
 [code]
 format_version = 1
 
-# The crates' source, read at the grammar level: only comments hold markers.
-# `crates/*/tests/` stays out: its fixture files hold real comments with markers of test IDs.
+# Every Rust file of the crates, tests included, is read at the grammar level: only comments hold markers.
 [code.languages.rust]
-include = ["crates/mara/src/**/*.rs", "crates/mara-engine/src/**/*.rs"]
+include = ["crates/**/*.rs"]
 comment_prefixes = ["//", "///"]
 grammar = { version = "0.24.2", checksum = "blake3:f03b54d5fcef88042d4645c2820c4a4bedbd4edaed2e01ad85e67b325c2d7149" }
 
