@@ -11,7 +11,7 @@ Done when, in a fresh worktree after `pnpm install`, one documented `nx` command
 
 Asked by the maintainer on 2026-11-21, before the alpha.6 slice starts: "Before we start next milestone could we move this repo on this tooling? https://github.com/convesoft/nx-rust … Let it be a small epic because we need to initialize nx workspace for example and other routine". The slice mara-xzfeyj (Node library and browser) is blocked by this epic: its JS packages and its napi and WASM artifacts are to be built in this workspace.
 
-Decided by the maintainer: until `@convesoft/nx-rust` is on npm, the repository depends on the build output of the maintainer's local checkout by path (`/home/araketski/Work/github.com/convesoft/nx-rust/dist/nx-rust`), which works on this machine only; the dependency becomes the npm version when the package is published.
+Decided by the maintainer: until `@convesoft/nx-rust` is on npm, the repository uses the plugin from the maintainer's local checkout by path, loaded from its TypeScript source without a build (`/home/araketski/Work/github.com/convesoft/nx-rust/nx-rust`; mara-a4ga3m has what that needs), which works on this machine only; the dependency becomes the npm version when the package is published.
 
 Decided by the orchestrator, provisional (review issue of this epic): the Nx targets are added beside the cargo commands, which stay documented as the fallback, and the orchestrator's gate runs both until a run has shown the same results; worktrees do not share an Nx cache, so the gate executes its checks itself.
 

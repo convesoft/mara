@@ -18,7 +18,7 @@ Context: AGENTS.md (Deciding during the rewrite). When the epic closes, the orch
 ## Decided by the maintainer
 
 - 2026-11-21: the repository moves to Nx with `@convesoft/nx-rust` before the alpha.6 slice starts, as a small epic.
-- 2026-11-21: until the package is on npm, the dependency is the build output of the maintainer's local nx-rust checkout, by path (chosen over a vendored tarball, a GitHub pre-release and waiting for npm). It works on this machine only.
+- 2026-11-21: until the package is on npm, the plugin is used from the maintainer's local nx-rust checkout, by path (chosen over a vendored tarball, a GitHub pre-release and waiting for npm), and on 2026-11-22: from its TypeScript source, without a build. It works on this machine only.
 - 2026-11-21: what the plugin does not handle is a custom Nx target (one that calls `zban`, for example), and `package.json` scripts combine the usual checks.
 
 ## Decided by the orchestrator
