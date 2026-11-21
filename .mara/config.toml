@@ -8,28 +8,12 @@ include = ["docs/**/*.mara.md"]
 [code]
 format_version = 1
 
-# The crates' source. `crates/*/tests/` and `crates/mara-engine/src/code/tests.rs` are left out:
-# their marker-shaped test data would be markers, and patterns cannot exclude a file.
-# Rust at the basic level: a pinned grammar needs `mara code add rust`, which downloads (mara-cp1skx).
+# The crates' source, read at the grammar level: only comments hold markers.
+# `crates/*/tests/` stays out: its fixture files hold real comments with markers of test IDs.
 [code.languages.rust]
-include = [
-    "crates/mara/src/**/*.rs",
-    "crates/mara-engine/src/*.rs",
-    "crates/mara-engine/src/code/outline.rs",
-    "crates/mara-engine/src/authoring/**/*.rs",
-    "crates/mara-engine/src/config/**/*.rs",
-    "crates/mara-engine/src/document/**/*.rs",
-    "crates/mara-engine/src/evaluation/**/*.rs",
-    "crates/mara-engine/src/facts/**/*.rs",
-    "crates/mara-engine/src/fix/**/*.rs",
-    "crates/mara-engine/src/program/**/*.rs",
-    "crates/mara-engine/src/read/**/*.rs",
-    "crates/mara-engine/src/relink/**/*.rs",
-    "crates/mara-engine/src/snapshot/**/*.rs",
-    "crates/mara-engine/src/validation/**/*.rs",
-    "crates/mara-engine/src/write/**/*.rs",
-]
+include = ["crates/mara/src/**/*.rs", "crates/mara-engine/src/**/*.rs"]
 comment_prefixes = ["//", "///"]
+grammar = { version = "0.24.2", checksum = "blake3:f03b54d5fcef88042d4645c2820c4a4bedbd4edaed2e01ad85e67b325c2d7149" }
 
 [rules]
 programs = [".mara/rules/*.dl"]

@@ -27,7 +27,7 @@ For every document in this repository, this file included:
 - `Accepted` means decided, not built. `Draft` marks a proposal or a provisional number.
 - Add only relations that carry meaning. Never add an item or a link just to complete a chain.
 - Update the affected items in the same change as the code.
-- Code that implements an Accepted requirement carries `@mara implements <ID>` ([DES-CODE-MARKERS](docs/code/index.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)) on each function or type that carries out a distinct obligation of it, for the hosts that exist; a requirement that no single place or only `.mara/rules/*.dl` implements carries none. Markers change with the code. A Rust file is scanned only if a pattern of `[code]` in [.mara/config.toml](.mara/config.toml) matches it: check when you add a file or directory under `crates/mara-engine/src/`.
+- Code that implements an Accepted requirement carries `@mara implements <ID>` ([DES-CODE-MARKERS](docs/code/index.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)) on each function or type that carries out a distinct obligation of it, for the hosts that exist; a requirement that no single place or only `.mara/rules/*.dl` implements carries none. Markers change with the code. Every `.rs` file under `crates/mara/src/` and `crates/mara-engine/src/` is scanned at the grammar level, so only comments hold markers.
 - Read and change `docs/` with the binary built in your worktree, in direct mode, as `cargo run --quiet --bin mara -- --no-daemon <operation>`. When your context lacks its guide, headed `# Mara workflow`, run `cargo run --quiet --bin mara -- prime` first.
 - A requirement is Accepted together with its Verification item. The rewrite is the exception: until 0.4.0 ships, a slice's Verification items are written before its work starts, by the issue that blocks the slice's epic.
 - Ask before deciding anything that changes user-visible behaviour, a persisted format, data safety or scope. Small reversible choices need no question. Until 0.4.0 is published, [Deciding during the rewrite](#deciding-during-the-rewrite) replaces this rule.
@@ -64,7 +64,7 @@ One orchestrator starts a worker for each ready issue and integrates its branch.
 
 ## Local checks
 
-Run `scripts/build-souffle.sh` once in a fresh worktree first: `cargo test` needs the Soufflé it builds. Run them from the repository root; each must exit 0. `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins. The `wasm32` build is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9). The release test times a release build for [VER-SCALING](docs/verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW).
+Run `scripts/build-souffle.sh` once in a fresh worktree first: `cargo test` needs the Soufflé it builds. Run `cargo run --quiet --bin mara -- --no-daemon code add rust` once on each machine first: `project validate` needs this repository's pinned grammar in the per-user cache ([DES-GRAMMAR-ASSETS](docs/code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)). Run them from the repository root; each must exit 0. `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins. The `wasm32` build is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9). The release test times a release build for [VER-SCALING](docs/verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW).
 
 ```sh
 cargo fmt --all --check
