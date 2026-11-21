@@ -1,7 +1,8 @@
 //! The daemon's watches (DES-DAEMON-SESSIONS), as the kernel lists them in the `fdinfo` of the
 //! daemon's inotify descriptor: they exist once `daemon start` opened a session, before any
 //! request, and they follow a directory that is moved away and replaced, or deleted and created
-//! again, as a branch checkout does.
+//! again, as a branch checkout does. A sync of a session's watches holds no lock across its
+//! system calls: the watcher reads events and derives meanwhile.
 
 use std::fs;
 use std::os::unix::fs::MetadataExt;
@@ -9,7 +10,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::{Test, WAIT};
+use crate::{Test, WAIT, finish};
 
 /// The inodes of the directories the daemon `pid` watches.
 fn watched(pid: u32) -> Vec<u64> {
@@ -109,4 +110,60 @@ fn watches_follow_a_directory_moved_away_and_copied_back_or_created_again() {
         test.run_in(&project, &read, &[]),
         test.direct(&project, &read)
     );
+}
+
+/// A request's sync of its session's watches, paused by `MARA_TEST_PAUSE_WATCH`
+/// (ADR-DEBUG-PAUSE-POINT) where it looks up directories and adds watches, keeps neither the
+/// thread that reads events nor a background derivation waiting: an edit made meanwhile is
+/// derived, as `MARA_TEST_DERIVED` reports, before the sync goes on.
+#[cfg(debug_assertions)]
+#[test]
+fn a_sync_paused_at_its_system_calls_keeps_the_watcher_working() {
+    let test = Test::new();
+    let project = test.project();
+    let pauses = test.path().join("pauses");
+    fs::create_dir(&pauses).unwrap();
+    let paused = pauses.join("paused");
+    let derived = test.path().join("derived");
+    let derivations = || {
+        fs::read_to_string(&derived)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    let wait_for = |what: &str, done: &dyn Fn() -> bool| {
+        let deadline = Instant::now() + WAIT;
+        while !done() {
+            assert!(Instant::now() < deadline, "{what}");
+            thread::sleep(Duration::from_millis(5));
+        }
+    };
+    let env = [
+        ("MARA_TEST_PAUSE_WATCH", pauses.to_str().unwrap()),
+        ("MARA_TEST_DERIVED", derived.to_str().unwrap()),
+    ];
+    // `daemon start` derives its project, then syncs its watches.
+    let pid = test.start_in(&project, &env);
+    wait_for("no sync after the first derivation", &|| paused.exists());
+    assert_eq!(derivations(), 1);
+    fs::remove_file(&paused).unwrap();
+    wait_for_watches(pid, &[inode(&project.join("docs"))], &[]);
+    // A read's sync stops before its system calls.
+    let read = ["--format", "json", "item", "list"];
+    let mut client = test.spawn_in(&project, &read);
+    wait_for("the read did not sync", &|| paused.exists());
+    let document = project.join("docs/reqs.mara.md");
+    let text = fs::read_to_string(&document).unwrap();
+    fs::write(&document, text.replace("## Two", "## Deux")).unwrap();
+    wait_for("the edit was not derived while a sync was paused", &|| {
+        derivations() == 2
+    });
+    // The read and the derivation's own sync go on.
+    while client.try_wait().unwrap().is_none() {
+        let _ = fs::remove_file(&paused);
+        thread::sleep(Duration::from_millis(5));
+    }
+    finish(client).succeeded();
+    let _ = fs::remove_file(&paused);
+    test.run(&["daemon", "stop"]).succeeded();
 }

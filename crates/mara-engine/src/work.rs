@@ -1,5 +1,7 @@
 //! Work counters (DES-PERFORMANCE-HARNESS in `docs/performance.mara.md`).
 
+use std::ops::AddAssign;
+
 /// The work one request does.
 ///
 /// The host creates one per request, passes it by `&mut` to every engine call that does counted
@@ -37,5 +39,30 @@ impl WorkCounts {
             ("check_steps", self.check_steps),
             ("program_runs", self.program_runs),
         ]
+    }
+}
+
+impl AddAssign<&WorkCounts> for WorkCounts {
+    /// Adds every counter of `other`: the work of two requests, or of a request and the
+    /// background, together.
+    fn add_assign(&mut self, other: &WorkCounts) {
+        let WorkCounts {
+            file_reads,
+            hashes,
+            parses,
+            snapshot_builds,
+            code_scans,
+            subprocess_spawns,
+            check_steps,
+            program_runs,
+        } = other;
+        self.file_reads += file_reads;
+        self.hashes += hashes;
+        self.parses += parses;
+        self.snapshot_builds += snapshot_builds;
+        self.code_scans += code_scans;
+        self.subprocess_spawns += subprocess_spawns;
+        self.check_steps += check_steps;
+        self.program_runs += program_runs;
     }
 }

@@ -8,10 +8,12 @@
 
 use std::fs::{self, DirBuilder, File, OpenOptions, TryLockError};
 use std::io::{self, Read, Write};
+use std::net::Shutdown;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use mara_engine::hash::Hash;
@@ -197,10 +199,8 @@ impl Runtime {
 
     /// Writes an empty lock of mode 0600 and links it into place, unless another process did.
     fn create_lock(&self) -> io::Result<()> {
-        let mut staged = self.lock.as_os_str().to_owned();
-        staged.push(format!(".{}", std::process::id()));
-        let staged = PathBuf::from(staged);
-        // One that this process ID left earlier.
+        let staged = self.staged_lock();
+        // One that an earlier process of this ID left.
         let _ = fs::remove_file(&staged);
         let file = OpenOptions::new()
             .write(true)
@@ -217,6 +217,17 @@ impl Runtime {
             });
         let _ = fs::remove_file(&staged);
         linked.map_err(|error| annotate(error, "cannot create the daemon lock", &self.lock))
+    }
+
+    /// A name for a new lock before it is linked into place, which no other call of any live
+    /// process uses: the lock's name, the process ID and a number this process never gives
+    /// twice, so that two threads of one process starting the daemon at once never collide.
+    fn staged_lock(&self) -> PathBuf {
+        static STAGED: AtomicU64 = AtomicU64::new(0);
+        let number = STAGED.fetch_add(1, Ordering::Relaxed);
+        let mut staged = self.lock.as_os_str().to_owned();
+        staged.push(format!(".{}.{number}", std::process::id()));
+        PathBuf::from(staged)
     }
 
     /// Binds the socket with mode 0600 whatever the umask, and checks it. The process must run
@@ -391,22 +402,31 @@ pub fn try_lock(file: &File) -> io::Result<bool> {
     }
 }
 
+/// [`write_frame`] on a connection, which ends for writing when the frame fails: a frame cut
+/// after its length would make the peer read whatever comes next as its payload.
+pub fn send_frame(stream: &UnixStream, payload: &[u8]) -> io::Result<()> {
+    let mut writer = stream;
+    let sent = write_frame(&mut writer, payload);
+    if sent.is_err() {
+        let _ = stream.shutdown(Shutdown::Write);
+    }
+    sent
+}
+
 /// Writes one frame: the payload's length as 4 bytes, big-endian, then the payload.
 pub fn write_frame(stream: &mut impl Write, payload: &[u8]) -> io::Result<()> {
-    stream.write_all(&frame(payload)?)?;
+    stream.write_all(&frame_length(payload)?)?;
+    stream.write_all(payload)?;
     stream.flush()
 }
 
-/// The bytes of one frame of `payload`.
-pub fn frame(payload: &[u8]) -> io::Result<Vec<u8>> {
+/// The 4 bytes that start the frame of `payload`.
+pub fn frame_length(payload: &[u8]) -> io::Result<[u8; 4]> {
     if payload.len() > MAX_FRAME {
         return Err(io::Error::other("the message is too large for the daemon"));
     }
     let length = u32::try_from(payload.len()).expect("MAX_FRAME fits in 32 bits");
-    let mut frame = Vec::with_capacity(4 + payload.len());
-    frame.extend_from_slice(&length.to_be_bytes());
-    frame.extend_from_slice(payload);
-    Ok(frame)
+    Ok(length.to_be_bytes())
 }
 
 /// Reads one frame: `None` when the stream ends before it starts.
@@ -591,6 +611,61 @@ mod tests {
             assert!(!keys[index + 1..].contains(key), "{key}");
         }
         assert_eq!(one.key(), build("/bin/mara", 10, (5, 6)).key());
+    }
+
+    #[test]
+    fn threads_of_one_process_create_the_lock_at_once() {
+        let base = tempfile::tempdir().unwrap();
+        let directory = base.path().join("mara");
+        let runtime = Runtime {
+            lock: directory.join("key.lock"),
+            socket: directory.join("key.sock"),
+            directory,
+        };
+        runtime.create().unwrap();
+        // Each staged name is new, so no call removes the file another thread is linking.
+        assert_ne!(runtime.staged_lock(), runtime.staged_lock());
+        let threads = 16;
+        let barrier = std::sync::Barrier::new(threads);
+        std::thread::scope(|scope| {
+            let opened: Vec<_> = (0..threads)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        runtime.open_lock().map(drop)
+                    })
+                })
+                .collect();
+            for thread in opened {
+                thread.join().unwrap().unwrap();
+            }
+        });
+        // Only the lock is left, of mode 0600.
+        let names: Vec<_> = fs::read_dir(&runtime.directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["key.lock"]);
+        let mode = fs::metadata(&runtime.lock).unwrap().mode() & 0o7777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn a_frame_cut_after_its_length_ends_the_connection_for_writing() {
+        let (writer, mut reader) = UnixStream::pair().unwrap();
+        writer
+            .set_write_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
+        // Larger than any socket buffer, and never read while it is written: it times out
+        // after its length and part of its payload.
+        let payload = vec![b' '; 16 << 20];
+        assert!(send_frame(&writer, &payload).is_err());
+        // Nothing more is written: not a frame that the reader would take for the payload.
+        let next = send_frame(&writer, b"{}").unwrap_err();
+        assert_eq!(next.kind(), io::ErrorKind::BrokenPipe);
+        // The reader finds the frame cut short by the end of the stream.
+        let cut = read_frame(&mut reader).unwrap_err();
+        assert_eq!(cut.kind(), io::ErrorKind::UnexpectedEof);
     }
 
     #[test]

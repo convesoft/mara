@@ -26,23 +26,52 @@ pub struct Caller {
 }
 
 impl Caller {
-    /// The values of this process. The umask is read by setting it and setting it back, so
-    /// this runs before the process starts a thread that creates files.
+    /// The values of this process.
     pub fn of_this_process() -> Caller {
-        // SAFETY: umask takes no pointer and cannot fail.
-        let umask = unsafe {
-            let umask = libc::umask(0o077);
-            libc::umask(umask);
-            umask
-        };
-        // `mode_t` is `u16` on macOS.
-        #[allow(clippy::useless_conversion)]
-        let umask = u32::from(umask);
         Caller {
-            umask,
+            umask: this_umask(),
             temp_dir: std::env::temp_dir(),
         }
     }
+}
+
+/// This process's umask, read without changing it from `Umask:` of `/proc/self/status` (Linux
+/// 4.7 and later).
+#[cfg(target_os = "linux")]
+fn this_umask() -> u32 {
+    let status = fs::read("/proc/self/status").unwrap_or_default();
+    // An older kernel, or no `/proc`.
+    umask_in(&status).unwrap_or_else(umask_by_setting)
+}
+
+/// The umask in the `Umask:` line of a `/proc/<pid>/status`. The file is read as bytes: other
+/// lines, such as the task's name, need not be UTF-8.
+#[cfg(target_os = "linux")]
+fn umask_in(status: &[u8]) -> Option<u32> {
+    let field =
+        (status.split(|&byte| byte == b'\n')).find_map(|line| line.strip_prefix(b"Umask:"))?;
+    u32::from_str_radix(std::str::from_utf8(field).ok()?.trim(), 8).ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn this_umask() -> u32 {
+    umask_by_setting()
+}
+
+/// This process's umask, read where the system offers no way to read it but setting it, as on
+/// macOS: set and set back. Race: a file another thread of this process creates between the two
+/// calls gets mode bits less 0o077 instead of less the umask, and two threads that read it so at
+/// once can leave 0o077 set.
+fn umask_by_setting() -> u32 {
+    // SAFETY: umask takes no pointer and cannot fail.
+    let umask = unsafe {
+        let umask = libc::umask(0o077);
+        libc::umask(umask);
+        umask
+    };
+    // `mode_t` is `u16` on macOS.
+    #[allow(clippy::useless_conversion)]
+    u32::from(umask)
 }
 
 thread_local! {
@@ -50,16 +79,16 @@ thread_local! {
     static SERVED: RefCell<Option<Caller>> = const { RefCell::new(None) };
 }
 
-/// Runs `serve` on this thread as a request of `caller`.
+/// Runs `serve` on this thread as a request of `caller`, then restores the caller this thread
+/// served before, if any.
 pub fn serve<T>(caller: Caller, serve: impl FnOnce() -> T) -> T {
-    struct Reset;
-    impl Drop for Reset {
+    struct Restore(Option<Caller>);
+    impl Drop for Restore {
         fn drop(&mut self) {
-            SERVED.with(|served| served.borrow_mut().take());
+            SERVED.with(|served| *served.borrow_mut() = self.0.take());
         }
     }
-    SERVED.with(|served| *served.borrow_mut() = Some(caller));
-    let _reset = Reset;
+    let _restore = Restore(SERVED.with(|served| served.borrow_mut().replace(caller)));
     serve()
 }
 
@@ -111,18 +140,16 @@ pub fn create_new(path: &Path) -> io::Result<File> {
 
 /// Creates or truncates the file `path` and writes `contents`, as `fs::write` does in the
 /// client's process: a created file gets 0666 less the umask, an existing one keeps its mode.
+/// Whether it is created is the open's own answer, so a file another process creates or removes
+/// meanwhile gets no wrong mode: one removed between the two opens is a `NotFound` error, as is a
+/// link to nothing, which `fs::write` would follow.
 pub fn write(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
-    let umask = umask();
-    let existed = fs::symlink_metadata(path).is_ok();
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o666 & !umask.unwrap_or(0))
-        .open(path)?;
-    if !existed && let Some(umask) = umask {
-        file.set_permissions(Permissions::from_mode(0o666 & !umask))?;
-    }
+    let mut file = match create_new(path) {
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            OpenOptions::new().write(true).truncate(true).open(path)?
+        }
+        created => created?,
+    };
     file.write_all(contents.as_ref())
 }
 
@@ -136,4 +163,62 @@ pub fn tempdir(prefix: &str) -> io::Result<tempfile::TempDir> {
         .tempdir_in(temp_dir())?;
     restore(dir.path(), 0o700, umask)?;
     Ok(dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn caller(umask: u32) -> Caller {
+        Caller {
+            umask,
+            temp_dir: std::env::temp_dir(),
+        }
+    }
+
+    #[test]
+    fn this_umask_is_the_one_a_child_inherits() {
+        let output = std::process::Command::new("sh")
+            .args(["-c", "umask"])
+            .output()
+            .unwrap();
+        let printed = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(
+            u32::from_str_radix(printed.trim(), 8).unwrap(),
+            Caller::of_this_process().umask
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_umask_is_read_from_a_status_whose_name_is_no_utf8() {
+        let status = b"Name:\tmara\xff\xfe\nUmask:\t0027\nState:\tR (running)\n";
+        assert_eq!(umask_in(status), Some(0o027));
+        assert_eq!(umask_in(b"Name:\tmara\nState:\tR\n"), None);
+    }
+
+    #[test]
+    fn a_nested_serve_restores_the_outer_caller() {
+        serve(caller(0o022), || {
+            serve(caller(0o077), || assert_eq!(umask(), Some(0o077)));
+            assert_eq!(umask(), Some(0o022));
+        });
+        assert_eq!(umask(), None);
+    }
+
+    #[test]
+    fn write_gives_a_created_file_the_callers_mode_and_keeps_an_existing_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let (created, existing) = (dir.path().join("created"), dir.path().join("existing"));
+        fs::write(&existing, "old").unwrap();
+        fs::set_permissions(&existing, Permissions::from_mode(0o640)).unwrap();
+        serve(caller(0o002), || {
+            write(&created, "new").unwrap();
+            write(&existing, "new").unwrap();
+        });
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&created), 0o664);
+        assert_eq!(mode(&existing), 0o640);
+        assert_eq!(fs::read_to_string(&existing).unwrap(), "new");
+    }
 }

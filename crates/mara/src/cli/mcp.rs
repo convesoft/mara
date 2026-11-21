@@ -24,7 +24,7 @@ use serde_json::{Value, json};
 
 use mara::caller::Caller;
 
-use super::client::{self, add};
+use super::client;
 use super::guide::{self, Surface};
 use super::{
     Args, Context, FAILURE, Failure, Kind, OPERATIONS, Operation, Opt, PROJECT, REJECTED, Reply,
@@ -83,10 +83,7 @@ fn serve(context: &mut Context) -> u8 {
         }),
         Err(error) => Err(format!("cannot start the runtime: {error}")),
     };
-    add(
-        context.work,
-        &work.lock().unwrap_or_else(PoisonError::into_inner),
-    );
+    *context.work += &*work.lock().unwrap_or_else(PoisonError::into_inner);
     match outcome {
         Ok(()) => SUCCESS,
         Err(message) => {
@@ -163,10 +160,7 @@ impl ServerHandler for Server {
                 session: None,
             };
             let reply = client::request(operation, run, &mut context, &args, true);
-            add(
-                &mut work.lock().unwrap_or_else(PoisonError::into_inner),
-                &counts,
-            );
+            *work.lock().unwrap_or_else(PoisonError::into_inner) += &counts;
             reply
         })
         .await

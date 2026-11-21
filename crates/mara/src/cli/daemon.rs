@@ -81,7 +81,7 @@ fn ask(stream: &mut UnixStream, build: &Build, request: &str) -> io::Result<Valu
         "build": build.key(),
         "request": request,
     });
-    daemon::write_frame(stream, message.to_string().as_bytes())?;
+    daemon::send_frame(stream, message.to_string().as_bytes())?;
     let Some(frame) = daemon::read_frame(stream)? else {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,

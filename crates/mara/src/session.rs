@@ -76,20 +76,7 @@ impl Session {
 
     /// Adds the work of a request, or of the background, to what the next response reports.
     pub fn add(&self, work: &WorkCounts) {
-        let mut guard = lock(&self.work);
-        let total = &mut *guard;
-        for (field, value) in [
-            (&mut total.file_reads, work.file_reads),
-            (&mut total.hashes, work.hashes),
-            (&mut total.parses, work.parses),
-            (&mut total.snapshot_builds, work.snapshot_builds),
-            (&mut total.code_scans, work.code_scans),
-            (&mut total.subprocess_spawns, work.subprocess_spawns),
-            (&mut total.check_steps, work.check_steps),
-            (&mut total.program_runs, work.program_runs),
-        ] {
-            *field += value;
-        }
+        *lock(&self.work) += work;
     }
 
     /// The work done since the previous response, which a response reports.

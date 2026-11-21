@@ -18,6 +18,7 @@
 //! `daemon-lost`.
 
 use std::io::{self, Write};
+use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
@@ -88,7 +89,7 @@ pub fn request(
     }
     match dispatch(operation, context, args, json) {
         Sent::Answered(reply, work) => {
-            add(context.work, &work);
+            *context.work += &work;
             reply
         }
         Sent::Lost { pid, why } => Reply::new(Err(lost(operation, pid, &why)), json),
@@ -232,22 +233,34 @@ fn message(
     }))
 }
 
-/// Writes the request's frame in full within [`SEND_TIMEOUT`], or fails.
+/// Writes the request's frame in full within [`SEND_TIMEOUT`], or fails and ends the
+/// connection for writing, as [`daemon::send_frame`] does.
 fn send(stream: &mut UnixStream, message: &Value) -> io::Result<()> {
-    let frame = daemon::frame(message.to_string().as_bytes())?;
+    let sent = write_request(stream, message);
+    if sent.is_err() {
+        let _ = stream.shutdown(Shutdown::Write);
+    }
+    sent
+}
+
+fn write_request(stream: &mut UnixStream, message: &Value) -> io::Result<()> {
+    let payload = message.to_string();
+    let length = daemon::frame_length(payload.as_bytes())?;
     let deadline = Instant::now() + SEND_TIMEOUT;
-    let mut written = 0;
-    while written < frame.len() {
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Err(io::ErrorKind::TimedOut.into());
-        }
-        stream.set_write_timeout(Some(left))?;
-        match stream.write(&frame[written..]) {
-            Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-            Ok(count) => written += count,
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error),
+    for part in [&length[..], payload.as_bytes()] {
+        let mut written = 0;
+        while written < part.len() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(io::ErrorKind::TimedOut.into());
+            }
+            stream.set_write_timeout(Some(left))?;
+            match stream.write(&part[written..]) {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(count) => written += count,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(error),
+            }
         }
     }
     Ok(())
@@ -322,18 +335,6 @@ fn start_daemon(cwd: PathBuf, project: Option<PathBuf>) {
             .name("mara-daemon-start".to_owned())
             .spawn(move || child.wait());
     }
-}
-
-/// Adds the work of one request to `total`.
-pub fn add(total: &mut WorkCounts, call: &WorkCounts) {
-    total.file_reads += call.file_reads;
-    total.hashes += call.hashes;
-    total.parses += call.parses;
-    total.snapshot_builds += call.snapshot_builds;
-    total.code_scans += call.code_scans;
-    total.subprocess_spawns += call.subprocess_spawns;
-    total.check_steps += call.check_steps;
-    total.program_runs += call.program_runs;
 }
 
 /// The daemon's answer to an operation request: the reply and the work counts of the request's

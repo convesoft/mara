@@ -509,7 +509,8 @@ impl From<SelectError> for Failure {
 /// Runs the request that `arguments` make, prints its result or failure and returns the exit
 /// status.
 pub fn run(arguments: &[OsString], work: &mut WorkCounts) -> u8 {
-    // Read while this process runs one thread: reading the umask sets it for a moment.
+    // Read while this process runs one thread: where the umask cannot be read from
+    // `/proc/self/status`, as on macOS, reading it sets it for a moment.
     let caller = Caller::of_this_process();
     let json = requested_json(arguments);
     let reply = match parse(arguments) {

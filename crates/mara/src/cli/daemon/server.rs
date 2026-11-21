@@ -260,11 +260,11 @@ impl Daemon {
         self.changed.notify_all();
     }
 
-    /// The answer to one request. `stop` makes the daemon stop.
-    fn answer(&self, frame: &[u8]) -> Value {
-        let request: Value = match serde_json::from_slice(frame) {
+    /// The answer to one request, as [`parse`] read it. `stop` makes the daemon stop.
+    fn answer(&self, request: &Result<Value, String>) -> Value {
+        let request = match request {
             Ok(request) => request,
-            Err(error) => return self.refuse("malformed-request", &error.to_string()),
+            Err(error) => return self.refuse("malformed-request", error),
         };
         if request["version"].as_u64() != Some(PROTOCOL_VERSION) {
             return self.refuse("malformed-request", "the request has another version");
@@ -289,7 +289,7 @@ impl Daemon {
             Some("stop") => json!({"version": PROTOCOL_VERSION, "pid": self.pid, "stopping": true}),
             Some("operation") => {
                 self.touch();
-                let answer = client::answer(&request, &self.sessions, self.watcher.as_ref());
+                let answer = client::answer(request, &self.sessions, self.watcher.as_ref());
                 self.touch();
                 match answer {
                     Ok(mut answer) => {
@@ -454,15 +454,24 @@ fn accept(daemon: &Arc<Daemon>, listener: &UnixListener) {
     }
 }
 
+/// The JSON request of one frame, read once for both [`connection`] and [`Daemon::answer`], or
+/// why it is none.
+fn parse(frame: &[u8]) -> Result<Value, String> {
+    serde_json::from_slice(frame).map_err(|error| error.to_string())
+}
+
 /// Answers the requests of one connection in order. After `stop`, whose answer it sends before
 /// the daemon stops, keeps the connection open until the process exits, which tells the client
 /// that the daemon has ended.
 fn connection(daemon: &Daemon, mut stream: UnixStream) {
     let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
     while let Ok(Some(frame)) = daemon::read_frame(&mut stream) {
-        let request: Value = serde_json::from_slice(&frame).unwrap_or(Value::Null);
-        let operation = request["request"] == "operation";
-        let write = operation && client::writes(&request);
+        let request = parse(&frame);
+        drop(frame);
+        let operation = request
+            .as_ref()
+            .is_ok_and(|request| request["request"] == "operation");
+        let write = operation && request.as_ref().is_ok_and(client::writes);
         let taken = {
             let mut state = daemon.state();
             if !state.stopping {
@@ -473,7 +482,7 @@ fn connection(daemon: &Daemon, mut stream: UnixStream) {
         };
         if !taken {
             let refusal = daemon.refuse("stopping", "the daemon is stopping");
-            if daemon::write_frame(&mut stream, refusal.to_string().as_bytes()).is_err() {
+            if daemon::send_frame(&stream, refusal.to_string().as_bytes()).is_err() {
                 return;
             }
             continue;
@@ -481,8 +490,8 @@ fn connection(daemon: &Daemon, mut stream: UnixStream) {
         // A panic is a defect: the connection closes without an answer, and the client reports
         // `daemon-lost`, but the daemon still counts the request as finished.
         let answer = match operation {
-            true => answer_working(daemon, &frame, &stream),
-            false => panic::catch_unwind(AssertUnwindSafe(|| daemon.answer(&frame))),
+            true => answer_working(daemon, &request, &stream),
+            false => panic::catch_unwind(AssertUnwindSafe(|| daemon.answer(&request))),
         };
         // A stopping daemon ends its reads: one that ends meanwhile, its evaluation cancelled
         // perhaps, is not answered, and its client reports `daemon-lost`. Writes run to their
@@ -490,7 +499,7 @@ fn connection(daemon: &Daemon, mut stream: UnixStream) {
         let ended = operation && !write && daemon.state().stopping;
         let written = match &answer {
             Ok(_) if ended => Err(io::ErrorKind::Interrupted.into()),
-            Ok(answer) => daemon::write_frame(&mut stream, answer.to_string().as_bytes()),
+            Ok(answer) => daemon::send_frame(&stream, answer.to_string().as_bytes()),
             Err(_) => Err(io::ErrorKind::Other.into()),
         };
         {
@@ -517,11 +526,15 @@ fn connection(daemon: &Daemon, mut stream: UnixStream) {
 /// Answers an operation request on a worker thread, so that this thread can tell the client
 /// every [`daemon::HEARTBEAT`] that it still runs: a client takes silence for a daemon that
 /// stopped or hangs. A panic of the worker is returned as such.
-fn answer_working(daemon: &Daemon, frame: &[u8], stream: &UnixStream) -> thread::Result<Value> {
+fn answer_working(
+    daemon: &Daemon,
+    request: &Result<Value, String>,
+    stream: &UnixStream,
+) -> thread::Result<Value> {
     thread::scope(|scope| {
         let (done, finished) = mpsc::channel::<()>();
         let work = move || {
-            let answer = daemon.answer(frame);
+            let answer = daemon.answer(request);
             let _ = done.send(());
             answer
         };
@@ -531,7 +544,7 @@ fn answer_working(daemon: &Daemon, frame: &[u8], stream: &UnixStream) -> thread:
         {
             Ok(worker) => worker,
             // No thread to spare: the request runs here, without heartbeats.
-            Err(_) => return panic::catch_unwind(AssertUnwindSafe(|| daemon.answer(frame))),
+            Err(_) => return panic::catch_unwind(AssertUnwindSafe(|| daemon.answer(request))),
         };
         let heartbeat = json!({"version": PROTOCOL_VERSION, "pid": daemon.pid, "working": true});
         let heartbeat = heartbeat.to_string();
@@ -539,8 +552,7 @@ fn answer_working(daemon: &Daemon, frame: &[u8], stream: &UnixStream) -> thread:
         // Ends when the worker has answered, or has panicked and dropped `done`.
         while let Err(mpsc::RecvTimeoutError::Timeout) = finished.recv_timeout(daemon::HEARTBEAT) {
             if beating {
-                let mut writer = stream;
-                beating = daemon::write_frame(&mut writer, heartbeat.as_bytes()).is_ok();
+                beating = daemon::send_frame(stream, heartbeat.as_bytes()).is_ok();
             }
         }
         worker.join()

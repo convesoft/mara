@@ -46,7 +46,7 @@ impl Watcher {
     /// Makes the watches of `session` those of the directories its last check listed.
     pub fn sync(&self, session: &Arc<Session>) {
         #[cfg(target_os = "linux")]
-        self.inner.sync(session);
+        self.inner.sync(session, true);
         #[cfg(not(target_os = "linux"))]
         let _ = session;
     }
@@ -133,6 +133,39 @@ mod linux {
         state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// A pause point for tests, in debug builds only (ADR-DEBUG-PAUSE-POINT in
+    /// `docs/authoring/writes.mara.md`): when `MARA_TEST_PAUSE_WATCH` names a directory,
+    /// [`Inner::sync`] creates `paused` there before its lookups and new watches, while it holds
+    /// no lock, and goes on once it is gone.
+    #[cfg(debug_assertions)]
+    fn pause_sync() {
+        let Some(directory) =
+            std::env::var_os("MARA_TEST_PAUSE_WATCH").filter(|value| !value.is_empty())
+        else {
+            return;
+        };
+        let paused = Path::new(&directory).join("paused");
+        if std::fs::write(&paused, "").is_err() {
+            return;
+        }
+        while std::fs::symlink_metadata(&paused).is_ok() {
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn pause_sync() {}
+
+    /// The watches of `root` while `session` is the one registered for it.
+    fn owned<'s>(
+        state: &'s mut State,
+        root: &Path,
+        session: &Weak<Session>,
+    ) -> Option<&'s mut HashMap<PathBuf, Watched>> {
+        let (open, watched) = state.sessions.get_mut(root)?;
+        Weak::ptr_eq(open, session).then_some(watched)
+    }
+
     /// The device and inode of the directory at `path`, without following a link.
     fn inode(path: &Path) -> Option<(u64, u64)> {
         let metadata = std::fs::symlink_metadata(path).ok()?;
@@ -169,45 +202,85 @@ mod linux {
         }
 
         /// Makes the watches of `session` those of the directories its last check listed, each
-        /// on the directory its path names now.
-        pub(super) fn sync(&self, session: &Arc<Session>) {
+        /// on the directory its path names now. A request's sync (`claim`) makes `session` the
+        /// one its root's watches serve; a background sync goes on only while it is.
+        ///
+        /// Directories are looked up without the lock. Each change of a watch, the system call
+        /// with its record, is one step under the lock, which is then held for one
+        /// `inotify_add_watch` or `inotify_rm_watch` and released before the next, so that the
+        /// thread that reads events and other sessions get in between. Before each step the
+        /// sync checks that its session is still the one registered for its root: one whose
+        /// session was forgotten or replaced changes nothing more. No descriptor is recorded
+        /// after it was removed, and the thread that reads events sees every watch recorded
+        /// from its first event on.
+        pub(super) fn sync(&self, session: &Arc<Session>, claim: bool) {
             let directories: HashSet<PathBuf> = session.directories().into_iter().collect();
             let root = session.root().to_owned();
-            let mut state = lock(&self.state);
-            let mut watched = match state.sessions.remove(&root) {
-                Some((_, watched)) => watched,
-                None => HashMap::new(),
+            let this = Arc::downgrade(session);
+            // The directories no longer listed, whose watches end.
+            let gone: Vec<PathBuf> = {
+                let mut state = lock(&self.state);
+                if claim {
+                    let entry = (state.sessions)
+                        .entry(root.clone())
+                        .or_insert_with(|| (this.clone(), HashMap::new()));
+                    entry.0 = this.clone();
+                }
+                let Some((open, watched)) = state.sessions.get(&root) else {
+                    return;
+                };
+                if !Weak::ptr_eq(open, &this) {
+                    return;
+                }
+                (watched.keys())
+                    .filter(|directory| !directories.contains(*directory))
+                    .cloned()
+                    .collect()
             };
-            watched.retain(|directory, watch| {
-                let kept = directories.contains(directory);
-                if !kept {
+            for directory in gone {
+                let mut state = lock(&self.state);
+                let Some(watched) = owned(&mut state, &root, &this) else {
+                    return;
+                };
+                if let Some(watch) = watched.remove(&directory) {
                     self.unwatch(&mut state, watch.wd, &root);
                 }
-                kept
-            });
+            }
+            pause_sync();
             for directory in directories {
+                // Looked up before the watch is added: a directory replaced in between is
+                // found by the next sync, whose lookup tells another inode.
                 let now = inode(&directory);
-                if let Some(watch) = watched.get(&directory).copied() {
+                let mut state = lock(&self.state);
+                let Some(watched) = owned(&mut state, &root, &this) else {
+                    return;
+                };
+                let before = watched.get(&directory).copied();
+                if let Some(watch) = before {
                     // The kernel still holds the watch, and the path names its directory.
                     if Some(watch.inode) == now && state.watches.contains_key(&watch.wd) {
                         continue;
                     }
+                    if let Some(watched) = owned(&mut state, &root, &this) {
+                        watched.remove(&directory);
+                    }
                     self.unwatch(&mut state, watch.wd, &root);
-                    watched.remove(&directory);
+                    // The next watch is a step of its own.
+                    drop(state);
+                    state = lock(&self.state);
+                    if owned(&mut state, &root, &this).is_none() {
+                        return;
+                    }
                 }
-                // Looked up before the watch is added: a directory replaced in between is
-                // found by the next check.
-                let Some(now) = now else {
-                    continue;
-                };
-                if let Some(wd) = self.add(&directory) {
+                if let Some(now) = now
+                    && let Some(wd) = self.add(&directory)
+                {
                     state.watches.entry(wd).or_default().insert(root.clone());
-                    watched.insert(directory, Watched { wd, inode: now });
+                    if let Some(watched) = owned(&mut state, &root, &this) {
+                        watched.insert(directory, Watched { wd, inode: now });
+                    }
                 }
             }
-            state
-                .sessions
-                .insert(root, (Arc::downgrade(session), watched));
         }
 
         /// [`Inner::sync`] of the session at `session`'s root, while it is open.
@@ -217,7 +290,7 @@ mod linux {
                 .get(session.root())
                 .and_then(|(session, _)| session.upgrade());
             if let Some(session) = open {
-                self.sync(&session);
+                self.sync(&session, false);
             }
         }
 
