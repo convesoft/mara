@@ -11,10 +11,11 @@ use crate::{Dir, Server, cli};
 /// The heading that opens the full guide in both renderings (DES-AGENT-GUIDE).
 const HEADING: &str = "# Mara workflow\n";
 /// Its sections, in order.
-const SECTIONS: [&str; 4] = [
+const SECTIONS: [&str; 5] = [
     "## Find and read",
     "## Author",
     "## Repair after hand edits",
+    "## Link code",
     "## Validate",
 ];
 /// The tools the full guide leaves to the notes.

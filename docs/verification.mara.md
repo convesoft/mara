@@ -374,7 +374,7 @@ Rust integration tests run `mara prime` and read the instructions of the real st
 
 | Case | Expectation |
 | --- | --- |
-| Inside a project, found from the working directory or named by `--project` | Both open with the same fixed heading and have the sections find and read, author, repair after hand edits, and validate; operations appear as commands in `prime` and as tools in the MCP instructions |
+| Inside a project, found from the working directory or named by `--project` | Both open with the same fixed heading and have the sections find and read, author, repair after hand edits, link code, and validate; operations appear as commands in `prime` and as tools in the MCP instructions |
 | Outside every project | Both say how to initialize a project and name no other operation or tool |
 | A 0.3.0 project | Both say how to convert it and name no other operation or tool |
 | Each operation, option, tool and parameter that either rendering names | The CLI declares it or the MCP server lists it, compared as [DES-AGENT-GUIDE](agents.mara.md#01M7BGRHWQHQJJHC6XCXVDWDM8) describes |

@@ -13,10 +13,11 @@ use serde_json::Value;
 /// The heading that opens the full guide (DES-AGENT-GUIDE).
 const HEADING: &str = "# Mara workflow\n";
 /// Its sections, in order.
-const SECTIONS: [&str; 4] = [
+const SECTIONS: [&str; 5] = [
     "## Find and read",
     "## Author",
     "## Repair after hand edits",
+    "## Link code",
     "## Validate",
 ];
 /// The operations the full guide leaves to the notes, `prime` itself, the MCP server and the
@@ -296,6 +297,10 @@ fn an_item_written_by_hand_after_a_title_and_introduction_is_listed_after_one_fi
         &format!("# Authentication\n\nHow users sign in.\n\n{example}"),
     );
     // The one exception the guide allows: an item that starts the document has no `---`.
+    assert!(
+        guide.contains("before each item except at the document's start"),
+        "{guide}"
+    );
     let first = example
         .strip_prefix("---\n\n")
         .unwrap()

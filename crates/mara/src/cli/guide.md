@@ -1,7 +1,5 @@
 # Mara workflow
 
-This project keeps Mara items in Markdown documents, checked against its schema.
-
 cli: Run `mara` for every operation's arguments. `--project <dir>` names the project root; without it, the nearest directory at or above the working directory that holds `.mara/config.toml` is the project. `--format json` prints one JSON object: the result, or `{"error": {"code", "message", "diagnostics"}}`. Exit status 0 is success or a valid result, 1 a failure or an invalid result, 2 rejected arguments.
 mcp: Each tool returns one JSON object: the result, or `{"error": {"code", "message", "diagnostics"}}`.
 mcp-bound: This server works on the one project it was started for; its tools take no `{{--project}}`.
@@ -10,27 +8,27 @@ mcp-unbound: Each tool takes `{{--project}}`, the project root, else found from 
 ## Find and read
 
 - Documents are the files that `include` in `.mara/config.toml` matches.
-- Start with `{{schema list}}`, the types with their ID prefixes and the relations. `{{schema get <name>}}` gives a type's fields and allowed values, or a relation's targets for each source type.
+- Start with `{{schema list}}`: types, ID prefixes and relations. `{{schema get <name>}}` gives a type's fields and allowed values, or a relation's targets per source type.
 - `{{search <query>}}` finds items and narrative by their words; `{{item list}}` lists items. Narrow both with `{{--type}}`, `{{--field}}` `key=value`, `{{--relation}}`, `{{--path}}` and `{{--id}}`.
 - `{{get <node>}}` reads an item with its path, line and MID, a whole document, or narrative. A node is an ID, a MID, a path from the project root, or `<path>:<line>`.
-- `{{relation list <node>}}` lists an item's relations both ways.
-- `{{query list}}` names the queries, views, invariants and gates; `{{query execute <name>}}`, `{{query view <name>}}` and `{{query gate <name>}}` run one, and `{{query report <name>}}` explains an outcome.
-- A result cut short gives a cursor: pass it as `{{--cursor}}` for the next page. `{{--limit}}` sets the page size.
+- `{{relation list <node>}}` lists relations both ways.
+- `{{query list}}` names queries, views, invariants and gates; `{{query execute <name>}}`, `{{query view <name>}}` and `{{query gate <name>}}` run one, and `{{query report <name>}}` explains an outcome.
+- Pass the cursor of a result cut short as `{{--cursor}}` for the next page; `{{--limit}}` sets the page size.
 
 ## Author
 
-Name an item by its ID, its MID or `<path>:<line>`. Write types, relations, fields and values by the names the schema gives, such as `{{--field}}` `status=draft`.
+Name an item by its ID, MID or `<path>:<line>`, and types, relations, fields and values as the schema does, such as `{{--field}}` `status=draft`.
 
-- `{{item create <type> <path>}}` needs `{{--title}}`, `{{--body}}` and a `{{--field}}` for `status` and for each required field. The ID is the type's prefix and the title in capitals; `{{--id}}` chooses another. It ends the document, or goes before the line `{{--line}}` gives; a missing document is created when `include` matches it.
-- `{{item update <item>}}` changes `{{--title}}` or `{{--body}}`, replaces every value of a field with `{{--field}}`, or removes an optional field with `{{--clear-field}}`.
-- `{{relation add <source> <relation> <target>}}` and `{{relation remove <source> <relation> <target>}}` write or remove one row in the source's table, by the relation's forward name.
+- `{{item create <type> <path>}}` needs `{{--title}}`, `{{--body}}` and a `{{--field}}` for `status` and for each required field. The ID is the type's prefix and the title in capitals; `{{--id}}` chooses another. It goes at the document's end or before `{{--line}}`; a missing document that `include` matches is created.
+- `{{item update <item>}}` sets `{{--title}}` or `{{--body}}`, replaces all values of a field with `{{--field}}`, or clears an optional field with `{{--clear-field}}`.
+- `{{relation add <source> <relation> <target>}}` and `{{relation remove <source> <relation> <target>}}` edit one row of the source's table, by the relation's forward name.
 - `{{item move <item> <path>}}` (`{{--line}}` as for create) and `{{item rename <item> <new-id>}}` also rewrite every link to the item.
-- `{{item delete <item>}}` is refused while another item or narrative links to it; its diagnostics give each link.
-- A refused request changes no file, but a `changed-file` stop may have replaced some. When its message names replaced files, run `{{project fix}}` and `{{project validate}}`, then go on with the item's current ID or its MID; otherwise read again and repeat the request.
+- `{{item delete <item>}}` is refused while relations, mentions or code markers outside the item name it; its diagnostics give each.
+- If a failed edit lists replaced files, run `{{project fix}}`, then `{{project validate}}` and resolve errors before continuing with the item's current ID or MID. Otherwise reread before retrying.
 
 ## Repair after hand edits
 
-An item, or many at once, may be written by hand without an anchor and with relation targets as bare IDs:
+Items written by hand may lack an anchor and have bare IDs as relation targets:
 
 ```markdown
 ---
@@ -46,13 +44,18 @@ An item, or many at once, may be written by hand without an anchor and with rela
 Users sign in with a passkey.
 ```
 
-- Put a `---` line with a blank line on each side before every item, the first one after a title or other text included; leave it out only for an item that starts the document, which never starts with `---`. A forgotten one is reported, and `{{project fix}}` adds it.
-- Then run `{{project fix}}` once. It gives each such item an anchor with a new MID, turns bare IDs in relation rows into links, and repairs link paths and texts that moving or renaming items by hand left stale.
+- Put `---` between blank lines before each item except at the document's start. `{{project fix}}` adds a missing separator.
+- Then run `{{project fix}}` once: it gives each such item an anchor with a new MID, links bare relation targets, and repairs stale document links.
 - Never make up a MID, change one, or copy an anchor to another item.
 - To mention an item in text, write `[<ID>](#<MID>)` with the MID from `{{get}}`; `{{project fix}}` writes the path.
+
+## Link code
+
+- In files indexed under `[code.languages.<name>]` in `.mara/config.toml`, put only `@mara <relation> <ID>` after the prefix on its own comment line. Use one forward relation and one ID, never a MID. `{{schema get <name>}}` must list the item's type under `code`.
+- `{{relation list <node>}}` shows them, `{{project validate}}` reports `invalid-marker` and `unresolved-marker`, and `{{item rename <item> <new-id>}}` rewrites markers.
 
 ## Validate
 
 - `{{project validate}}` checks the project, or what `{{--path}}` names. `{{item validate <item>}}` checks one item and `{{schema validate}}` the schema file. Any error makes the result invalid.
 - After changing documents, run `{{project fix}}`, then `{{project validate}}`, and resolve every error.
-- `invalid-project` means the configuration or schema has an error: `{{project validate}}` reports where; fix it by hand.
+- `invalid-project` means an error in the configuration or schema, which `{{project validate}}` locates; fix it by hand.
