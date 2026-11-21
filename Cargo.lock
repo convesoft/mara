@@ -829,7 +829,7 @@ checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
 name = "mara"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 dependencies = [
  "globset",
  "granit-parser",
@@ -849,7 +849,7 @@ dependencies = [
 
 [[package]]
 name = "mara-engine"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 dependencies = [
  "blake3",
  "pulldown-cmark",
