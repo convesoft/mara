@@ -93,6 +93,7 @@ Rust integration tests run the real CLI with `HOME` and the per-user cache insid
 | Every other operation of [DES-OPERATIONS](../hosts/index.mara.md#01M7BF6H124JRJAQSYVQ21Q2JS), as the cases of the performance harness run it, through the CLI and each MCP tool, with the pinned grammar absent from an empty cache | 0 connections; the exit status of the case; `unavailable-grammar` in the result of each operation that reads code and returns diagnostics |
 | A given repository `http://` on a host that is not a loopback address, or `ftp://` | Rejected with `invalid-argument`; nothing written |
 | A language the catalog lacks, without a repository | Refused; nothing written |
+| The built-in catalog | Each entry's version and checksum are those of a grammar fixture, and its URLs name that version's tag |
 | The configuration changed by another program at the pause before step 2 ([DES-WRITE-PROCEDURE](../authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) | Refused with `changed-file`; the configuration keeps that program's contents |
 | An ignored test, run with `--ignored` before each release: each catalog language added from its real repository | The fetched files match the catalog's checksums, and that language's markers get declaration endpoints |
 

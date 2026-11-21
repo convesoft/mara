@@ -1,5 +1,22 @@
 # The built-in grammar catalog of `code add` (DES-GRAMMAR-ASSETS in docs/code/index.mara.md):
 # one `[languages.<name>]` table per grammar, with `version`, `wasm` and `tags` (the URLs of the
 # release's `.wasm` and of its `queries/tags.scm`), `checksum` ("blake3:<hex>"), `extensions` and
-# `comment_prefixes`. Empty until its entries are decided: see the open question there.
+# `comment_prefixes`. Each checksum is that of the fixture grammar in
+# crates/mara/tests/fixtures/grammars; a test of crates/mara/tests/code/add.rs holds them equal.
 [languages]
+
+[languages.python]
+version = "0.25.0"
+wasm = "https://github.com/tree-sitter/tree-sitter-python/releases/download/v0.25.0/tree-sitter-python.wasm"
+tags = "https://raw.githubusercontent.com/tree-sitter/tree-sitter-python/v0.25.0/queries/tags.scm"
+checksum = "blake3:1d81988af0eb6a514956528292f42d2bb46655ac839f76c589a46360962abbd5"
+extensions = ["py"]
+comment_prefixes = ["#"]
+
+[languages.rust]
+version = "0.24.2"
+wasm = "https://github.com/tree-sitter/tree-sitter-rust/releases/download/v0.24.2/tree-sitter-rust.wasm"
+tags = "https://raw.githubusercontent.com/tree-sitter/tree-sitter-rust/v0.24.2/queries/tags.scm"
+checksum = "blake3:f03b54d5fcef88042d4645c2820c4a4bedbd4edaed2e01ad85e67b325c2d7149"
+extensions = ["rs"]
+comment_prefixes = ["//", "///"]

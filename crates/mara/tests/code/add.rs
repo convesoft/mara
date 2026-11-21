@@ -259,9 +259,9 @@ fn adds_from_the_catalog_and_declares_a_language_the_configuration_lacks() {
     let home = project.home();
     let before = project.tree();
 
-    // The shipped catalog is empty: a language without a repository is refused.
+    // A language the shipped catalog lacks, without a repository, is refused.
     assert_eq!(
-        failure(&project, &["code", "add", "rust"], &[], 1),
+        failure(&project, &["code", "add", "go"], &[], 1),
         "unknown-grammar"
     );
     unchanged(&before, &project.tree(), "a language the catalog lacks");
@@ -500,6 +500,26 @@ fn refuses_a_file_that_is_no_valid_module_and_an_unusable_proxy() {
         "an unusable proxy connects to nothing"
     );
     unchanged(&before, &project.tree(), "an unusable proxy");
+}
+
+/// The built-in catalog pins the fixture grammars, at their release tags: the ignored test below
+/// confirms that the real repositories serve those files.
+#[test]
+fn the_built_in_catalog_pins_the_fixture_grammars() {
+    let catalog: toml::Table =
+        toml::from_str(include_str!("../../src/cli/code/catalog.toml")).unwrap();
+    let languages = catalog["languages"].as_table().unwrap();
+    assert!(!languages.contains_key("go"), "the refused language");
+    for (language, entry) in languages {
+        let (wasm, tags, version) = fixture(language);
+        let checksum = format!("blake3:{}", mara::grammar::checksum(&wasm, &tags));
+        assert_eq!(entry["version"].as_str(), Some(version), "{language}");
+        assert_eq!(entry["checksum"].as_str(), Some(&*checksum), "{language}");
+        for url in ["wasm", "tags"] {
+            let url = entry[url].as_str().unwrap();
+            assert!(url.contains(&format!("/v{version}/")), "{language}: {url}");
+        }
+    }
 }
 
 /// Each language of the built-in catalog, added from its real repository: run with `--ignored`
