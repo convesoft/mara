@@ -361,6 +361,10 @@ fn serve(
     if spawned.is_ok() {
         wait_until_stopping(&daemon);
     }
+    // Reads end with the process; rule evaluations end first, each killing its child and
+    // removing its directory; writes run to their end. Cancelled before the socket goes, so
+    // that whoever finds it gone finds the evaluations cancelled.
+    rules::cancel::all();
     // No new client finds the daemon from here on; a socket another daemon has bound since
     // stays.
     let current = fs::symlink_metadata(&runtime.socket)
@@ -369,9 +373,6 @@ fn serve(
     if current.is_some() && current == socket {
         let _ = fs::remove_file(&runtime.socket);
     }
-    // Reads end with the process; rule evaluations end first, each killing its child and
-    // removing its directory; writes run to their end.
-    rules::cancel::all();
     let mut state = daemon.state();
     while state.writes > 0 || rules::cancel::running() > 0 {
         state = daemon

@@ -140,14 +140,60 @@ impl Evaluations {
 /// the limits (DES-RULE-EXECUTION). Returns the rows of every output relation, or the fault
 /// that makes the outcome unavailable. Counts one subprocess spawn and one program run.
 pub fn evaluate(run: &Run, work: &mut WorkCounts) -> Result<Rows, Fault> {
-    // Counts the evaluation until its directory is removed and its child has ended.
-    let _running = cancel::Running::begin();
-    // Declared before the directory, so it ends Mara for a deferred signal only after the
-    // directory is removed.
-    let _interrupts = interrupt::Deferred::begin();
+    // Declared before the directory, so that it is dropped after it.
+    let _started = Started::begin()?;
     let dir = private_dir(run)?;
     run_in(run, dir.path(), work)
 }
+
+/// An evaluation that began, before its private directory exists: counted until it is dropped,
+/// so that a stopping daemon waits for it (DES-DAEMON-LIFECYCLE), and with the signals deferred.
+/// Dropped after the directory, it ends Mara for a deferred signal only once the directory is
+/// removed.
+struct Started {
+    _interrupts: interrupt::Deferred,
+    _running: cancel::Running,
+}
+
+impl Started {
+    /// Begins an evaluation, or refuses it once the daemon stops. The check follows the count,
+    /// so a stopping daemon either sees the evaluation counted and waits for it, or the
+    /// evaluation sees the daemon stopping and creates no directory.
+    fn begin() -> Result<Started, Fault> {
+        let started = Started {
+            _running: cancel::Running::begin(),
+            _interrupts: interrupt::Deferred::begin(),
+        };
+        pause_evaluation();
+        if cancel::cancelled() {
+            return Err(host("cannot run Soufflé", &cancel::error()));
+        }
+        Ok(started)
+    }
+}
+
+/// A pause point for tests, in debug builds only (ADR-DEBUG-PAUSE-POINT in
+/// `docs/authoring/writes.mara.md`): when `MARA_TEST_PAUSE_EVALUATION` names a directory, an
+/// evaluation that began creates `paused` there and waits until it is gone, before it checks
+/// whether the daemon stops.
+#[cfg(debug_assertions)]
+fn pause_evaluation() {
+    let Some(directory) =
+        std::env::var_os("MARA_TEST_PAUSE_EVALUATION").filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let paused = Path::new(&directory).join("paused");
+    if fs::write(&paused, "").is_err() {
+        return;
+    }
+    while fs::symlink_metadata(&paused).is_ok() {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn pause_evaluation() {}
 
 /// Runs Soufflé on the prepared private directory `dir` and reads its outcome.
 fn run_in(run: &Run, dir: &Path, work: &mut WorkCounts) -> Result<Rows, Fault> {
@@ -271,7 +317,15 @@ fn spawn_and_wait(
     drop(sandbox);
     work.subprocess_spawns += 1;
     work.program_runs += 1;
-    let mut exchange = console.map(|console| explain::Exchange::start(&mut child, console));
+    let mut exchange = match console.map(|console| explain::Exchange::start(&mut child, console)) {
+        None => None,
+        Some(Ok(exchange)) => Some(exchange),
+        Some(Err(error)) => {
+            child.kill()?;
+            child.wait()?;
+            return Err(error);
+        }
+    };
     let started = Instant::now();
     let deadline = Duration::from_secs(limits.time_seconds.into());
     let mut pause = Duration::from_micros(50);
@@ -348,8 +402,10 @@ fn limit(command: &mut Command, limits: Limits) {
                 return Err(io::Error::last_os_error());
             }
             // SAFETY: `getppid` has no preconditions.
+            // `ESRCH`, no such process: an error that allocates nothing, which no one reads,
+            // since Mara ended.
             if unsafe { libc::getppid() } as u32 != parent {
-                return Err(io::Error::other("Mara ended before Soufflé started"));
+                return Err(io::Error::from_raw_os_error(libc::ESRCH));
             }
         }
         #[cfg(not(target_os = "linux"))]

@@ -8,10 +8,11 @@
 //! replies. Neither can block the run past its time limit: the commands are written on another
 //! thread, and the wait for a reply is the loop that stops the run at that limit.
 
-use std::io::{Read as _, Write as _};
+use std::io::{self, Read as _, Write as _};
 use std::path::Path;
 use std::process::Child;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::thread;
 use std::time::Duration;
 
 use mara_engine::evaluation::explain::{EXIT, Explainer, Explanation, START, Target, Vocabulary};
@@ -19,7 +20,7 @@ use mara_engine::evaluation::{self, Exit, Fault, Limit, Rows};
 use mara_engine::facts::Relation;
 use mara_engine::work::WorkCounts;
 
-use super::{Run, bounded_read, host, interrupt, private_dir, read_rows};
+use super::{Run, Started, bounded_read, host, private_dir, read_rows};
 
 /// The most bytes of replies that one run may print; past it, the rows not yet explained
 /// cannot be.
@@ -45,10 +46,8 @@ pub fn explain(
     select: &mut dyn FnMut(&Rows) -> Vec<Target>,
     work: &mut WorkCounts,
 ) -> Result<Explained, Fault> {
-    // Counts the evaluation until its directory is removed and its child has ended, so that a
-    // stopping daemon waits for both (DES-DAEMON-LIFECYCLE).
-    let _running = super::cancel::Running::begin();
-    let _interrupts = interrupt::Deferred::begin();
+    // Declared before the directory, so that it is dropped after it.
+    let _started = Started::begin()?;
     let dir = private_dir(run)?;
     let read = evaluation::read_relations(run.program, run.relations);
     let mut console = Provenance {
@@ -106,21 +105,35 @@ enum Chunk {
 
 impl<'c> Exchange<'c> {
     /// Takes the child's standard input and output, and sends the commands that start the
-    /// exchange.
-    pub(super) fn start(child: &mut Child, console: &'c mut dyn Console) -> Exchange<'c> {
+    /// exchange. Fails when the system cannot start one of the threads; the caller then ends
+    /// the child.
+    pub(super) fn start(
+        child: &mut Child,
+        console: &'c mut dyn Console,
+    ) -> io::Result<Exchange<'c>> {
+        let cannot = |error: io::Error| {
+            io::Error::new(
+                error.kind(),
+                format!("cannot start a thread to exchange with Soufflé: {error}"),
+            )
+        };
         let (commands, pending) = mpsc::channel::<String>();
         let (chunks, output) = mpsc::channel();
         if let Some(mut stdin) = child.stdin.take() {
-            std::thread::spawn(move || {
+            let writer = move || {
                 for command in pending {
                     if stdin.write_all(command.as_bytes()).is_err() {
                         break;
                     }
                 }
-            });
+            };
+            thread::Builder::new()
+                .name("mara-souffle-in".to_owned())
+                .spawn(writer)
+                .map_err(cannot)?;
         }
         if let Some(mut stdout) = child.stdout.take() {
-            std::thread::spawn(move || {
+            let reader = move || {
                 let mut total = 0;
                 let mut buffer = vec![0; 64 << 10];
                 loop {
@@ -144,16 +157,20 @@ impl<'c> Exchange<'c> {
                 if total <= REPLY_BYTES {
                     let _ = chunks.send(Chunk::End { overflow: false });
                 }
-            });
+            };
+            thread::Builder::new()
+                .name("mara-souffle-out".to_owned())
+                .spawn(reader)
+                .map_err(cannot)?;
         }
         let _ = commands.send(START.to_owned());
-        Exchange {
+        Ok(Exchange {
             console,
             commands: Some(commands),
             output,
             buffer: Vec::new(),
             ended: false,
-        }
+        })
     }
 
     /// Waits at most `wait` for output, and hands each complete reply to the console.
@@ -163,7 +180,7 @@ impl<'c> Exchange<'c> {
             Err(RecvTimeoutError::Timeout) => return,
             // The thread ended: so did the output.
             Err(RecvTimeoutError::Disconnected) => {
-                std::thread::sleep(wait);
+                thread::sleep(wait);
                 return;
             }
         };

@@ -175,6 +175,8 @@ Fix rewrites the stale links an interruption leaves ([REQ-ONE-FIX-OPERATION](ind
 - Chosen by the maintainer on 2026-11-15, later: the same mechanism also pauses once per edit, after the edit is computed and before step 2. A test changes a later file there and expects a refusal with nothing replaced. It stays in debug builds only, with no general fault-injection facility.
 - Rejected: verifying step 2 by inspection. A regression that drops step 2 would fail no test.
 - Rejected: accepting either a refusal or an interrupted edit for a later file changed before writing began. The refusal of [REQ-REFUSED-EDIT-CHANGES-NOTHING](#01M7BF6HHTMM6D6QAF0BHFBCE6) would then not be shown for multi-file edits.
+- Chosen during the rewrite on 2026-11-21 (mara-zmp8yz): one more pause point, outside the writer, in debug builds only. When `MARA_TEST_PAUSE_EVALUATION` names a directory, a rule evaluation that began stops before it checks whether the daemon stops, creates `paused` there and goes on once it is gone, so a test stops the daemon at that point ([DES-DAEMON-LIFECYCLE](../daemon/index.mara.md#01M7BF6GR80WA207P4BBFWW671)). Its name begins with `MARA_TEST_PAUSE`, so the release-build check of the pause points finds it too.
+- Rejected: stopping the daemon at a random moment during an evaluation. The window between counting an evaluation and creating its directory is a few instructions wide, so such a test would almost never reach it.
 
 ---
 

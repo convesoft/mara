@@ -210,14 +210,7 @@ fn an_evaluation_through_the_daemon_uses_the_clients_temporary_directory_and_uma
 /// (DES-DAEMON-LIFECYCLE).
 fn stop_ends_a_running_evaluation(args: &[&str]) {
     let test = Test::new();
-    let project = test.project();
-    programs(&project);
-    let config = project.join(".mara/config.toml");
-    let text = fs::read_to_string(&config).unwrap();
-    let text = text.replace("time_limit_seconds = 3", "time_limit_seconds = 60")
-        + "\n[invariants.slow-check]\nprogram = \".mara/rules/slow.dl\"\nrelation = \"bad\"\n\
-           severity = \"error\"\nmessage = \"Never ends in time\"\n";
-    fs::write(&config, text).unwrap();
+    let project = slow_project(&test);
     let client_tmp = test.path().join("client-tmp");
     crate::private_directory(&client_tmp);
     start_daemon(&test, 0o022, &[]);
@@ -245,6 +238,129 @@ fn stop_ends_a_running_evaluation(args: &[&str]) {
     let run = finish(child);
     assert_eq!(run.status.code(), Some(1), "{run:?}");
     assert!(run.stderr.contains("daemon-lost"), "{run:?}");
+}
+
+/// A project with the programs of [`programs`], a time limit of 60 s and the invariant
+/// `slow-check` over `slow`.
+fn slow_project(test: &Test) -> PathBuf {
+    let project = test.project();
+    programs(&project);
+    let config = project.join(".mara/config.toml");
+    let text = fs::read_to_string(&config).unwrap();
+    let text = text.replace("time_limit_seconds = 3", "time_limit_seconds = 60")
+        + "\n[invariants.slow-check]\nprogram = \".mara/rules/slow.dl\"\nrelation = \"bad\"\n\
+           severity = \"error\"\nmessage = \"Never ends in time\"\n";
+    fs::write(&config, text).unwrap();
+    project
+}
+
+/// `mara daemon stop` while an evaluation for a read, `args`, has begun and has no private
+/// directory yet, held there by `MARA_TEST_PAUSE_EVALUATION` (ADR-DEBUG-PAUSE-POINT): the
+/// evaluation creates none, and the daemon exits once it ended (DES-DAEMON-LIFECYCLE).
+#[cfg(debug_assertions)]
+fn stop_before_an_evaluation_creates_its_directory(args: &[&str]) {
+    let test = Test::new();
+    let project = slow_project(&test);
+    let pauses = test.path().join("pauses");
+    fs::create_dir(&pauses).unwrap();
+    let paused = pauses.join("paused");
+    let client_tmp = test.path().join("client-tmp");
+    crate::private_directory(&client_tmp);
+    let pause = [("MARA_TEST_PAUSE_EVALUATION", pauses.to_str().unwrap())];
+    start_daemon(&test, 0o022, &pause);
+    let (socket, _) = test.paths_of(&mara());
+    let client = [("TMPDIR", client_tmp.to_str().unwrap())];
+    let child = spawn(&mut test.command_in(&project, &mara(), args, &client));
+    let deadline = Instant::now() + WAIT;
+    while !paused.exists() {
+        assert!(Instant::now() < deadline, "no evaluation began");
+        thread::sleep(Duration::from_millis(5));
+    }
+    let mut stop = test.spawn(&mara(), &["daemon", "stop"], &[]);
+    // The daemon cancels its evaluations before it removes its socket.
+    while fs::symlink_metadata(&socket).is_ok() {
+        assert!(Instant::now() < deadline, "the daemon did not stop");
+        thread::sleep(Duration::from_millis(5));
+    }
+    let created = Creations::watch(&client_tmp);
+    // The paused evaluation goes on, and so does any that begins after it.
+    while stop.try_wait().unwrap().is_none() {
+        let _ = fs::remove_file(&paused);
+        assert!(Instant::now() < deadline, "the daemon did not exit");
+        thread::sleep(Duration::from_millis(5));
+    }
+    let stopped = finish(stop).succeeded();
+    assert!(
+        stopped.stdout.starts_with("Stopped the daemon"),
+        "{stopped:?}"
+    );
+    assert!(test.daemons().is_empty(), "the daemon outlived `stop`");
+    assert!(
+        !created.any(),
+        "a cancelled evaluation created its directory"
+    );
+    let left: Vec<_> = fs::read_dir(&client_tmp).unwrap().collect();
+    assert!(left.is_empty(), "left behind: {left:?}");
+    let run = finish(child);
+    assert_eq!(run.status.code(), Some(1), "{run:?}");
+    assert!(
+        run.stderr.contains("daemon-lost") || run.stderr.contains("the daemon stops"),
+        "{run:?}"
+    );
+}
+
+/// The entries created in a directory since the watch began (inotify): one created and removed
+/// again counts too.
+#[cfg(debug_assertions)]
+struct Creations(fs::File);
+
+#[cfg(debug_assertions)]
+impl Creations {
+    fn watch(directory: &Path) -> Creations {
+        use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+        use std::os::unix::ffi::OsStrExt;
+        // SAFETY: inotify_init1 takes no pointer.
+        let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+        assert!(fd >= 0, "inotify: {}", std::io::Error::last_os_error());
+        // SAFETY: inotify_init1 returned a new descriptor, owned by nothing else.
+        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        let path = std::ffi::CString::new(directory.as_os_str().as_bytes()).unwrap();
+        // SAFETY: the path is NUL-terminated and outlives the call.
+        let watch =
+            unsafe { libc::inotify_add_watch(fd.as_raw_fd(), path.as_ptr(), libc::IN_CREATE) };
+        assert!(watch >= 0, "inotify: {}", std::io::Error::last_os_error());
+        Creations(fs::File::from(fd))
+    }
+
+    /// Whether any entry was created.
+    fn any(&self) -> bool {
+        use std::io::Read;
+        let mut buffer = [0; 4096];
+        match (&self.0).read(&mut buffer) {
+            Ok(read) => read > 0,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
+            Err(error) => panic!("inotify: {error}"),
+        }
+    }
+}
+
+#[test]
+#[cfg(debug_assertions)]
+fn stop_before_an_evaluation_creates_its_directory_leaves_none() {
+    stop_before_an_evaluation_creates_its_directory(&["query", "execute", "slow"]);
+}
+
+/// The provenance run of `query report` checks the same.
+#[test]
+#[cfg(debug_assertions)]
+fn stop_before_a_report_creates_its_directory_leaves_none() {
+    stop_before_an_evaluation_creates_its_directory(&[
+        "query",
+        "report",
+        "slow-check",
+        "--id",
+        "REQ-ONE",
+    ]);
 }
 
 #[test]
