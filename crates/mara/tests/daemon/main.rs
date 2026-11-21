@@ -29,6 +29,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::Value;
 
+#[cfg(debug_assertions)]
+#[path = "../support/derived.rs"]
+mod derived;
 #[path = "../support/daemons.rs"]
 mod support;
 
@@ -39,6 +42,7 @@ mod fresh;
 mod grammar;
 mod mcp;
 mod parity;
+mod reads;
 mod warm;
 mod watches;
 mod writes;

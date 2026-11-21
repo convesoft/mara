@@ -1,22 +1,27 @@
-//! Warm rows of VER-WORK-COUNTERS (`docs/verification.mara.md`) that follow an edit, a write or
-//! an earlier evaluation, through a daemon's session (DES-DAEMON-SESSIONS): an edited document
-//! is read again by the request after the watcher's derivation, a write leaves its read-back
-//! parses in the session and reads no other input again, and a session keeps its evaluations
-//! by key. Where a case depends on the watcher's derivation, the test waits for it through
-//! `MARA_TEST_DERIVED`, which a debug build's daemon appends each background derivation's
-//! counts to, never for a deadline.
+//! How a daemon's session keeps the work of the warm rows of VER-WORK-COUNTERS small after a
+//! change (DES-DAEMON-SESSIONS): the hand-over after a write reads no other input again, no
+//! background derivation runs in a write's window, and the background derivation reads no
+//! unsettled schema again. The rows themselves run at 1× in the `performance` test
+//! (`tests/performance/warm.rs`).
+//!
+//! The test waits for the watcher through the daemon's reports of its derivations
+//! (`MARA_TEST_DERIVED`, debug builds only), never for a deadline, and learns from them which
+//! case a run is in (`derived::Case`): a derivation that checked a change less than 2 s after
+//! it, or one that checked it later and so settled what it read. The expected counts are fixed
+//! for each case.
 
 #![cfg(debug_assertions)]
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::Value;
 
+use crate::derived::{self, Case, Reports, decided, until_settled};
 use crate::fresh::project;
-use crate::{Test, WAIT, settle, stats};
+use crate::{Test, WAIT, stats};
 
 const LIST: &[&str] = &["--format", "json", "item", "list"];
 
@@ -27,193 +32,35 @@ fn counted(test: &Test, root: &Path, args: &[&str]) -> Value {
     stats(&run)
 }
 
-/// `counter` of `stats`.
-fn count(stats: &Value, counter: &str) -> u64 {
-    stats[counter]
-        .as_u64()
-        .unwrap_or_else(|| panic!("no {counter}: {stats}"))
-}
-
 /// Asserts each of `expected` in `stats`.
 #[track_caller]
 fn assert_counts(stats: &Value, expected: &[(&str, u64)], what: &str) {
     for &(counter, value) in expected {
-        assert_eq!(count(stats, counter), value, "{counter} of {what}: {stats}");
+        let count = stats[counter].as_u64();
+        assert_eq!(count, Some(value), "{counter} of {what}: {stats}");
     }
 }
 
-/// The counts of a background derivation, as the daemon appends them to `MARA_TEST_DERIVED`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Derived {
-    file_reads: u64,
-    hashes: u64,
-    parses: u64,
-    snapshot_builds: u64,
+/// Starts a daemon serving the project at `root`, with `env` in its environment too, its
+/// session open and settled, which reports each background derivation to a file of the test.
+fn start(test: &Test, root: &Path, env: &[(&str, &str)]) -> Reports {
+    let reports = Reports::new(test.path().join("derived"));
+    let mut env = env.to_vec();
+    env.push(("MARA_TEST_DERIVED", reports.path().to_str().unwrap()));
+    test.start_in(root, &env);
+    test.wait_for_session(root);
+    for args in [LIST, &["--format", "json", "project", "validate"]] {
+        test.run_in(root, args, &[]);
+    }
+    reports
 }
 
-/// A started daemon serving the project at `root`, its session open and settled, that reports
-/// each background derivation to a file of the test.
-struct Watched {
-    derived: PathBuf,
-}
-
-impl Watched {
-    fn start(test: &Test, root: &Path) -> Watched {
-        Watched::start_with(test, root, &[])
-    }
-
-    /// [`Watched::start`] with `env` in the daemon's environment too.
-    fn start_with(test: &Test, root: &Path, env: &[(&str, &str)]) -> Watched {
-        let derived = test.path().join("derived");
-        let mut env = env.to_vec();
-        env.push(("MARA_TEST_DERIVED", derived.to_str().unwrap()));
-        test.start_in(root, &env);
-        test.wait_for_session(root);
-        for args in [LIST, &["--format", "json", "project", "validate"]] {
-            test.run_in(root, args, &[]);
-        }
-        Watched { derived }
-    }
-
-    /// The derivations reported so far.
-    fn derivations(&self) -> Vec<Derived> {
-        let text = fs::read_to_string(&self.derived).unwrap_or_default();
-        (text.lines())
-            .map(|line| {
-                let n: Vec<u64> = line.split(' ').map(|n| n.parse().unwrap()).collect();
-                Derived {
-                    file_reads: n[0],
-                    hashes: n[1],
-                    parses: n[2],
-                    snapshot_builds: n[3],
-                }
-            })
-            .collect()
-    }
-
-    /// Waits until a derivation after the first `seen` is reported: those after them.
-    fn wait_after(&self, seen: usize) -> Vec<Derived> {
-        let deadline = Instant::now() + WAIT;
-        loop {
-            let derivations = self.derivations();
-            if derivations.len() > seen {
-                return derivations[seen..].to_vec();
-            }
-            assert!(Instant::now() < deadline, "the watcher did not derive");
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-}
-
-/// Settles the project's files and the session's record of them: 2 s, then a request.
-fn settled(test: &Test, root: &Path) {
-    settle();
+/// Settles the files changed at `changed` and the session's record of them: a request 2 s
+/// after the change. The number of derivations reported then.
+fn settled(test: &Test, root: &Path, reports: &Reports, changed: SystemTime) -> usize {
+    until_settled(changed);
     counted(test, root, LIST);
-}
-
-/// Sleeps until 2 s after `since`.
-fn two_seconds_after(since: Instant) {
-    let until = since + Duration::from_secs(2);
-    thread::sleep(until.saturating_duration_since(Instant::now()));
-}
-
-#[test]
-fn an_edited_document_is_read_by_the_watcher_and_again_by_the_request_that_settles_it() {
-    let test = Test::new();
-    let root = project(&test, "project");
-    let watched = Watched::start(&test, &root);
-    let more = root.join("docs/more.mara.md");
-    let original = fs::read_to_string(&more).unwrap();
-    for (title, later) in [("Three peach", false), ("Three fig", true)] {
-        settled(&test, &root);
-        let seen = watched.derivations().len();
-        let edited = original.replace("Three plum", title);
-        match later {
-            false => fs::write(&more, &edited).unwrap(),
-            true => {
-                let staged = more.with_extension("swp");
-                fs::write(&staged, &edited).unwrap();
-                fs::rename(&staged, &more).unwrap();
-            }
-        }
-        let edited_at = Instant::now();
-        let reads = if later {
-            // After the watcher's derivation, which read the document, and 2 s after the edit.
-            let derivations = watched.wait_after(seen);
-            let first = derivations[0];
-            assert_eq!((first.file_reads, first.parses), (1, 1), "{derivations:?}");
-            two_seconds_after(edited_at);
-            2
-        } else {
-            0
-        };
-        let next = counted(&test, &root, LIST);
-        let read = count(&next, "file_reads");
-        match later {
-            false => assert!((1..=2).contains(&read), "{next}"),
-            true => assert_eq!(read, reads, "{next}"),
-        }
-        let expected = [
-            ("hashes", read),
-            ("parses", 1),
-            ("snapshot_builds", 1),
-            ("code_scans", 0),
-        ];
-        assert_counts(
-            &next,
-            &expected,
-            if later { "2 s later" } else { "at once" },
-        );
-        let served = test.run_in(&root, LIST, &[]);
-        assert_eq!(served, test.direct(&root, LIST));
-        assert!(served.stdout.contains(title), "{}", served.stdout);
-    }
-}
-
-#[test]
-fn a_write_leaves_its_parses_and_the_next_request_reads_only_the_written_file() {
-    let test = Test::new();
-    let root = project(&test, "project");
-    let watched = Watched::start(&test, &root);
-    for (title, later) in [("Three peach", false), ("Three fig", true)] {
-        settled(&test, &root);
-        let seen = watched.derivations().len();
-        let update = ["item", "update", "REQ-THREE", "--title", title];
-        let write = counted(&test, &root, &update);
-        let written_at = Instant::now();
-        let expected = [
-            ("file_reads", 0),
-            ("hashes", 1),
-            ("parses", 1),
-            ("snapshot_builds", 1),
-        ];
-        assert_counts(&write, &expected, "the write");
-        if later {
-            // The watcher's derivation after the renames read nothing again: the hand-over
-            // recorded the written file.
-            let derivations = watched.wait_after(seen);
-            for derived in &derivations {
-                assert_eq!(derived.file_reads, 0, "{derivations:?}");
-                assert_eq!(derived.parses, 0, "{derivations:?}");
-            }
-            two_seconds_after(written_at);
-        }
-        let next = counted(&test, &root, LIST);
-        let expected = [
-            ("file_reads", 1),
-            ("hashes", 1),
-            ("parses", 0),
-            ("snapshot_builds", 0),
-        ];
-        assert_counts(
-            &next,
-            &expected,
-            if later { "2 s later" } else { "at once" },
-        );
-        let served = test.run_in(&root, LIST, &[]);
-        assert_eq!(served, test.direct(&root, LIST));
-        assert!(served.stdout.contains(title), "{}", served.stdout);
-    }
+    reports.seen()
 }
 
 /// DES-WRITE-PROCEDURE step 4: the hand-over after a write re-derives only the files written,
@@ -222,34 +69,38 @@ fn a_write_leaves_its_parses_and_the_next_request_reads_only_the_written_file() 
 fn a_write_reads_no_other_input_again_after_its_renames() {
     let test = Test::new();
     let root = project(&test, "project");
-    let watched = Watched::start(&test, &root);
-    settled(&test, &root);
-    let seen = watched.derivations().len();
+    let reports = start(&test, &root, &[]);
     let reqs = root.join("docs/reqs.mara.md");
-    let saved = fs::read_to_string(&reqs)
-        .unwrap()
-        .replace("Two pear", "Two quince");
-    fs::write(&reqs, saved).unwrap();
-    // The watcher reads the saved document; the write's check reads it again, unsettled.
-    watched.wait_after(seen);
-    let derivations = watched.derivations().split_off(seen);
-    let sum = |counter: fn(&Derived) -> u64| derivations.iter().map(counter).sum::<u64>();
-    let watcher = Derived {
-        file_reads: sum(|d| d.file_reads),
-        hashes: sum(|d| d.hashes),
-        parses: sum(|d| d.parses),
-        snapshot_builds: sum(|d| d.snapshot_builds),
-    };
-    assert_eq!(watcher.file_reads, 1, "{derivations:?}");
-    let update = ["item", "update", "REQ-THREE", "--title", "Three peach"];
-    let write = counted(&test, &root, &update);
-    let expected = [
-        ("file_reads", watcher.file_reads + 1),
-        ("hashes", watcher.hashes + 2),
-        ("parses", watcher.parses + 1),
-        ("snapshot_builds", watcher.snapshot_builds + 1),
-    ];
-    assert_counts(&write, &expected, "the write after the watcher");
+    let mut changed = SystemTime::now();
+    decided("a write after a saved document", |run| {
+        let seen = settled(&test, &root, &reports, changed);
+        let saved = fs::read_to_string(&reqs)
+            .unwrap()
+            .replace("Two pear", &format!("Two quince {run}"));
+        fs::write(&reqs, saved).unwrap();
+        changed = derived::changed(&[&reqs]);
+        // The watcher reads, hashes and parses the saved document and builds the snapshot.
+        // Unsettled, the write's check reads and hashes it again; settled, not. The write adds
+        // 1 hash, 1 parse and 1 snapshot build of the file it writes.
+        reports.wait_after(seen);
+        let title = format!("Three peach {run}");
+        let update = ["item", "update", "REQ-THREE", "--title", &title];
+        let (write, before) = reports.around(seen, || counted(&test, &root, &update))?;
+        let again = match Case::of(&before, changed) {
+            Case::None => panic!("the watcher's derivation was awaited"),
+            Case::Early(_) => 1,
+            Case::Late(_) => 0,
+        };
+        let expected = [
+            ("file_reads", 1 + again),
+            ("hashes", 2 + again),
+            ("parses", 2),
+            ("snapshot_builds", 2),
+        ];
+        assert_counts(&write, &expected, "the write after the watcher");
+        changed = derived::changed(&[&reqs, &root.join("docs/more.mara.md")]);
+        Ok(())
+    });
     let served = test.run_in(&root, LIST, &[]);
     assert_eq!(served, test.direct(&root, LIST));
 }
@@ -264,52 +115,70 @@ fn no_derivation_runs_between_a_writes_first_rename_and_its_hand_over() {
     let root = project(&test, "project");
     let pauses = test.path().join("pauses");
     fs::create_dir(&pauses).unwrap();
-    let watched = Watched::start_with(
+    let reports = start(
         &test,
         &root,
         &[("MARA_TEST_PAUSE", pauses.to_str().unwrap())],
     );
-    settled(&test, &root);
-    let seen = watched.derivations().len();
     let paused = pauses.join("paused");
-    let args = [
-        "--debug-stats",
-        "item",
-        "move",
-        "REQ-TWO",
-        "docs/moved.mara.md",
-    ];
-    let mut client = test.spawn_in(&root, &args);
-    // Before step 2, then in step 3 of each file: the destination, then the source.
-    for expected in ["", "docs/moved.mara.md", "docs/reqs.mara.md"] {
-        let deadline = Instant::now() + WAIT;
-        let at = loop {
-            if let Ok(at) = fs::read_to_string(&paused) {
-                break at;
+    let mut from = "docs/reqs.mara.md".to_owned();
+    let mut changed = SystemTime::now();
+    decided("a move", |run| {
+        let seen = settled(&test, &root, &reports, changed);
+        // Each run moves REQ-TWO to a new document.
+        let to = format!("docs/moved-{run}.mara.md");
+        let args = ["--debug-stats", "item", "move", "REQ-TWO", &to];
+        let mut client = test.spawn_in(&root, &args);
+        // Before step 2, then in step 3 of each file: the destination, then the source.
+        for expected in ["", to.as_str(), from.as_str()] {
+            let deadline = Instant::now() + WAIT;
+            let at = loop {
+                if let Ok(at) = fs::read_to_string(&paused) {
+                    break at;
+                }
+                assert!(client.try_wait().unwrap().is_none(), "the client ended");
+                assert!(Instant::now() < deadline, "the writer did not pause");
+                thread::sleep(Duration::from_millis(5));
+            };
+            assert_eq!(at, expected);
+            if expected == from {
+                thread::sleep(Duration::from_millis(500));
+                let during = reports.all().split_off(seen);
+                assert_eq!(during, [], "a derivation ran in the write's window");
             }
-            assert!(client.try_wait().unwrap().is_none(), "the client ended");
-            assert!(Instant::now() < deadline, "the writer did not pause");
-            thread::sleep(Duration::from_millis(5));
-        };
-        assert_eq!(at, expected);
-        if expected == "docs/reqs.mara.md" {
-            thread::sleep(Duration::from_millis(500));
-            let during = watched.derivations().split_off(seen);
-            assert_eq!(during, [], "a derivation ran in the write's window");
+            fs::remove_file(&paused).unwrap();
         }
-        fs::remove_file(&paused).unwrap();
-    }
-    let run = crate::finish(client).succeeded();
-    let expected = [
-        ("file_reads", 0),
-        ("hashes", 2),
-        ("parses", 2),
-        ("snapshot_builds", 1),
-    ];
-    assert_counts(&stats(&run), &expected, "the move");
-    for derived in watched.wait_after(seen) {
-        assert_eq!((derived.file_reads, derived.parses), (0, 0), "{derived:?}");
-    }
+        let run = crate::finish(client).succeeded();
+        let expected = [
+            ("file_reads", 0),
+            ("hashes", 2),
+            ("parses", 2),
+            ("snapshot_builds", 1),
+        ];
+        assert_counts(&stats(&run), &expected, "the move");
+        let written = [root.join(&from), root.join(&to)];
+        from = to;
+        // The derivation after the hand-over reads neither written file again within 2 s of the
+        // first rename, and reads both, to settle them, 2 s or more after the second.
+        let first = written.iter().map(|path| derived::changed(&[path])).min();
+        changed = derived::changed(&written);
+        let derivations = reports.wait_after(seen);
+        let reads = match (
+            Case::of(&derivations, first.unwrap()),
+            Case::of(&derivations, changed),
+        ) {
+            (Case::Early(_), _) => 0,
+            (_, Case::Late(_)) => 2,
+            _ => return Err("the watcher came between the two renames' 2 s".to_owned()),
+        };
+        let derived = derivations[0];
+        assert_eq!(
+            (derived.file_reads, derived.parses),
+            (reads, 0),
+            "{derived:?}"
+        );
+        Ok(())
+    });
     let served = test.run_in(&root, LIST, &[]);
     assert_eq!(served, test.direct(&root, LIST));
 }
@@ -320,99 +189,36 @@ fn no_derivation_runs_between_a_writes_first_rename_and_its_hand_over() {
 fn the_watcher_reads_no_unsettled_schema_again() {
     let test = Test::new();
     let root = project(&test, "project");
-    let watched = Watched::start(&test, &root);
-    settled(&test, &root);
+    let reports = start(&test, &root, &[]);
     let schema = root.join(".mara/schema.toml");
-    let edited = fs::read_to_string(&schema)
-        .unwrap()
-        .replace("A requirement.", "A need.");
-    let seen = watched.derivations().len();
-    fs::write(&schema, edited).unwrap();
-    let derivations = watched.wait_after(seen);
-    assert_eq!(derivations[0].file_reads, 1, "the schema: {derivations:?}");
-    // Within 2 s of the schema's change, a document saved.
-    let seen = watched.derivations().len();
     let more = root.join("docs/more.mara.md");
-    let saved = fs::read_to_string(&more)
-        .unwrap()
-        .replace("Three plum", "Three fig");
-    fs::write(&more, saved).unwrap();
-    let derivations = watched.wait_after(seen);
-    assert_eq!(
-        derivations[0].file_reads, 1,
-        "the document alone: {derivations:?}"
-    );
+    let mut changed = SystemTime::now();
+    decided("a document saved after the schema", |run| {
+        let seen = settled(&test, &root, &reports, changed);
+        let edited = fs::read_to_string(&schema)
+            .unwrap()
+            .replace("A requirement.", &format!("A need {run}."));
+        fs::write(&schema, edited).unwrap();
+        let schema_changed = derived::changed(&[&schema]);
+        let derivations = reports.wait_after(seen);
+        assert_eq!(derivations[0].file_reads, 1, "the schema: {derivations:?}");
+        // Within 2 s of the schema's change, a document saved.
+        let seen = reports.seen();
+        let saved = fs::read_to_string(&more)
+            .unwrap()
+            .replace("Three plum", &format!("Three fig {run}"));
+        fs::write(&more, saved).unwrap();
+        changed = derived::changed(&[&more]);
+        let derivations = reports.wait_after(seen);
+        // The document alone, or with the schema when the derivation checked it 2 s or more
+        // after its change, which settles it.
+        let reads = match Case::of(&derivations, schema_changed) {
+            Case::Late(_) => 2,
+            _ => 1,
+        };
+        assert_eq!(derivations[0].file_reads, reads, "{derivations:?}");
+        Ok(())
+    });
     let served = test.run_in(&root, LIST, &[]);
     assert_eq!(served, test.direct(&root, LIST));
-}
-
-/// The row "A write that gives a file the contents of another input": the read-back takes the
-/// parse of the document that has those contents.
-#[test]
-fn a_write_that_gives_a_file_the_contents_of_another_input_parses_nothing() {
-    let test = Test::new();
-    let root = project(&test, "project");
-    let more = fs::read_to_string(root.join("docs/more.mara.md")).unwrap();
-    let extra = crate::fresh::item(4, "REQ-FOUR", "Four kiwi");
-    let copy = root.join("docs/copy.mara.md");
-    fs::write(&copy, format!("{more}\n---\n\n{extra}")).unwrap();
-    let watched = Watched::start(&test, &root);
-    settled(&test, &root);
-    let seen = watched.derivations().len();
-    let write = counted(&test, &root, &["item", "delete", "REQ-FOUR"]);
-    assert_eq!(
-        fs::read_to_string(&copy).unwrap(),
-        more,
-        "the case's contents"
-    );
-    let expected = [("file_reads", 0), ("parses", 0), ("snapshot_builds", 1)];
-    assert_counts(&write, &expected, "the delete");
-    watched.wait_after(seen);
-    let served = test.run_in(&root, LIST, &[]);
-    assert_eq!(served, test.direct(&root, LIST));
-}
-
-#[test]
-fn a_request_reads_the_evaluations_that_an_earlier_request_ran() {
-    let test = Test::new();
-    let root = project(&test, "project");
-    Watched::start(&test, &root);
-    let validate: &[&str] = &["--format", "json", "project", "validate"];
-    let execute: &[&str] = &["--format", "json", "query", "execute", "flagged-items"];
-    let notes: &[&str] = &["--format", "json", "query", "execute", "notes", "--input"];
-    let counted = |test: &Test, root: &Path, args: &[&str]| {
-        let counted: Vec<&str> = ["--debug-stats"].iter().chain(args).copied().collect();
-        stats(&test.run_in(root, &counted, &[]))
-    };
-    // The project was validated once already: this validation finds every evaluation.
-    assert_eq!(count(&counted(&test, &root, validate), "program_runs"), 0);
-    assert_eq!(count(&counted(&test, &root, execute), "program_runs"), 0);
-    let first = [notes, &["note=first"]].concat();
-    let second = [notes, &["note=second"]].concat();
-    assert_eq!(count(&counted(&test, &root, &first), "program_runs"), 1);
-    assert_eq!(count(&counted(&test, &root, &second), "program_runs"), 1);
-    assert_eq!(count(&counted(&test, &root, &first), "program_runs"), 0);
-    for args in [validate, execute, &first] {
-        assert_eq!(
-            test.run_in(&root, args, &[]),
-            test.direct(&root, args),
-            "{args:?}"
-        );
-    }
-
-    // A document edit: the program that an invariant gives the snapshot's facts runs again,
-    // once; the other, run against empty facts, does not.
-    settle();
-    let reqs = root.join("docs/reqs.mara.md");
-    let edited = fs::read_to_string(&reqs)
-        .unwrap()
-        .replace("REQ-ONE", "REQ-UNO");
-    fs::write(&reqs, edited).unwrap();
-    let validated = counted(&test, &root, validate);
-    assert_eq!(count(&validated, "program_runs"), 1, "{validated}");
-    assert_eq!(count(&counted(&test, &root, execute), "program_runs"), 0);
-    assert_eq!(
-        test.run_in(&root, execute, &[]),
-        test.direct(&root, execute)
-    );
 }

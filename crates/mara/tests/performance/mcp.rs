@@ -60,7 +60,13 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
 /// exit status 0 and returns the work of the session's stats line, the last line on stderr. The
 /// process's CPU time counts in [`cpu_time::now`].
 pub fn run(directory: &Path, calls: &[(&str, &Value)]) -> Run {
-    let session = session(directory, &[], calls);
+    run_with(directory, calls, &[])
+}
+
+/// [`run`] with the environment holding only `env`, and `MARA_NO_DAEMON=1` unless `env` names a
+/// runtime directory of the test as `XDG_RUNTIME_DIR`, as [`crate::cli::run_with`] does.
+pub fn run_with(directory: &Path, calls: &[(&str, &Value)], env: &[(&str, &Path)]) -> Run {
+    let session = session(directory, env, calls);
     for ((tool, arguments), response) in calls.iter().zip(&session.responses) {
         assert_eq!(
             response["result"]["isError"], false,
@@ -83,14 +89,18 @@ pub struct Finished {
     pub run: Run,
 }
 
-/// Runs `mara --debug-stats mcp` in `directory` with an environment of only `MARA_NO_DAEMON=1`
-/// and `env`, as [`run`] does, whatever its calls and its exit status give.
+/// Runs `mara --debug-stats mcp` in `directory` with an environment of only `env`, and
+/// `MARA_NO_DAEMON=1` unless `env` names a runtime directory of the test, as [`run_with`] does,
+/// whatever its calls and its exit status give.
 pub fn session(directory: &Path, env: &[(&str, &Path)], calls: &[(&str, &Value)]) -> Finished {
     let mut child = Command::new(env!("CARGO_BIN_EXE_mara"))
         .args(["--debug-stats", "mcp"])
         .current_dir(directory)
         .env_clear()
-        .env("MARA_NO_DAEMON", "1")
+        .envs(
+            (!env.iter().any(|(name, _)| *name == "XDG_RUNTIME_DIR"))
+                .then_some(("MARA_NO_DAEMON", Path::new("1"))),
+        )
         .envs(env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

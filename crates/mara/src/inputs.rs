@@ -23,7 +23,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::SystemTime;
 
 use ignore::Match;
@@ -35,6 +35,7 @@ use mara_engine::document::DocumentKey;
 use mara_engine::hash::Hash;
 use mara_engine::pattern::{Patterns, Positions};
 use mara_engine::snapshot::{DocumentInput, ParsedFile, Snapshot, SnapshotInputs};
+use mara_engine::validation::{self, Finding};
 use mara_engine::work::WorkCounts;
 
 use crate::grammar::{self, Grammar, ParseFailure};
@@ -59,7 +60,8 @@ pub struct Inputs {
     reads: Reads,
     /// Shared with the views that a request keeps after its check ([`Inputs::shared`]).
     state: Arc<State>,
-    snapshot: Option<Arc<Snapshot>>,
+    /// The last snapshot, with the findings of its built-in checks once a request ran them.
+    snapshot: Option<(Arc<Snapshot>, Arc<Checks>)>,
     /// The inputs that a view checks and derives on: those of a daemon's session.
     shared: Option<Arc<Mutex<Inputs>>>,
     /// The outcomes of the session's evaluations, for a view.
@@ -78,6 +80,12 @@ struct State {
     documents: HashMap<String, Tracked<Arc<ParsedFile>>>,
     programs: HashMap<String, Tracked<Arc<Vec<u8>>>>,
     code: HashMap<String, Tracked<Scan>>,
+    /// The contents of the code files that [`Inputs::read_code`] read, so that the same file is
+    /// read again only when a check would read it.
+    code_contents: HashMap<String, Tracked<Arc<[u8]>>>,
+    /// The grammar-level scans that [`Inputs::scan_code`] made, so that the same contents of
+    /// the same file are not scanned again.
+    code_scans: HashMap<String, Scan>,
 }
 
 /// The markers of a code file's contents, with their key.
@@ -104,6 +112,10 @@ pub enum CodeReads {
 /// reason it cannot be applied.
 type Compiled = Result<Arc<Gitignore>, (usize, String)>;
 
+/// The findings of the built-in checks of one snapshot, run by the first request that needs
+/// them ([`Generation::check`]).
+type Checks = OnceLock<Vec<Finding>>;
+
 /// What one request found.
 #[derive(Debug)]
 pub struct Generation {
@@ -126,6 +138,18 @@ pub struct Generation {
     /// For a request in a daemon's session, the outcomes of the session's evaluations, which
     /// an evaluation reads before it runs Soufflé (DES-DAEMON-SESSIONS).
     pub(crate) evaluated: Option<Arc<Evaluated>>,
+    /// Kept with the snapshot, so that a session checks each snapshot once.
+    checks: Arc<Checks>,
+}
+
+impl Generation {
+    /// The findings of the built-in checks of the snapshot ([`validation::check`]): run, and
+    /// counted in `work`, only by the first request of the snapshot that needs them; a session
+    /// keeps them with its snapshot (DES-DAEMON-SESSIONS).
+    pub fn check(&self, work: &mut WorkCounts) -> &[Finding] {
+        self.checks
+            .get_or_init(|| validation::check(&self.snapshot, work))
+    }
 }
 
 /// A document that a write put on disk, as the session takes it ([`Inputs::written`]).
@@ -247,28 +271,55 @@ impl Inputs {
         Some(Basis::Contents(version))
     }
 
-    /// Reads and hashes the code file at `path`, which the last request listed
-    /// ([`CodeReads::List`]), in the request that began at `now`: its hash and contents, or the
-    /// `io-error` of a file that cannot be read.
+    /// Checks the code file at `path`, which the last request listed ([`CodeReads::List`]), in
+    /// the request that began at `now`, reading and hashing it unless the contents an earlier
+    /// call or scan kept still hold (DES-INPUTS-AND-KEYS): its hash and contents, or the
+    /// `io-error` of a file that cannot be read. A view keeps them in the session's inputs.
     pub fn read_code(
-        &self,
+        &mut self,
         path: &str,
         now: SystemTime,
         work: &mut WorkCounts,
     ) -> Result<(Hash, Vec<u8>), Box<Diagnostic>> {
         let absolute = self.root.join(path);
+        // The contents of the session's latest check of the file: an earlier call's, or the
+        // last scan's, which keeps them for a file with markers.
+        let kept = |state: &State| {
+            let got = state.code_contents.get(path).cloned();
+            let scanned = (state.code.get(path))
+                .and_then(|scan| Some(scan.with_value(scan.value.file.contents.clone()?)));
+            match (got, scanned) {
+                (Some(got), Some(scanned)) if scanned.checked() > got.checked() => Some(scanned),
+                (got, scanned) => got.or(scanned),
+            }
+        };
+        let previous = match &self.shared {
+            Some(shared) => kept(&lock(shared).state),
+            None => kept(&self.state),
+        };
         let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
             let reads = &mut Reads::default();
-            tracked::check::<()>(&absolute, &metadata, None, now, work, reads, false)
+            tracked::check(&absolute, &metadata, previous, now, work, reads, false)
         });
-        match checked {
-            Ok(Check::Read(read)) => Ok((read.hash, read.contents)),
-            Ok(Check::Kept(_)) => unreachable!("a check without a previous value reads"),
+        let tracked = match checked {
+            Ok(Check::Kept(tracked)) => tracked,
+            Ok(Check::Read(mut read)) => {
+                let contents = Arc::from(std::mem::take(&mut read.contents));
+                read.with(contents)
+            }
             Err(error) => {
                 let message = format!("cannot read {path}: {error}");
-                Err(Box::new(Diagnostic::error("io-error", path, 1, message)))
+                return Err(Box::new(Diagnostic::error("io-error", path, 1, message)));
             }
+        };
+        let kept = (path.to_owned(), tracked.clone());
+        match &self.shared {
+            Some(shared) => Arc::make_mut(&mut lock(shared).state)
+                .code_contents
+                .extend([kept]),
+            None => Arc::make_mut(&mut self.state).code_contents.extend([kept]),
         }
+        Ok((tracked.hash, tracked.value.to_vec()))
     }
 
     /// Scans `contents`, the code file at `path` of the language at index `language`, which the
@@ -296,12 +347,23 @@ impl Inputs {
             Some(Ok(grammar)) => grammar,
         };
         let key = MarkerKey::new(key_of(language, true), hash);
-        let kept = self.state.code.get(path).map(|tracked| &tracked.value);
-        let scanned = match kept.filter(|scan| scan.key == key) {
-            Some(scan) => Arc::clone(&scan.file),
+        // A scan of these contents at this level, by the last scan of the code files or by an
+        // earlier call: the key holds the contents' hash and the grammar.
+        let found = |state: &State| {
+            let listed = state.code.get(path).map(|tracked| &tracked.value);
+            let scan = (listed.filter(|scan| scan.key == key))
+                .or_else(|| state.code_scans.get(path).filter(|scan| scan.key == key))?;
+            Some(Arc::clone(&scan.file))
+        };
+        let kept = match &self.shared {
+            Some(shared) => found(&lock(shared).state),
+            None => found(&self.state),
+        };
+        let scanned = match kept {
+            Some(file) => file,
             None => {
                 let prefixes = &language.prefixes;
-                match grammar.parse(contents, path) {
+                let scanned = match grammar.parse(contents, path) {
                     Ok(syntax) => {
                         Arc::new(ScannedFile::scan_syntax(contents, prefixes, &syntax, work))
                     }
@@ -312,7 +374,22 @@ impl Inputs {
                         let reason = grammar.abandoned().unwrap_or_default();
                         return (None, vec![grammar::unavailable(language, &reason)]);
                     }
+                };
+                // A fallback may depend on the grammar's time at that moment: not kept.
+                if scanned.fallback.is_none() {
+                    let scan = Scan {
+                        key,
+                        file: Arc::clone(&scanned),
+                    };
+                    let kept = [(path.to_owned(), scan)];
+                    match &self.shared {
+                        Some(shared) => Arc::make_mut(&mut lock(shared).state)
+                            .code_scans
+                            .extend(kept),
+                        None => Arc::make_mut(&mut self.state).code_scans.extend(kept),
+                    }
                 }
+                scanned
             }
         };
         let diagnostics = (scanned.fallback.iter())
@@ -594,6 +671,8 @@ impl Inputs {
             // Code tracked by an earlier request stays for the next one that reads code.
             next.code = std::mem::take(&mut previous.code);
         }
+        next.code_contents = std::mem::take(&mut previous.code_contents);
+        next.code_scans = std::mem::take(&mut previous.code_scans);
         self.state = Arc::new(next);
         self.reads = Reads::default();
         diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
@@ -603,11 +682,13 @@ impl Inputs {
             project.schema_hash,
             project.config_hash,
         );
-        let snapshot = match &self.snapshot {
-            Some(snapshot) if snapshot.key() == inputs.key() => Arc::clone(snapshot),
-            _ => Arc::new(inputs.build(work)),
+        let (snapshot, checks) = match &self.snapshot {
+            Some((snapshot, checks)) if snapshot.key() == inputs.key() => {
+                (Arc::clone(snapshot), Arc::clone(checks))
+            }
+            _ => (Arc::new(inputs.build(work)), Arc::default()),
         };
-        self.snapshot = Some(Arc::clone(&snapshot));
+        self.snapshot = Some((Arc::clone(&snapshot), Arc::clone(&checks)));
         let mut code_paths = found.paths;
         code_paths.sort_unstable();
         let (layer, listed_unread) = match found.reads {
@@ -626,6 +707,7 @@ impl Inputs {
             code_paths,
             listed_unread,
             evaluated: None,
+            checks,
         }
     }
 }

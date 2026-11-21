@@ -245,7 +245,7 @@ fn an_edited_program_input_or_code_file_is_seen_by_the_next_request() {
 }
 
 /// The long program of VER-EVALUATION-TIME-LIMIT behind the invariant's relation.
-const LONG: &str = ".include \"mara.dl\"\n.decl n(x: number)\nn(x) :- x = range(0, 1000).\n\
+pub(crate) const LONG: &str = ".include \"mara.dl\"\n.decl n(x: number)\nn(x) :- x = range(0, 1000).\n\
                     .decl bad(m: Mid, c: number)\n\
                     bad(m, c) :- item(m, _, _, _, _, _), \
                     c = count : { n(w), n(x), n(y), n(z), w + x + y + z < 0 }.\n\
@@ -258,7 +258,7 @@ const FAST: &str = ".include \"mara.dl\"\n.decl n(x: number)\n.decl bad(m: Mid, 
 
 /// The process ID of the `souffle` process whose working directory lies in `temporary`, once
 /// one runs.
-fn souffle_in(temporary: &Path) -> u32 {
+pub(crate) fn souffle_in(temporary: &Path) -> u32 {
     let deadline = Instant::now() + WAIT;
     loop {
         for process in fs::read_dir("/proc").unwrap().flatten() {
@@ -281,7 +281,7 @@ fn souffle_in(temporary: &Path) -> u32 {
 }
 
 /// Whether the process `pid` runs.
-fn runs(pid: u32) -> bool {
+pub(crate) fn runs(pid: u32) -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
 }
 

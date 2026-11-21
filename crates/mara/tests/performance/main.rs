@@ -14,6 +14,9 @@ mod daemon;
 #[cfg(target_os = "linux")]
 #[path = "../support/daemons.rs"]
 mod daemons;
+#[cfg(all(target_os = "linux", debug_assertions))]
+#[path = "../support/derived.rs"]
+mod derived;
 #[path = "../support/grammar_server.rs"]
 mod grammar_server;
 #[cfg(target_os = "linux")]
@@ -24,6 +27,10 @@ mod pause_points;
 mod prime;
 mod restore;
 mod scaling;
+#[cfg(target_os = "linux")]
+mod warm;
+#[cfg(target_os = "linux")]
+mod warm_scaling;
 mod work_counters;
 
 /// The seed of every generated corpus.

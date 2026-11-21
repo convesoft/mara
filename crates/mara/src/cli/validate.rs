@@ -7,7 +7,7 @@
 use std::fmt::Write as _;
 
 use mara::inputs::CodeReads;
-use mara::project::{self, Project};
+use mara::project::Project;
 use mara::rules::{self, Scope};
 use mara_engine::code::CodeLinks;
 use mara_engine::config::CONFIG_PATH;
@@ -15,7 +15,7 @@ use mara_engine::diagnostic::Diagnostic;
 use mara_engine::facts::CodeFacts;
 use mara_engine::hash::Hash;
 use mara_engine::paging::PAGE_BYTES;
-use mara_engine::validation::{self, PageError, Report, result_key};
+use mara_engine::validation::{PageError, Report, result_key};
 
 use super::{
     Args, Argument, CURSOR, Context, FAILURE, Failure, Kind, LIMIT, Operation, Opt, Response, Run,
@@ -91,7 +91,7 @@ fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Fail
         .generation(context.now, context.work, CodeReads::Scan);
     let layer = generation.code.clone().expect("code was scanned");
     let code = CodeLinks::new(&generation.snapshot, layer);
-    let findings = validation::check(&generation.snapshot, context.work);
+    let findings = generation.check(context.work);
     let mut facts = |_: &mut _| CodeFacts::new(&code, &generation.snapshot);
     let invariants = rules::invariants(&generation, Scope::Project, &mut facts, context.work);
     // One key for every spelling of the same paths (DES-DIAGNOSTICS).
@@ -110,8 +110,8 @@ fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Fail
     let mut keys = input_keys(&generation, &invariants.keys);
     keys.push(Some(code.key()));
     let key = result_key(&request, &keys, &diagnostics);
-    let primary = findings.into_iter().filter(|finding| finding.primary);
-    diagnostics.extend(primary.map(|finding| finding.diagnostic));
+    let primary = findings.iter().filter(|finding| finding.primary);
+    diagnostics.extend(primary.map(|finding| finding.diagnostic.clone()));
     diagnostics.extend(
         invariants
             .findings
@@ -133,11 +133,11 @@ fn item_validate(context: &mut Context, args: &Args) -> Result<Response, Failure
     let generation = inputs.generation(now, context.work, CodeReads::List);
     let snapshot = &generation.snapshot;
     let item = super::resolve_item(snapshot, reference)?;
-    let findings = validation::check(snapshot, context.work);
+    let findings = generation.check(context.work);
     let mut diagnostics: Vec<Diagnostic> = findings
-        .into_iter()
+        .iter()
         .filter(|finding| finding.item == Some(item))
-        .map(|finding| finding.diagnostic)
+        .map(|finding| finding.diagnostic.clone())
         .collect();
     // A configuration problem may drop an entry that would judge the item, and a program that
     // cannot be evaluated leaves the item's invariants unknown, so their problems are the
@@ -184,7 +184,7 @@ fn item_validate(context: &mut Context, args: &Args) -> Result<Response, Failure
 /// Reads no document.
 fn schema_validate(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let root = context.root()?;
-    let project = project::load(root, context.work);
+    let project = context.inputs(root).project(context.now, context.work);
     let key = result_key(
         &["schema validate"],
         &[project.config_hash, project.schema_hash],

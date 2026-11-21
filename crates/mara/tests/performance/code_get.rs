@@ -114,6 +114,13 @@ fn warm_get_of_code_reads_no_document() {
             ..WorkCounts::default()
         };
         assert_eq!(work, expected, "warm get {line}, grammar {grammar}");
+        // The same request again: the session keeps the file's contents and its scan.
+        let (work, _) = get(&line);
+        assert_eq!(
+            work,
+            WorkCounts::default(),
+            "warm get {line} again, grammar {grammar}"
+        );
 
         // A code file changed on disk is read as it is now.
         let absolute = corpus.root().join(&file);

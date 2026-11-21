@@ -267,7 +267,7 @@ pub fn check_growth<P>(corpora: &[(usize, P)], name: &str, run: impl FnMut(usize
 /// gets [`RUNS`] runs of both sizes and fails when the median grows faster than [`LIMIT`] per
 /// doubling.
 /// `prepare` runs before each timed run, outside the timed span.
-fn check_growth_after<P>(
+pub fn check_growth_after<P>(
     corpora: &[(usize, P)],
     name: &str,
     mut prepare: impl FnMut(usize),

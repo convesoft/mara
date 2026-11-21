@@ -29,6 +29,37 @@ pub fn now() -> Duration {
     Duration::new(seconds, nanoseconds) + CHILDREN.get()
 }
 
+/// Adds `time`, CPU time spent for this thread elsewhere, such as by a daemon serving it, to
+/// this thread's [`now`].
+pub fn charge(time: Duration) {
+    CHILDREN.set(CHILDREN.get() + time);
+}
+
+/// The CPU time of the process `pid` so far, user plus system, its exited threads included and
+/// its child processes not: its process CPU clock (DES-PERFORMANCE-HARNESS).
+#[cfg(target_os = "linux")]
+pub fn of_process(pid: u32) -> Duration {
+    let mut clock: libc::clockid_t = 0;
+    let pid = libc::pid_t::try_from(pid).expect("a process ID");
+    // SAFETY: `clock_getcpuclockid` writes a clock ID into `clock`, and returns 0 or an error.
+    let result = unsafe { libc::clock_getcpuclockid(pid, &mut clock) };
+    assert_eq!(result, 0, "the CPU clock of process {pid}: error {result}");
+    let mut time = MaybeUninit::<libc::timespec>::uninit();
+    // SAFETY: as in [`now`].
+    let result = unsafe { libc::clock_gettime(clock, time.as_mut_ptr()) };
+    assert_eq!(
+        result,
+        0,
+        "CPU time of {pid}: {}",
+        io::Error::last_os_error()
+    );
+    // SAFETY: initialized by the successful call above.
+    let time = unsafe { time.assume_init() };
+    let seconds = u64::try_from(time.tv_sec).expect("a CPU time after the epoch");
+    let nanoseconds = u32::try_from(time.tv_nsec).expect("nanoseconds below one second");
+    Duration::new(seconds, nanoseconds)
+}
+
 /// Waits for `child` to exit and reaps it, adds its CPU time to this thread's [`now`], and returns
 /// its exit status.
 pub fn wait(child: Child) -> ExitStatus {

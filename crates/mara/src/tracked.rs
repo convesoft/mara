@@ -94,6 +94,11 @@ impl<T> Tracked<T> {
         fs::symlink_metadata(path).is_ok_and(|metadata| Stat::of(&metadata) == self.stat)
     }
 
+    /// When the check that read the contents began.
+    pub(crate) fn checked(&self) -> SystemTime {
+        self.checked
+    }
+
     /// The same check of the same contents, with another value.
     pub(crate) fn with_value<U>(&self, value: U) -> Tracked<U> {
         Tracked {

@@ -120,10 +120,11 @@ impl Session {
     /// next response: it is added before the derived state is given to other requests, so the
     /// response of a request that uses that state reports it.
     pub fn derive(&self) {
-        self.inputs().rederive(SystemTime::now(), |work| {
+        let now = SystemTime::now();
+        self.inputs().rederive(now, |work| {
             self.add(work);
             #[cfg(debug_assertions)]
-            derived(work);
+            derived(work, now);
         });
     }
 
@@ -178,16 +179,24 @@ impl Session {
 /// Appends the counts of a background derivation, once it gave its state to the session, to
 /// the file that `MARA_TEST_DERIVED` names, in debug builds only, so that a test can wait for
 /// the watcher's derivation instead of a deadline (as ADR-DEBUG-PAUSE-POINT allows test-only
-/// code): one line of the file reads, hashes, parses and snapshot builds.
+/// code): one line of the file reads, hashes, parses and snapshot builds, then the time its
+/// check took as now, in nanoseconds since the epoch, which tells whether it settled what it read.
 #[cfg(debug_assertions)]
-fn derived(work: &WorkCounts) {
+fn derived(work: &WorkCounts, now: SystemTime) {
     use std::io::Write as _;
     let Some(path) = std::env::var_os("MARA_TEST_DERIVED").filter(|value| !value.is_empty()) else {
         return;
     };
+    let checked = now
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
     let line = format!(
-        "{} {} {} {}\n",
-        work.file_reads, work.hashes, work.parses, work.snapshot_builds
+        "{} {} {} {} {}\n",
+        work.file_reads,
+        work.hashes,
+        work.parses,
+        work.snapshot_builds,
+        checked.as_nanos()
     );
     let file = fs::OpenOptions::new().append(true).create(true).open(path);
     let _ = file.and_then(|mut file| file.write_all(line.as_bytes()));
