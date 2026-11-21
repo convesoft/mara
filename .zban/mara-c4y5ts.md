@@ -20,6 +20,9 @@ Context: AGENTS.md (Deciding during the rewrite). When the epic closes, the orch
 - 2026-11-21: the repository moves to Nx with `@convesoft/nx-rust` before the alpha.6 slice starts, as a small epic.
 - 2026-11-21: until the package is on npm, the plugin is used from the maintainer's local nx-rust checkout, by path (chosen over a vendored tarball, a GitHub pre-release and waiting for npm), and on 2026-11-22: from its TypeScript source, without a build. It works on this machine only.
 - 2026-11-21: what the plugin does not handle is a custom Nx target (one that calls `zban`, for example), and `package.json` scripts combine the usual checks.
+- 2026-11-22: the workspace files are copied from Nx's TypeScript preset, generated in a temporary directory, so that they agree with what Nx generates and hold what the alpha.6 packages need; the generator never runs inside the checkout.
+- 2026-11-22: of the generator's agent files, the repository takes the Nx skills it will use and the managed Nx block of `AGENTS.md`; the size rule of `AGENTS.md` does not count that block. The linter and the formatter of the JS side are oxlint and oxfmt.
+- 2026-11-22: a last issue of the epic (mara-mrmg89) switches to the published package.
 
 ## Decided by the orchestrator
 
