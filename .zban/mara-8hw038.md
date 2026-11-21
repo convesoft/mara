@@ -1,6 +1,6 @@
 ---
 title: Warm counts after a watched change and after a write
-status: todo
+status: in-progress
 type: task
 parent: mara-0mxw21
 related:

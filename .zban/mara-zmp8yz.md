@@ -1,6 +1,6 @@
 ---
 title: Starting and cancelling Soufflé is safe in the daemon
-status: todo
+status: in-progress
 type: bug
 parent: mara-0mxw21
 created_at: 2026-11-20T20:22:51Z

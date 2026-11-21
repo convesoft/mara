@@ -1,6 +1,6 @@
 ---
 title: Diagnostic codes and paths are not leaked for the life of the process
-status: todo
+status: in-progress
 type: bug
 parent: mara-0mxw21
 created_at: 2026-11-20T20:22:51Z

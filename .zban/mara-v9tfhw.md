@@ -1,6 +1,6 @@
 ---
 title: The CLI and the daemon read options the same way
-status: todo
+status: in-progress
 type: bug
 parent: mara-0mxw21
 created_at: 2026-11-20T20:22:51Z

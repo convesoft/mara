@@ -1,6 +1,6 @@
 ---
 title: Loading a grammar does not hold up other languages, and a load that times out is not tried again
-status: todo
+status: in-progress
 type: bug
 parent: mara-779tms
 created_at: 2026-11-20T20:22:51Z
