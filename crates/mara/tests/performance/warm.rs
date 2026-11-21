@@ -367,6 +367,51 @@ fn an_added_removed_or_renamed_document_is_parsed_only_when_its_contents_are_new
     }
 }
 
+/// The row of VER-CODE-WORK-COUNTERS (`docs/code/verification.mara.md`) of a code file added,
+/// one removed and one renamed with its contents unchanged: the new path is read and hashed,
+/// and only new contents are scanned.
+#[test]
+fn an_added_removed_or_renamed_code_file_is_scanned_only_when_its_contents_are_new() {
+    let warm = Warm::start();
+    let path = warm.root().join(&warm.corpus.code_files[0]);
+    let added = path.with_file_name("added.rs");
+    let renamed = path.with_file_name("renamed.rs");
+    let mut changed = SystemTime::now();
+    let changes: [(&str, Change, u64, u64); 3] = [
+        (
+            "added",
+            Box::new(|| fs::write(&added, "pub fn added() {}\n").unwrap()),
+            1,
+            1,
+        ),
+        (
+            "removed",
+            Box::new(|| fs::remove_file(&added).unwrap()),
+            0,
+            0,
+        ),
+        (
+            "renamed",
+            Box::new(|| fs::rename(&path, &renamed).unwrap()),
+            1,
+            0,
+        ),
+    ];
+    for (what, change, reads, scans) in changes {
+        warm.settled(changed);
+        change();
+        changed = SystemTime::now();
+        let work = warm.run(VALIDATE);
+        let expected = [
+            ("file_reads", reads),
+            ("hashes", reads),
+            ("parses", 0),
+            ("code_scans", scans),
+        ];
+        assert_counts(&work, &expected, &format!("a code file {what}"));
+    }
+}
+
 #[test]
 fn an_edited_schema_or_configuration_builds_the_snapshot_again_and_parses_nothing() {
     let warm = Warm::start();

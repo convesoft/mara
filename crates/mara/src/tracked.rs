@@ -94,6 +94,12 @@ impl<T> Tracked<T> {
         fs::symlink_metadata(path).is_ok_and(|metadata| Stat::of(&metadata) == self.stat)
     }
 
+    /// Whether `other` records the same check of the same contents: the same stat, time and
+    /// hash.
+    pub(crate) fn same_check<U>(&self, other: &Tracked<U>) -> bool {
+        (self.stat, self.checked, self.hash) == (other.stat, other.checked, other.hash)
+    }
+
     /// When the check that read the contents began.
     pub(crate) fn checked(&self) -> SystemTime {
         self.checked

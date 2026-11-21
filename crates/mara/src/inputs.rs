@@ -18,7 +18,7 @@
 
 mod admit;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -58,8 +58,7 @@ pub struct Inputs {
     project: Option<(u64, Arc<Project>)>,
     /// The project files that request read, for their other roles in it.
     reads: Reads,
-    /// Shared with the views that a request keeps after its check ([`Inputs::shared`]).
-    state: Arc<State>,
+    state: State,
     /// The last snapshot, with the findings of its built-in checks once a request ran them.
     snapshot: Option<(Arc<Snapshot>, Arc<Checks>)>,
     /// The inputs that a view checks and derives on: those of a daemon's session.
@@ -71,15 +70,15 @@ pub struct Inputs {
     deriving: Option<Arc<Deriving>>,
 }
 
-/// What the inventory found, by path relative to the project root.
-#[derive(Clone, Debug, Default)]
+/// What the requests found, by path relative to the project root. A view takes the inventory
+/// and the code files from the session's check ([`Inputs::shared`]), each shared until one of
+/// them changes it, and keeps no contents or grammar-level scan of its own: it reads and adds
+/// those in the session's.
+#[derive(Debug, Default)]
 struct State {
-    directories: HashMap<String, Listing>,
-    /// By the path of the directory that holds the file.
-    gitignores: HashMap<String, Tracked<Compiled>>,
-    documents: HashMap<String, Tracked<Arc<ParsedFile>>>,
-    programs: HashMap<String, Tracked<Arc<Vec<u8>>>>,
-    code: HashMap<String, Tracked<Scan>>,
+    inventory: Arc<Inventory>,
+    /// The code files as the last scan read them ([`Inputs::scan_listed`]).
+    code: Arc<CodeScans>,
     /// The contents of the code files that [`Inputs::read_code`] read, so that the same file is
     /// read again only when a check would read it.
     code_contents: HashMap<String, Tracked<Arc<[u8]>>>,
@@ -87,6 +86,19 @@ struct State {
     /// the same file are not scanned again.
     code_scans: HashMap<String, Scan>,
 }
+
+/// What the inventory found.
+#[derive(Clone, Debug, Default)]
+struct Inventory {
+    directories: HashMap<String, Listing>,
+    /// By the path of the directory that holds the file.
+    gitignores: HashMap<String, Tracked<Compiled>>,
+    documents: HashMap<String, Tracked<Arc<ParsedFile>>>,
+    programs: HashMap<String, Tracked<Arc<Vec<u8>>>>,
+}
+
+/// Code files, each with its markers as last read, by path.
+type CodeScans = HashMap<String, Tracked<Scan>>;
 
 /// The markers of a code file's contents, with their key.
 #[derive(Clone, Debug)]
@@ -170,7 +182,7 @@ impl Inputs {
             request: next_request(),
             project: None,
             reads: Reads::default(),
-            state: Arc::default(),
+            state: State::default(),
             snapshot: None,
             shared: None,
             evaluated: None,
@@ -206,7 +218,7 @@ impl Inputs {
     /// The directories that the last request listed, relative to the root (`""` for the root):
     /// those that may hold inputs, which a daemon watches (DES-DAEMON-SESSIONS).
     pub fn directories(&self) -> Vec<String> {
-        self.state.directories.keys().cloned().collect()
+        self.state.inventory.directories.keys().cloned().collect()
     }
 
     /// The schema's path as the last loaded configuration names it.
@@ -218,7 +230,8 @@ impl Inputs {
     /// Takes on what the shared inputs found in the check that just ended.
     fn adopt(&mut self, shared: &Inputs) {
         self.project.clone_from(&shared.project);
-        self.state = Arc::clone(&shared.state);
+        self.state.inventory = Arc::clone(&shared.state.inventory);
+        self.state.code = Arc::clone(&shared.state.code);
         self.snapshot.clone_from(&shared.snapshot);
     }
 
@@ -264,7 +277,7 @@ impl Inputs {
     /// The basis of the document at `path` for an edit: the contents that the last snapshot
     /// holds, as that request read them. `None` when it holds no document at `path`.
     pub fn basis(&self, path: &str) -> Option<Basis> {
-        let version = match self.state.documents.get(path) {
+        let version = match self.state.inventory.documents.get(path) {
             Some(tracked) => Version::of(tracked),
             None => Version::of(self.state.code.get(path)?),
         };
@@ -297,6 +310,7 @@ impl Inputs {
             Some(shared) => kept(&lock(shared).state),
             None => kept(&self.state),
         };
+        let before = previous.as_ref().map(|previous| previous.with_value(()));
         let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
             let reads = &mut Reads::default();
             tracked::check(&absolute, &metadata, previous, now, work, reads, false)
@@ -312,12 +326,13 @@ impl Inputs {
                 return Err(Box::new(Diagnostic::error("io-error", path, 1, message)));
             }
         };
-        let kept = (path.to_owned(), tracked.clone());
-        match &self.shared {
-            Some(shared) => Arc::make_mut(&mut lock(shared).state)
-                .code_contents
-                .extend([kept]),
-            None => Arc::make_mut(&mut self.state).code_contents.extend([kept]),
+        // Only what this call read: a record it reused may be one that a newer listing forgot.
+        if before.is_none_or(|before| !before.same_check(&tracked)) {
+            let kept = (path.to_owned(), tracked.clone());
+            match &self.shared {
+                Some(shared) => lock(shared).state.code_contents.extend([kept]),
+                None => self.state.code_contents.extend([kept]),
+            }
         }
         Ok((tracked.hash, tracked.value.to_vec()))
     }
@@ -383,10 +398,8 @@ impl Inputs {
                     };
                     let kept = [(path.to_owned(), scan)];
                     match &self.shared {
-                        Some(shared) => Arc::make_mut(&mut lock(shared).state)
-                            .code_scans
-                            .extend(kept),
-                        None => Arc::make_mut(&mut self.state).code_scans.extend(kept),
+                        Some(shared) => lock(shared).state.code_scans.extend(kept),
+                        None => self.state.code_scans.extend(kept),
                     }
                 }
                 scanned
@@ -407,7 +420,8 @@ impl Inputs {
     /// [`CodeReads::List`] does, and reads no document or program and builds no snapshot. The
     /// listing starts from the directories and `.gitignore` files of the last check, each
     /// listed or read again only when its stat says so, and changes nothing that these inputs
-    /// or a session keep.
+    /// or a session keep, except that they forget what `get` kept of each code file that the
+    /// listing no longer finds as one, a document or a program now included ([`Inputs::forget_code`]).
     pub fn code_file(
         &mut self,
         path: &str,
@@ -426,11 +440,14 @@ impl Inputs {
         let documents = patterns(&mut config.include.iter().flatten());
         let programs = patterns(&mut config.rules.iter().flat_map(|rules| &rules.programs));
         let code = patterns(&mut config.code.iter().flat_map(|language| &language.include));
-        let name = path.rsplit('/').next().unwrap_or(path);
-        let excluded = (name.ends_with(".mara.md") && documents.matches(path))
-            || programs.matches(path)
-            || name.starts_with(TEMPORARY_PREFIX);
-        if excluded || !code.matches(path) {
+        // Whether a listed path has another role, which the walk below does not tell.
+        let excluded = |path: &str| {
+            let name = path.rsplit('/').next().unwrap_or(path);
+            (name.ends_with(".mara.md") && documents.matches(path))
+                || programs.matches(path)
+                || name.starts_with(TEMPORARY_PREFIX)
+        };
+        if excluded(path) || !code.matches(path) {
             return (None, Vec::new());
         }
         let config = Config {
@@ -438,19 +455,31 @@ impl Inputs {
             rules: None,
             ..config.clone()
         };
-        let previous = State {
-            directories: self.state.directories.clone(),
-            gitignores: self.state.gitignores.clone(),
-            ..State::default()
+        let previous = Inventory {
+            directories: self.state.inventory.directories.clone(),
+            gitignores: self.state.inventory.gitignores.clone(),
+            ..Inventory::default()
         };
         let mut problems = Vec::new();
-        let code = Code::new(&config, CodeReads::List, &previous, &mut problems);
+        let code = Code::new(&config, CodeReads::List, Arc::default(), &mut problems);
         let mut reads = Reads::default();
         let mut walk = Walk::new(&self.root, &config, code, previous, now, work, &mut reads);
         walk.run();
-        let listed = (walk.code.paths.iter()).find(|(listed, _)| listed == path);
+        let Walk {
+            code: found,
+            mut diagnostics,
+            ..
+        } = walk;
+        let listed = (found.paths.iter()).find(|(listed, _)| listed == path);
         let language = listed.map(|&(_, language)| language);
-        let mut diagnostics = walk.diagnostics;
+        let paths: HashSet<&str> = (found.paths.iter())
+            .map(|(path, _)| &**path)
+            .filter(|path| !excluded(path))
+            .collect();
+        match &self.shared {
+            Some(shared) => lock(shared).forget_code(|path| paths.contains(path)),
+            None => self.forget_code(|path| paths.contains(path)),
+        }
         diagnostics.extend(problems);
         diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
         (language, diagnostics)
@@ -464,12 +493,13 @@ impl Inputs {
     /// listing's that may hide code and each code file that cannot be read, and the diagnostics
     /// of the scan: those of the layer's own problems, `unavailable-grammar` and fallbacks.
     ///
-    /// A view scans without holding the session's inputs ([`Inputs::shared`]): it copies the
+    /// A view scans without holding the session's inputs ([`Inputs::shared`]): it takes the
     /// session's record of the code files under its lock, reads, loads grammars and parses
-    /// without it, and gives back under the lock again only the results whose file still has
-    /// the stat it was read with. So no request waits for another's scan, and a scan that a
-    /// change overtook is not kept. The view keeps its own results, which an edit is checked
-    /// against.
+    /// without it, and gives back under the lock again only what it read again, and of that
+    /// only the results whose file still has the stat it was read with ([`give_back`]). So no
+    /// request waits for another's scan, a scan that a change overtook is not kept, and a scan
+    /// that read nothing again and found no file gone changes nothing of the session. The view
+    /// keeps its own results, which an edit is checked against.
     pub fn scan_listed(
         &mut self,
         generation: &Generation,
@@ -477,20 +507,18 @@ impl Inputs {
         work: &mut WorkCounts,
     ) -> (Arc<CodeLayer>, Vec<Diagnostic>) {
         let Some(shared) = self.shared.clone() else {
-            // Copied only while a view of an earlier check still holds it.
-            let mut state = Arc::unwrap_or_clone(std::mem::take(&mut self.state));
-            let previous = std::mem::take(&mut state.code);
-            let (code, layer, diagnostics) = scan(&self.root, generation, previous, now, work);
-            state.code = code;
-            self.state = Arc::new(state);
+            let previous = std::mem::take(&mut self.state.code);
+            let (scanned, layer, diagnostics) = scan(&self.root, generation, previous, now, work);
+            self.state.code = Arc::new(scanned.files);
             return (layer, diagnostics);
         };
-        let previous = lock(&shared).state.code.clone();
-        let (code, layer, diagnostics) = scan(&self.root, generation, previous, now, work);
-        give_back(&shared, &self.root, &code);
-        let mut state = Arc::unwrap_or_clone(std::mem::take(&mut self.state));
-        state.code = code;
-        self.state = Arc::new(state);
+        let previous = Arc::clone(&lock(&shared).state.code);
+        let (scanned, layer, diagnostics) = scan(&self.root, generation, previous, now, work);
+        // The view lets go of the session's record before it gives back, so that the session
+        // changes its record without copying it.
+        self.state.code = Arc::default();
+        give_back(&shared, &self.root, &scanned);
+        self.state.code = Arc::new(scanned.files);
         (layer, diagnostics)
     }
 
@@ -517,6 +545,9 @@ impl Inputs {
         };
         let mut generation = match self.shared.clone() {
             Some(shared) => {
+                // What the view took from an earlier check of this request is let go, so that
+                // the session derives without copying it.
+                self.state = State::default();
                 let mut shared = lock(&shared);
                 let derivation = Derivation::Request(listing);
                 let generation = shared.generation_for(self.request, now, work, derivation);
@@ -643,7 +674,7 @@ impl Inputs {
         let project = self.project_for(request, now, work, keep);
         self.reads.keep = keep;
         // Copied only while a view of an earlier check still holds it.
-        let previous = Arc::unwrap_or_clone(std::mem::take(&mut self.state));
+        let previous = Arc::unwrap_or_clone(std::mem::take(&mut self.state.inventory));
         for file in &written {
             let contents = Arc::from(&*file.file.contents);
             (self.reads).insert(file.absolute.clone(), file.stat, file.hash, contents);
@@ -651,7 +682,7 @@ impl Inputs {
         let reads = &mut self.reads;
         let config = &project.config;
         let mut grammar_problems = Vec::new();
-        let code = Code::new(config, code, &previous, &mut grammar_problems);
+        let code = Code::new(config, code, Arc::default(), &mut grammar_problems);
         let mut walk = Walk::new(&self.root, config, code, previous, now, work, reads);
         for file in written {
             walk.parsed.insert(DocumentKey::new(file.hash), file.file);
@@ -659,21 +690,14 @@ impl Inputs {
         walk.diagnostics.extend(grammar_problems);
         walk.run();
         let Walk {
-            mut next,
-            mut previous,
+            next,
             documents,
             programs,
             mut diagnostics,
             code: found,
             ..
         } = walk;
-        if found.reads != Some(CodeReads::Scan) {
-            // Code tracked by an earlier request stays for the next one that reads code.
-            next.code = std::mem::take(&mut previous.code);
-        }
-        next.code_contents = std::mem::take(&mut previous.code_contents);
-        next.code_scans = std::mem::take(&mut previous.code_scans);
-        self.state = Arc::new(next);
+        self.state.inventory = Arc::new(next);
         self.reads = Reads::default();
         diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
         let inputs = SnapshotInputs::new(
@@ -691,6 +715,12 @@ impl Inputs {
         self.snapshot = Some((Arc::clone(&snapshot), Arc::clone(&checks)));
         let mut code_paths = found.paths;
         code_paths.sort_unstable();
+        if found.reads == Some(CodeReads::List) {
+            let listed = |path: &str| {
+                (code_paths.binary_search_by(|(listed, _)| listed.as_str().cmp(path))).is_ok()
+            };
+            self.forget_code(listed);
+        }
         let (layer, listed_unread) = match found.reads {
             Some(CodeReads::Scan) => (
                 Some(Arc::new(CodeLayer::new(found.files, found.unread))),
@@ -710,6 +740,17 @@ impl Inputs {
             checks,
         }
     }
+
+    /// Forgets what `get` kept of every code file that a listing of the code files no longer
+    /// finds, `listed` telling the paths it found: the contents that [`Inputs::read_code`] kept
+    /// and the scan that [`Inputs::scan_code`] kept. The record of the scanned code files is left
+    /// to the next scan ([`give_back`]), which first reuses by key the scan of a file that was
+    /// only renamed. So a session keeps nothing of a code file deleted or renamed, or no longer
+    /// declared, beyond its next scan.
+    fn forget_code(&mut self, listed: impl Fn(&str) -> bool) {
+        self.state.code_contents.retain(|path, _| listed(path));
+        self.state.code_scans.retain(|path, _| listed(path));
+    }
 }
 
 /// What a derivation of the inputs does.
@@ -722,35 +763,47 @@ enum Derivation {
     Written(Vec<Written>),
 }
 
+/// What a scan found ([`scan`]).
+struct Scanned {
+    /// Every code file the scan read or kept, by path.
+    files: CodeScans,
+    /// The paths of `files` that the scan read itself: those that `previous` did not hold as
+    /// they are.
+    read: Vec<String>,
+    /// The paths of `previous` that the scan did not find.
+    gone: Vec<String>,
+}
+
+impl std::ops::Index<&str> for Scanned {
+    type Output = Tracked<Scan>;
+
+    fn index(&self, path: &str) -> &Tracked<Scan> {
+        &self.files[path]
+    }
+}
+
 /// Reads, hashes and scans the code files that `generation` listed, against `previous`, the
-/// code files as last read: the record of the code files after the scan, the layer and the
-/// scan's diagnostics ([`Inputs::scan_listed`]).
+/// code files as last read, reusing by key the scan of any of them, also of one no longer
+/// listed: the code files after the scan, the layer and the scan's diagnostics
+/// ([`Inputs::scan_listed`]).
 fn scan(
     root: &Path,
     generation: &Generation,
-    previous: HashMap<String, Tracked<Scan>>,
+    previous: Arc<CodeScans>,
     now: SystemTime,
     work: &mut WorkCounts,
-) -> (
-    HashMap<String, Tracked<Scan>>,
-    Arc<CodeLayer>,
-    Vec<Diagnostic>,
-) {
+) -> (Scanned, Arc<CodeLayer>, Vec<Diagnostic>) {
     let config = &generation.project.config;
-    let previous = State {
-        code: previous,
-        ..State::default()
-    };
     let mut grammar_problems = Vec::new();
-    let code = Code::new(config, CodeReads::Scan, &previous, &mut grammar_problems);
+    let code = Code::new(config, CodeReads::Scan, previous, &mut grammar_problems);
     let mut reads = Reads::default();
-    let mut walk = Walk::new(root, config, code, previous, now, work, &mut reads);
+    let inventory = Inventory::default();
+    let mut walk = Walk::new(root, config, code, inventory, now, work, &mut reads);
     walk.diagnostics.extend(grammar_problems);
     for (path, language) in &generation.code_paths {
         walk.code_file(path.clone(), *language);
     }
     let Walk {
-        next,
         mut diagnostics,
         code: found,
         ..
@@ -759,19 +812,58 @@ fn scan(
     unread.extend(found.unread);
     diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
     let layer = Arc::new(CodeLayer::new(found.files, unread));
-    (next.code, layer, diagnostics)
+    let read = (found.next.iter())
+        .filter(|(path, tracked)| {
+            (found.previous.get(*path)).is_none_or(|previous| !same_scan(previous, tracked))
+        })
+        .map(|(path, _)| path.clone())
+        .collect();
+    let gone = (found.previous.keys())
+        .filter(|path| !found.next.contains_key(*path))
+        .cloned()
+        .collect();
+    let scanned = Scanned {
+        files: found.next,
+        read,
+        gone,
+    };
+    (scanned, layer, diagnostics)
 }
 
-/// Gives the session `shared` the results of a scan, `code`, made without its lock: only those
-/// whose file still has the stat it was read with, so that a scan a change overtook is not
-/// kept. The next check reads such a file again.
-fn give_back(shared: &Mutex<Inputs>, root: &Path, code: &HashMap<String, Tracked<Scan>>) {
-    let current: Vec<(String, Tracked<Scan>)> = (code.iter())
+/// Gives the session `shared` the results of a scan made without its lock, `scanned`: only
+/// what the scan read itself, judged against the record it started from, that the session's
+/// record does not already hold as it is, and of that only the results whose file still has
+/// the stat it was read with, so that a scan a change overtook is not kept. The next check
+/// reads such a file again. A result that the scan reused is never given back, so an older
+/// scan does not bring back a file that a newer listing dropped; a file it read itself still
+/// comes back, until the next scan. The session's record then loses the files of the record
+/// the scan started from that the scan did not find, and no other: a file that a newer scan
+/// added stays. A scan that read nothing and found no file gone changes nothing of the session
+/// and checks no file.
+fn give_back(shared: &Mutex<Inputs>, root: &Path, scanned: &Scanned) {
+    let kept = Arc::clone(&lock(shared).state.code);
+    let current: Vec<(String, Tracked<Scan>)> = (scanned.read.iter())
+        .map(|path| (path, &scanned.files[path]))
+        .filter(|(path, tracked)| kept.get(*path).is_none_or(|kept| !same_scan(kept, tracked)))
         .filter(|(path, tracked)| tracked.still_as_read(&root.join(path)))
         .map(|(path, tracked)| (path.clone(), tracked.clone()))
         .collect();
-    let mut shared = lock(shared);
-    Arc::make_mut(&mut shared.state).code.extend(current);
+    let gone = scanned.gone.iter().any(|path| kept.contains_key(path));
+    drop(kept);
+    if current.is_empty() && !gone {
+        return;
+    }
+    let mut session = lock(shared);
+    let code = Arc::make_mut(&mut session.state.code);
+    for path in &scanned.gone {
+        code.remove(path);
+    }
+    code.extend(current);
+}
+
+/// Whether `a` and `b` are the same check of a code file, with the same scan.
+fn same_scan(a: &Tracked<Scan>, b: &Tracked<Scan>) -> bool {
+    a.same_check(b) && a.value.key == b.value.key && Arc::ptr_eq(&a.value.file, &b.value.file)
 }
 
 /// A number that no other request of this process has: what tells the calls of one request
@@ -801,6 +893,9 @@ struct Code {
     /// at the grammar level.
     configured: Vec<Language>,
     grammars: Vec<Option<Arc<Grammar>>>,
+    /// With [`CodeReads::Scan`], the code files as last read, and as this walk read them.
+    previous: Arc<CodeScans>,
+    next: CodeScans,
     /// The scans of the last request and of this one, by key, so that two files with the same
     /// contents and language are scanned once.
     scanned: HashMap<MarkerKey, Arc<ScannedFile>>,
@@ -813,13 +908,14 @@ struct Code {
 }
 
 impl Code {
-    /// What a walk does with code files. With [`CodeReads::Scan`], loads the grammar of each
-    /// language that pins one, and puts the `unavailable-grammar` diagnostic of each that cannot
-    /// be used into `problems`.
+    /// What a walk does with code files. With [`CodeReads::Scan`], reads them against
+    /// `previous`, the code files as last read, loads the grammar of each language that pins
+    /// one, and puts the `unavailable-grammar` diagnostic of each that cannot be used into
+    /// `problems`.
     fn new(
         config: &Config,
         reads: CodeReads,
-        previous: &State,
+        previous: Arc<CodeScans>,
         problems: &mut Vec<Diagnostic>,
     ) -> Code {
         if reads == CodeReads::None {
@@ -846,7 +942,6 @@ impl Code {
             }
         }
         let scanned = previous
-            .code
             .values()
             .map(|tracked| (tracked.value.key, Arc::clone(&tracked.value.file)))
             .collect();
@@ -860,6 +955,7 @@ impl Code {
             keys,
             prefixes: config.code.iter().map(|l| l.prefixes.clone()).collect(),
             scanned,
+            previous,
             configured: config.code.clone(),
             grammars: loaded,
             ..Code::default()
@@ -884,8 +980,8 @@ struct Walk<'w> {
     work: &'w mut WorkCounts,
     reads: &'w mut Reads,
     /// What the last request found; each entry still found moves to `next`.
-    previous: State,
-    next: State,
+    previous: Inventory,
+    next: Inventory,
     /// The parsed documents of the last request and of this one, by key, so that a moved or
     /// copied document is not parsed again.
     parsed: HashMap<DocumentKey, Arc<ParsedFile>>,
@@ -910,7 +1006,7 @@ impl<'w> Walk<'w> {
         root: &'w Path,
         config: &Config,
         code: Code,
-        previous: State,
+        previous: Inventory,
         now: SystemTime,
         work: &'w mut WorkCounts,
         reads: &'w mut Reads,
@@ -932,7 +1028,7 @@ impl<'w> Walk<'w> {
             work,
             reads,
             previous,
-            next: State::default(),
+            next: Inventory::default(),
             parsed,
             documents: Vec::new(),
             programs: BTreeMap::new(),
@@ -1121,9 +1217,10 @@ impl<'w> Walk<'w> {
             return;
         }
         let absolute = self.root.join(&path);
-        let previous = self.previous.code.remove(&path).filter(|tracked| {
+        let previous = self.code.previous.get(&path).filter(|tracked| {
             tracked.value.key == MarkerKey::new(self.code.keys[language], tracked.hash)
         });
+        let previous = previous.cloned();
         let checked = self.check(&absolute, previous);
         let tracked = match checked {
             Ok(Check::Kept(tracked)) => tracked,
@@ -1147,7 +1244,7 @@ impl<'w> Walk<'w> {
             scanned: Arc::clone(&tracked.value.file),
         });
         self.code.file_languages.push(language);
-        self.next.code.insert(path, tracked);
+        self.code.next.insert(path, tracked);
     }
 
     /// Reads and scans again, at the basic level, each file of the language at index
@@ -1176,14 +1273,14 @@ impl<'w> Walk<'w> {
                         hash: read.hash,
                         scanned: Arc::clone(&file),
                     };
-                    self.next.code.insert(path, read.with(Scan { key, file }));
+                    self.code.next.insert(path, read.with(Scan { key, file }));
                     index += 1;
                 }
                 Ok(Check::Kept(_)) => unreachable!("a check without a previous value reads"),
                 Err(error) => {
                     self.code.files.remove(index);
                     self.code.file_languages.remove(index);
-                    self.next.code.remove(&path);
+                    self.code.next.remove(&path);
                     let message = format!("cannot read {path}: {error}");
                     self.hiding(true, "io-error", path, 1, message);
                 }
@@ -1480,6 +1577,218 @@ mod tests {
         let markers = |generation: &Generation| format!("{:?}", generation.code.as_ref().unwrap());
         assert!(markers(&next).contains("REQ-CC"), "{}", markers(&next));
         assert!(markers(&first).contains("REQ-A"));
+    }
+
+    /// A project with Rust code in `src/`, of the files `files`, and its session.
+    fn code_project(dir: &Path, files: &[(&str, &str)]) -> Arc<Mutex<Inputs>> {
+        fs::create_dir_all(dir.join(".mara")).unwrap();
+        fs::create_dir_all(dir.join("src")).unwrap();
+        let config = format!(
+            "{CONFIG}\n[code]\nformat_version = 1\n\n[code.languages.rust]\n\
+             include = [\"src/**/*.rs\", \"src/**/*.md\"]\ncomment_prefixes = [\"//\"]\n"
+        );
+        fs::write(dir.join(".mara/config.toml"), config).unwrap();
+        for (path, contents) in files {
+            fs::write(dir.join(path), contents).unwrap();
+        }
+        Arc::new(Mutex::new(Inputs::new(dir.to_owned())))
+    }
+
+    fn view(session: &Arc<Mutex<Inputs>>) -> Inputs {
+        Inputs::shared(Arc::clone(session), Arc::default(), Arc::default())
+    }
+
+    /// A warm scan gives the session only what it read again: one that read nothing leaves the
+    /// session's record of the code files as it was, and none copies the inventory, which
+    /// the view of the request holds too.
+    #[test]
+    fn a_warm_scan_copies_nothing_it_does_not_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = ("src/lib.rs", "// @mara implements REQ-A\n");
+        let other = ("src/other.rs", "// @mara implements REQ-B\n");
+        let session = code_project(dir.path(), &[lib, other]);
+        // Late enough that every check settles what it read.
+        let now = SystemTime::now() + Duration::from_secs(3600);
+        let mut work = WorkCounts::default();
+        view(&session).generation(now, &mut work, CodeReads::Scan);
+        let held = |session: &Mutex<Inputs>| {
+            let session = lock(session);
+            (
+                Arc::clone(&session.state.inventory),
+                Arc::clone(&session.state.code),
+            )
+        };
+
+        let mut request = view(&session);
+        let listed = request.generation(now, &mut work, CodeReads::List);
+        let (inventory, code) = held(&session);
+        let mut work = WorkCounts::default();
+        request.scan_listed(&listed, now, &mut work);
+        assert_eq!(work, WorkCounts::default());
+        let (after, code_after) = held(&session);
+        assert!(Arc::ptr_eq(&inventory, &after), "the inventory was copied");
+        assert!(
+            Arc::ptr_eq(&code, &code_after),
+            "the code files were changed"
+        );
+        drop((after, code_after));
+
+        fs::write(dir.path().join(other.0), "// @mara implements REQ-CC\n").unwrap();
+        let mut request = view(&session);
+        let listed = request.generation(now, &mut work, CodeReads::List);
+        let (inventory, _) = held(&session);
+        let mut work = WorkCounts::default();
+        request.scan_listed(&listed, now, &mut work);
+        assert_eq!((work.file_reads, work.code_scans), (1, 1));
+        let (after, code_after) = held(&session);
+        assert!(Arc::ptr_eq(&inventory, &after), "the inventory was copied");
+        let scan = |code: &CodeScans, path: &str| Arc::clone(&code[path].value.file);
+        assert!(Arc::ptr_eq(&scan(&code, lib.0), &scan(&code_after, lib.0)));
+        assert!(format!("{:?}", scan(&code_after, other.0)).contains("REQ-CC"));
+    }
+
+    /// The paths that the session `session` keeps of code files: in its record of the scanned
+    /// files, in the contents `get` kept and in the grammar-level scans `get` kept.
+    fn kept(session: &Mutex<Inputs>) -> [Vec<String>; 3] {
+        let session = lock(session);
+        let sorted = |paths: Vec<&String>| {
+            let mut paths: Vec<String> = paths.into_iter().cloned().collect();
+            paths.sort();
+            paths
+        };
+        [
+            sorted(session.state.code.keys().collect()),
+            sorted(session.state.code_contents.keys().collect()),
+            sorted(session.state.code_scans.keys().collect()),
+        ]
+    }
+
+    /// Keeps in the session `session`, for each code file of its record, the contents and the
+    /// grammar-level scan that `get` keeps after it reads a file: a grammar-level scan needs a
+    /// pinned grammar, and a `get` keeps contents only when it reads them.
+    fn as_get(session: &Mutex<Inputs>) {
+        let mut session = lock(session);
+        let state = &mut session.state;
+        for (path, tracked) in state.code.iter() {
+            let contents = tracked.value.file.contents.clone().unwrap();
+            (state.code_contents).insert(path.clone(), tracked.with_value(contents));
+            (state.code_scans).insert(path.clone(), tracked.value.clone());
+        }
+    }
+
+    /// A code file deleted, renamed, ignored, or now a document leaves the session: the contents
+    /// and grammar-level scan that a `get` kept when a listing, a request's or `get`'s, no longer
+    /// finds it as code, and its markers at the next scan, which first reuses by key the scan
+    /// of a file that was only renamed: the new path is read and hashed, and not scanned.
+    #[test]
+    fn a_code_file_that_left_is_forgotten() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let files = [
+            ("src/a.rs", "// @mara implements REQ-A\n"),
+            ("src/b.rs", "// @mara implements REQ-B\n"),
+            ("src/d.rs", "// @mara implements REQ-D\n"),
+            ("src/notes.mara.md", "// @mara implements REQ-N\n"),
+        ];
+        let session = code_project(root, &files);
+        // Late enough that every check settles what it read.
+        let now = SystemTime::now() + Duration::from_secs(3600);
+        let mut work = WorkCounts::default();
+        view(&session).generation(now, &mut work, CodeReads::Scan);
+        as_get(&session);
+        let all: Vec<String> = files.iter().map(|(path, _)| path.to_string()).collect();
+        assert_eq!(kept(&session), [all.clone(), all.clone(), all.clone()]);
+        let paths =
+            |paths: &[&str]| -> Vec<String> { paths.iter().map(|path| path.to_string()).collect() };
+
+        // Renamed, deleted, and ignored.
+        fs::rename(root.join("src/a.rs"), root.join("src/c.rs")).unwrap();
+        fs::remove_file(root.join("src/b.rs")).unwrap();
+        fs::write(root.join("src/.gitignore"), "d.rs\n").unwrap();
+        let mut request = view(&session);
+        let listed = request.generation(now, &mut work, CodeReads::List);
+        let notes = paths(&["src/notes.mara.md"]);
+        assert_eq!(kept(&session), [all, notes.clone(), notes.clone()]);
+        let mut work = WorkCounts::default();
+        request.scan_listed(&listed, now, &mut work);
+        let counts = (work.file_reads, work.hashes, work.code_scans);
+        assert_eq!(counts, (1, 1, 0), "the scan after the rename: {work:?}");
+        let scanned = paths(&["src/c.rs", "src/notes.mara.md"]);
+        assert_eq!(kept(&session), [scanned.clone(), notes.clone(), notes]);
+
+        // Renamed again, and the other file now a document; then `get` of the new path, which
+        // lists the code files itself.
+        as_get(&session);
+        fs::rename(root.join("src/c.rs"), root.join("src/e.rs")).unwrap();
+        let config = fs::read_to_string(root.join(".mara/config.toml")).unwrap();
+        let documents = r#"include = ["docs/**/*.mara.md", "src/**/*.mara.md"]"#;
+        let config = config.replacen(r#"include = ["docs/**/*.mara.md"]"#, documents, 1);
+        fs::write(root.join(".mara/config.toml"), config).unwrap();
+        let mut work = WorkCounts::default();
+        let (language, _) = view(&session).code_file("src/e.rs", now, &mut work);
+        assert_eq!(language, Some(0));
+        assert_eq!(kept(&session), [scanned, vec![], vec![]]);
+        let mut work = WorkCounts::default();
+        view(&session).generation(now, &mut work, CodeReads::Scan);
+        assert_eq!(work.code_scans, 0, "the scan after the second rename");
+        assert_eq!(kept(&session), [paths(&["src/e.rs"]), vec![], vec![]]);
+    }
+
+    /// A scan gives back only what it read itself: an older scan that reused a file's record
+    /// does not bring back the file after a newer listing dropped it.
+    #[test]
+    fn an_older_scan_does_not_bring_back_a_file_a_newer_one_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = ("src/lib.rs", "// @mara implements REQ-A\n");
+        let other = ("src/other.rs", "// @mara implements REQ-B\n");
+        let session = code_project(dir.path(), &[lib, other]);
+        let root = lock(&session).root.clone();
+        // Late enough that every check settles what it read.
+        let now = SystemTime::now() + Duration::from_secs(3600);
+        let mut work = WorkCounts::default();
+        view(&session).generation(now, &mut work, CodeReads::Scan);
+        // The older request lists and scans, reading nothing; then a newer one, after `other`
+        // is ignored, drops it; then the older one gives back.
+        let listed = view(&session).generation(now, &mut work, CodeReads::List);
+        let previous = Arc::clone(&lock(&session).state.code);
+        let (older, _, _) = scan(&root, &listed, previous, now, &mut work);
+        assert!(older.read.is_empty(), "{:?}", older.read);
+        fs::write(root.join("src/.gitignore"), "other.rs\n").unwrap();
+        view(&session).generation(now, &mut work, CodeReads::Scan);
+        give_back(&session, &root, &older);
+        let kept = kept(&session);
+        assert_eq!(kept[0], ["src/lib.rs"], "the dropped file came back");
+    }
+
+    /// A scan drops from the session's record only the files of the record it started from that
+    /// it did not find: an older scan that gives back what it read keeps a file that a newer
+    /// scan added after the older one listed.
+    #[test]
+    fn an_older_scan_keeps_a_file_a_newer_one_added() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = ("src/lib.rs", "// @mara implements REQ-A\n");
+        let session = code_project(dir.path(), &[lib]);
+        let root = lock(&session).root.clone();
+        // Late enough that every check settles what it read.
+        let now = SystemTime::now() + Duration::from_secs(3600);
+        let mut work = WorkCounts::default();
+        view(&session).generation(now, &mut work, CodeReads::Scan);
+        // The older request lists and scans after `lib` changed, so it has a result to give
+        // back; then `added` is added, and a newer request scans it and gives it back.
+        fs::write(root.join(lib.0), "// @mara implements REQ-B\n").unwrap();
+        let listed = view(&session).generation(now, &mut work, CodeReads::List);
+        let previous = Arc::clone(&lock(&session).state.code);
+        let (older, _, _) = scan(&root, &listed, previous, now, &mut work);
+        assert_eq!(older.read, ["src/lib.rs"]);
+        fs::write(root.join("src/added.rs"), "// @mara implements REQ-C\n").unwrap();
+        view(&session).generation(now, &mut work, CodeReads::Scan);
+        give_back(&session, &root, &older);
+        let kept = kept(&session);
+        assert_eq!(
+            kept[0],
+            ["src/added.rs", "src/lib.rs"],
+            "the added file was dropped"
+        );
     }
 
     /// Requests of a session whose clock stands still, then steps back: each checks the

@@ -183,7 +183,7 @@ Warm rows, against the daemon, besides the code row of [VER-WORK-COUNTERS](../ve
 | Situation | Expectation |
 | --- | --- |
 | A code file edited to the contents of another code file | 0 code scans |
-| A code file added; one removed | 1 code scan; 0 code scans; 0 parses in both |
+| A code file added; one removed; one renamed, its contents unchanged | 1 code scan; 0 code scans; 1 read and 1 hash of the new path and 0 code scans; 0 parses in all three |
 | Code files edited, then a request that reads no code | No read, hash or scan of a code file; the next request that reads code scans each edited file once |
 | A document edited, then `relation list` | 0 code scans |
 | A language's comment prefixes changed in the configuration, or its grammar added by `code add` | 1 code scan per distinct content of that language's files, none of another language's; 0 parses |

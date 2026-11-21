@@ -60,7 +60,7 @@ impl Inputs {
         for (index, part) in parts.iter().enumerate() {
             let mut kind = None;
             if listed {
-                let Some(listing) = self.state.directories.get(&directory) else {
+                let Some(listing) = self.state.inventory.directories.get(&directory) else {
                     return unmatched();
                 };
                 let find = |name: &str| {
@@ -71,6 +71,7 @@ impl Inputs {
                 if find(".gitignore").is_some() {
                     match self
                         .state
+                        .inventory
                         .gitignores
                         .get(&directory)
                         .map(|tracked| &tracked.value)
@@ -116,7 +117,7 @@ impl Inputs {
             }
             match kind {
                 None => listed = false,
-                Some(Kind::Directory) if self.state.directories.contains_key(&child) => {}
+                Some(Kind::Directory) if self.state.inventory.directories.contains_key(&child) => {}
                 Some(Kind::Directory) => {
                     return refuse(format!(
                         "{child} is another project's root, or Mara cannot list it"
