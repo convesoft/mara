@@ -1,6 +1,6 @@
 ---
 title: A session keeps the outcome of `query report`
-status: todo
+status: in-progress
 type: bug
 parent: mara-0mxw21
 discovered_from: mara-p27z9t
