@@ -1,6 +1,6 @@
 ---
 title: One mechanism for debug-only test hooks, and a release build that holds none
-status: todo
+status: in-progress
 type: task
 parent: mara-779tms
 discovered_from: mara-0mxw21

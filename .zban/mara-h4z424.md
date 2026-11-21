@@ -3,6 +3,8 @@ title: get of a code location checks only that file's directories and does not c
 status: todo
 type: bug
 parent: mara-779tms
+blocked_by:
+  - mara-0t6mpc
 discovered_from: mara-0mxw21
 created_at: 2026-11-21T16:35:20Z
 ---

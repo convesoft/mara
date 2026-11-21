@@ -1,6 +1,6 @@
 ---
 title: Fill the shipped grammar catalog with Rust and Python
-status: todo
+status: in-progress
 type: task
 parent: mara-779tms
 created_at: 2026-11-21T13:47:07Z
