@@ -1,6 +1,6 @@
 ---
 title: get of a code location checks only that file's directories and does not choose kept contents by time
-status: todo
+status: in-progress
 type: bug
 parent: mara-779tms
 blocked_by:
