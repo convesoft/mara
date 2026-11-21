@@ -4,9 +4,10 @@ use serde_json::json;
 
 use crate::{Dir, Server, usage};
 
-/// The CLI operations that are no tools: the daemon's control, the server itself and the agent
-/// guide.
-const NOT_TOOLS: [&str; 5] = [
+/// The CLI operations that are no tools: `code add`, the daemon's control, the server itself and
+/// the agent guide.
+const NOT_TOOLS: [&str; 6] = [
+    "code add",
     "daemon status",
     "daemon start",
     "daemon stop",

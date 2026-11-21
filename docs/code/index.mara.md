@@ -123,20 +123,32 @@ An operation reads code only when its result holds something from code.
 | Status | Accepted |
 | Satisfies | [REQ-ONLY-CODE-ADD-DOWNLOADS](#01M7BF6GPR0B36WAK7ESQH41WM) |
 
-- `mara code add <language>` fetches the grammar's `.wasm` and `tags.scm` from a built-in catalog (repository, release, extensions, comment syntax) or from a given repository. Official tree-sitter grammar releases publish both files.
+- `mara code add <language>` fetches the grammar's `.wasm` and `tags.scm` from the built-in catalog, from the repository of the language's stored pin, or, with `--repository <url> --version <version>`, from a given repository.
 - It verifies a checksum, stores the files in a per-user cache, and pins version and checksum in the project configuration.
-- A catalog entry carries the checksum of its release's files. A given repository is trusted on first use: `code add` pins the checksum of what it fetched, and the repository with it. Every later fetch and every load checks the files against the pin; a mismatch is refused and leaves the cache and the configuration unchanged.
-- A given repository is an `https://` URL, or an `http://` URL whose host is a loopback address. Anything else is rejected before a connection.
-- `code add` writes the configuration through [DES-WRITE-PROCEDURE](../authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17).
+- A catalog entry carries the language, the release's version, the URL of its `.wasm` release file and a URL of its `queries/tags.scm` alone, their checksum, the extensions of the language's files and its comment prefixes. A language that `[code.languages]` does not declare is declared from its entry, with `include = ["**/*.<extension>", …]`, before the pin; without an entry it is `unknown-grammar`, also with a repository.
+- A given repository serves `<url>/<language>/<version>/grammar.wasm` and `tags.scm`, the layout of the cache without the checksum. It is trusted on first use: `code add` pins the checksum of what it fetched, and the repository with it. Every later fetch and every load checks the files against the pin: a fetch that does not match fails with `checksum-mismatch` and leaves the cache and the configuration unchanged; a load is `unavailable-grammar`.
+- Two repositories are the same when they have the same form, which is what the pin holds and what `code add` compares and fetches from: the scheme and the host in lowercase, a final root `.` of the host dropped, an IPv6 address in its shortest form, the scheme's default port left out, and every `/` at the end removed; the rest of the path counts as written.
+- With a pin and without `--repository`, `code add <language>` fetches the pinned release from the pin's repository, or from the catalog when its entry has that version and checksum, else fails with `unknown-grammar`. A repository and version that the pin holds are checked against it; others are trusted on first use and replace the pin. Files already in the cache with the expected checksum are not fetched again.
+- A repository, and a URL of the catalog, is an `https://` URL, or an `http://` URL whose host is a loopback address, an IPv4 address in `127.0.0.0/8` or `[::1]`; a name such as `localhost` is none. Its host is a name of letters, digits, `-` and `.`, or an IP address, a port is 1 to 65535 in at most 5 digits, and it has no credentials, query, fragment, backslash or space. Anything else is rejected with `invalid-argument` before a connection, and in a pin is `invalid-value`. Before connecting, the host gives the URL to the HTTP client's own parser and refuses it with `fetch-failed` when that reads another scheme, host or port.
+- An `https://` fetch verifies the certificate against the WebPKI roots and follows at most 5 redirects, each to an `https://` URL, which may carry a query, as release hosts' signed URLs do; a loopback fetch follows no redirect ([ADR-UREQ-RUSTLS-FETCH](#01M7YXNWW8XPC1B1QTQKQGMS8N)). A file over 64 MiB, a connection not open within 30 s of resolving its host, a file not fetched within 300 s, resolving included, a status other than 2xx, and a `.wasm` file that wasmtime does not validate as a WebAssembly module are `fetch-failed`. The module is validated, never compiled or run, by `code add`.
+- Proxies: the first of `ALL_PROXY`, `HTTPS_PROXY` and `HTTP_PROXY`, each in capitals or lowercase, that is set and not empty names the proxy, unless `NO_PROXY` exempts the host. An `https://` fetch goes through an `http://` or `https://` proxy so named; a loopback fetch uses none. When any of these variables names a proxy that the client cannot read or of a SOCKS scheme, every fetch fails with `fetch-failed` naming the variable and the scheme before any connection, whatever `NO_PROXY` says, since a redirect could lead to a host it does not exempt.
+- Every check of the configuration comes before a connection: a configuration with an error is refused with `invalid-project`, and one whose language or pin is not written as a table it can edit in place, or that would not read back as the new pin with every other setting unchanged, with `unreadable-edit`. Nothing is written before the checksum is checked. Each file goes to a temporary name in its cache directory, then is renamed. The configuration is written last, through [DES-WRITE-PROCEDURE](../authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17), and only when the pin changes: the pin's inline table replaced, or a `grammar` line added after the language's last key. A refusal after the files are cached, such as `changed-file` or `io-error` at that write, leaves the project's files as they were; the cache keeps the verified files, being addressed by checksum, and the message names their directory.
+- The client runs `code add` itself, in direct mode: no daemon and no MCP tool serves it. It reads the configuration and no document or code file. The result is `language`, `version`, `checksum`, `repository` (null for the catalog), `fetched` and `pinned`, each false when the files were cached or the pin unchanged.
 - A grammar runs as WebAssembly in tree-sitter's WASM store inside Mara's process: it reaches no file, network or native code, and `tags.scm` is a query, not code. The store gives a module only a subset of the C library, the lexer's callbacks and a few builtins, among them `tree_sitter_debug_message`, which prints to standard output.
 - Grammar ABI compatibility is checked on load: a grammar whose ABI version lies outside the range of the tree-sitter runtime cannot be loaded. Before that, Mara checks that the module exports `tree_sitter_<name>` as a function without parameters that returns an `i32`, and each initializer it exports as a function without parameters or results; tree-sitter's store ends the process on another signature. Known limitation: a module that passes and still fails another assertion of the store, such as a language whose tables name functions the module lacks, ends the process.
-- The pin is `grammar = { version = "…", checksum = "blake3:…" }` in the language's table ([DES-CODE-MARKERS](#01M7BF6GQ1G370S0G7HPN4HGY1)). The version is letters, digits, `.`, `-`, `_` and `+`, not starting with `.`. The checksum is the BLAKE3 hash of the BLAKE3 hashes of the `.wasm` and of `tags.scm`, in that order, as 64 lowercase hexadecimal digits. An invalid pin is `invalid-value`, and its language is read at the basic level.
+- The pin is `grammar = { version = "…", checksum = "blake3:…" }`, with `repository = "…"` for a given repository, in the language's table ([DES-CODE-MARKERS](#01M7BF6GQ1G370S0G7HPN4HGY1)). The version is letters, digits, `.`, `-`, `_` and `+`, not starting with `.`. The checksum is the BLAKE3 hash of the BLAKE3 hashes of the `.wasm` and of `tags.scm`, in that order, as 64 lowercase hexadecimal digits. A repository is as `--repository` takes it. An invalid pin is `invalid-value`, and its language is read at the basic level.
 - The per-user cache is `$XDG_CACHE_HOME/mara/grammars` when that is absolute, else `~/.cache/mara/grammars`, and `~/Library/Caches/mara/grammars` on macOS. A pinned grammar's files are `<language>/<version>/<checksum>/grammar.wasm` and `tags.scm` there, the checksum in hexadecimal. Its tree-sitter name is the language's name with `-` read as `_`. A daemon finds the cache from its own environment, that of the client that started it.
 - A process loads a grammar once, for every request and project it serves, and again only when its files' stats change; each request that reads its language's code checks those stats. A request that scans every code file, such as `project validate`, loads each pinned grammar, also one whose language has no file, so that it reports every grammar it cannot use. The grammar's files are no project input that the work counters count ([DES-PERFORMANCE-HARNESS](../performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)).
 - A grammar that is not in the cache, does not match its pin or cannot be loaded is `unavailable-grammar`, an error at the configuration line that pins it naming `mara code add`; that language's files are scanned at the basic level. No operation but `code add` fetches it.
 - A grammar runs on a thread of its own with at most 128 MiB of linear memory, tree-sitter's limit for the module and not for the process, and 1 s plus 1 s per 256 KiB of a file to parse it and run its tags query. Finding the markers and their owners from what it found runs after that time, in work linear in the file. A trap, or the end of that time, leaves the file at the basic level, with `unavailable-grammar` at the pin's line naming the language and the file. A grammar that does not answer within twice that time and 1 s more, as when it loops inside one call, is no longer used in that process and its thread is left running. Every file of its language in that request, those scanned before too, is then read at the basic level, with one `unavailable-grammar`, and later requests of that process neither load that grammar nor wait for it ([ADR-GRAMMAR-WATCHDOG-THREAD](#01M7K2QH6DMGBZ1S9SPKJC296V)).
 - A grammar loads on its thread too, within 10 s, counted from the start of that thread to the end of compiling its module and its tags query; reading, hashing and checking its files before that are not counted. One that does not load in that time is dropped for the process the same way, its thread left running: that request reports `unavailable-grammar`, and later requests of that process neither load it nor wait for it.
 - A load holds up only the requests that need that grammar: a request for another grammar, of any project, is served meanwhile, and one for the same grammar waits for that load and starts no other. A load that fails for another reason than its time gives that failure to the requests that waited for it, and a later request tries it again, since its files may have been repaired.
+
+---
+
+## Open questions
+
+- Which grammars the built-in catalog ships, with their URLs and checksums. Until decided it is empty, and `code add` of a language without `--repository` or a stored pin's repository fails with `unknown-grammar`.
 
 ---
 
@@ -151,10 +163,10 @@ An operation reads code only when its result holds something from code.
 | Type | Decision |
 | --- | --- |
 | ID | ADR-GRAMMAR-TRUST-ON-FIRST-USE |
-| Status | Draft |
+| Status | Accepted |
 | Justifies | [DES-GRAMMAR-ASSETS](#01M7BF6GQC7MW6ZSA9NMEQRQHM) |
 
-- Chosen provisionally by the orchestrator on 2026-11-16, for the maintainer to confirm: catalog entries carry their checksums; a repository the user gives is trusted on first use, its fetched files' checksum and the repository pinned, and every later fetch and load checked against the pin; `https://`, or `http://` only to a loopback host ([DES-GRAMMAR-ASSETS](#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
+- Chosen by the maintainer on 2026-11-16, asked to choose between trust on first use, a required checksum and catalog only: catalog entries carry their checksums; a repository the user gives is trusted on first use, its fetched files' checksum and the repository pinned, and every later fetch and load checked against the pin; `https://`, or `http://` only to a loopback host ([DES-GRAMMAR-ASSETS](#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
 - Rejected: no pin. A later fetch or a changed cache could run other code unnoticed.
 - Rejected: a required checksum argument for every repository outside the catalog. Users would copy it from the same source they fetch from.
 - Rejected: plain HTTP to any host. Anyone on the path could replace the grammar on first use.
@@ -191,3 +203,21 @@ An operation reads code only when its result holds something from code.
 
 - Chosen: `@mara` comment markers, located by file and line or by a tree-sitter declaration.
 - Rejected: SCIP indexers. `rust-analyzer scip` cost 14–20 s and about 3.3 GB on every read ([EVD-PREVIOUS-IMPLEMENTATION-AUDIT](../performance.mara.md#01M7BF6H4V7TRV0EZTK37530GE)).
+
+---
+
+<a id="01M7YXNWW8XPC1B1QTQKQGMS8N"></a>
+
+### Fetch grammars through `ureq` with rustls
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-UREQ-RUSTLS-FETCH |
+| Status | Accepted |
+| Justifies | [DES-GRAMMAR-ASSETS](#01M7BF6GQC7MW6ZSA9NMEQRQHM) |
+
+- Chosen on 2026-11-21 for mara-h0hxa3: `ureq` 3 with only its `rustls` feature: blocking HTTP/1.1, rustls on the `ring` provider, the WebPKI roots compiled in, certificates verified by default. Only `code add` calls it ([DES-GRAMMAR-ASSETS](#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
+- Rejected: `reqwest`. Its blocking client runs hyper on a tokio runtime of its own, many more crates for two GET requests.
+- Rejected: `ureq` with the platform verifier or `native-tls`. More crates, and OpenSSL to build or link on Linux.
+- Rejected: running `curl`. A program each user must install, and failures Mara cannot tell apart.
+- Rejected: `minreq` and `attohttpc`. Smaller user bases for the one path that brings code from another machine.

@@ -241,6 +241,23 @@ pub fn run_with(
     env: &[(&str, &Path)],
     status: i32,
 ) -> Run {
+    let run = run_any(directory, args, env);
+    assert_eq!(
+        run.output.status.code(),
+        Some(status),
+        "exit status of mara {:?}; {:?}",
+        shown(args),
+        run.output
+    );
+    run
+}
+
+/// [`run_with`] whatever the exit status.
+pub fn run_any(
+    directory: &Path,
+    args: &[impl AsRef<std::ffi::OsStr>],
+    env: &[(&str, &Path)],
+) -> Run {
     let mut child = Command::new(env!("CARGO_BIN_EXE_mara"))
         .arg("--debug-stats")
         .args(args)
@@ -275,12 +292,6 @@ pub fn run_with(
         stdout,
         stderr,
     };
-    assert_eq!(
-        output.status.code(),
-        Some(status),
-        "exit status of mara {:?}; {output:?}",
-        shown(args)
-    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     let line = stderr
         .lines()

@@ -57,14 +57,41 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
 
 /// Runs `mara --debug-stats mcp` in `directory` with an empty environment, as a client does: the
 /// handshake and `tools/list`, then each call, which must succeed, then stdin closed. Requires
-/// exit status 0 and returns the session's stats line, the last line on stderr. The process's CPU
-/// time counts in [`cpu_time::now`].
+/// exit status 0 and returns the work of the session's stats line, the last line on stderr. The
+/// process's CPU time counts in [`cpu_time::now`].
 pub fn run(directory: &Path, calls: &[(&str, &Value)]) -> Run {
+    let session = session(directory, &[], calls);
+    for ((tool, arguments), response) in calls.iter().zip(&session.responses) {
+        assert_eq!(
+            response["result"]["isError"], false,
+            "{tool} {arguments}: {response}"
+        );
+    }
+    assert!(
+        session.run.output.status.success(),
+        "mara mcp {calls:?}: {:?}",
+        session.run.output
+    );
+    session.run
+}
+
+/// A finished session of `mara mcp`: its tool list, the response to each call, and its output
+/// and work.
+pub struct Finished {
+    pub tools: Value,
+    pub responses: Vec<Value>,
+    pub run: Run,
+}
+
+/// Runs `mara --debug-stats mcp` in `directory` with an environment of only `MARA_NO_DAEMON=1`
+/// and `env`, as [`run`] does, whatever its calls and its exit status give.
+pub fn session(directory: &Path, env: &[(&str, &Path)], calls: &[(&str, &Value)]) -> Finished {
     let mut child = Command::new(env!("CARGO_BIN_EXE_mara"))
         .args(["--debug-stats", "mcp"])
         .current_dir(directory)
         .env_clear()
         .env("MARA_NO_DAEMON", "1")
+        .envs(env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -91,13 +118,10 @@ pub fn run(directory: &Path, calls: &[(&str, &Value)]) -> Run {
     session.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
     let tools = session.exchange(1, "tools/list", json!({}));
     assert!(tools["result"]["tools"].is_array(), "{tools}");
+    let mut responses = Vec::new();
     for (index, (tool, arguments)) in calls.iter().enumerate() {
         let params = json!({"name": tool, "arguments": arguments});
-        let response = session.exchange(index + 2, "tools/call", params);
-        assert_eq!(
-            response["result"]["isError"], false,
-            "{tool} {arguments}: {response}"
-        );
+        responses.push(session.exchange(index + 2, "tools/call", params));
     }
     drop(stdin);
     stdout
@@ -112,11 +136,14 @@ pub fn run(directory: &Path, calls: &[(&str, &Value)]) -> Run {
         stdout: received,
         stderr,
     };
-    assert!(output.status.success(), "mara mcp {calls:?}: {output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     let line = stderr.lines().last().unwrap_or_default();
     let work = parse(line).unwrap_or_else(|problem| panic!("stats line {line:?}: {problem}"));
-    Run { output, work }
+    Finished {
+        tools: tools["result"]["tools"].clone(),
+        responses,
+        run: Run { output, work },
+    }
 }
 
 /// The client's side of a session's stdio.

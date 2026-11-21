@@ -11,6 +11,7 @@
 
 mod author;
 mod client;
+mod code;
 mod convert;
 mod daemon;
 mod fix;
@@ -69,6 +70,7 @@ const OPERATIONS: &[Operation] = &[
     query::VIEW,
     query::GATE,
     query::REPORT,
+    code::ADD,
     daemon::STATUS,
     daemon::START,
     daemon::STOP,

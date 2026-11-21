@@ -50,7 +50,7 @@ Rust integration tests run the real CLI on a disposable project initialized from
 | Verifies | [REQ-CODE-MARKER-LINKS](index.mara.md#01M7BF6GPD85NN3TCFJE7RCKWB) |
 | Verifies | [REQ-ONLY-CODE-ADD-DOWNLOADS](index.mara.md#01M7BF6GPR0B36WAK7ESQH41WM) |
 
-In the setup of [VER-CODE-MARKERS](#01M7JKT47QKGBA9KQYFWDE21Q9), the test's fixtures hold the official release files, the `.wasm` and `queries/tags.scm`, of the tree-sitter grammars for Rust and Python, at the versions of the built-in catalog. The test installs them in the per-user cache under its own `HOME` and pins them in the configuration, as `code add` stores and pins them ([DES-GRAMMAR-ASSETS](index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
+In the setup of [VER-CODE-MARKERS](#01M7JKT47QKGBA9KQYFWDE21Q9), the test's fixtures hold the official release files, the `.wasm` and `queries/tags.scm`, of the tree-sitter grammars for Rust 0.24.2 and Python 0.25.0. The test installs them in the per-user cache under its own `HOME` and pins them in the configuration, as `code add` stores and pins them ([DES-GRAMMAR-ASSETS](index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
 
 | Case | Expectation |
 | --- | --- |
@@ -83,14 +83,14 @@ Inspection: review of mara-s9gak4 finds that the grammar's ABI version is compar
 | Methods | Inspection |
 | Verifies | [REQ-ONLY-CODE-ADD-DOWNLOADS](index.mara.md#01M7BF6GPR0B36WAK7ESQH41WM) |
 
-Rust integration tests run the real CLI with `HOME` and the per-user cache inside the test's temporary directory. The test serves the grammar fixtures of [VER-GRAMMAR-MARKERS](#01M7JKT47QR2NYFK59JRV8EV7G) over HTTP on a loopback port as a given repository ([DES-GRAMMAR-ASSETS](index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)), in the layout that mara-h0hxa3 defines, and counts the connections it accepts.
+Rust integration tests run the real CLI with `HOME` and the per-user cache inside the test's temporary directory. The test serves the grammar fixtures of [VER-GRAMMAR-MARKERS](#01M7JKT47QR2NYFK59JRV8EV7G) over HTTP on a loopback port as a given repository, in its layout ([DES-GRAMMAR-ASSETS](index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)), and counts the connections it accepts. The catalog cases give the debug binary a catalog of that server's URLs through `MARA_TEST_GRAMMAR_CATALOG`.
 
 | Case | Expectation |
 | --- | --- |
 | `code add rust` from that repository | The files are in the cache; the configuration pins version, checksum and repository, and no other project file changes; markers in Rust files then have declaration endpoints |
 | `code add rust` in a copy of that project with an empty cache, the server now serving other bytes | Refused, naming the checksum mismatch; the cache and the configuration unchanged |
 | A cached file changed after `code add` | `unavailable-grammar`; file-and-line endpoints; 0 connections |
-| Every other operation of [DES-OPERATIONS](../hosts/index.mara.md#01M7BF6H124JRJAQSYVQ21Q2JS), as the cases of the performance harness run it, with the pinned grammar absent from the cache | 0 connections; `unavailable-grammar` from each operation that reads code |
+| Every other operation of [DES-OPERATIONS](../hosts/index.mara.md#01M7BF6H124JRJAQSYVQ21Q2JS), as the cases of the performance harness run it, through the CLI and each MCP tool, with the pinned grammar absent from an empty cache | 0 connections; the exit status of the case; `unavailable-grammar` in the result of each operation that reads code and returns diagnostics |
 | A given repository `http://` on a host that is not a loopback address, or `ftp://` | Rejected with `invalid-argument`; nothing written |
 | A language the catalog lacks, without a repository | Refused; nothing written |
 | The configuration changed by another program at the pause before step 2 ([DES-WRITE-PROCEDURE](../authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) | Refused with `changed-file`; the configuration keeps that program's contents |

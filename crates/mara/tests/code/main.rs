@@ -1,13 +1,16 @@
 //! Code markers through the real `mara` binary and `mara mcp`, on disposable projects
 //! initialized from `engineering`: VER-CODE-MARKERS, VER-GRAMMAR-MARKERS, VER-CODE-EDITS and
-//! VER-CODE-FACTS in `docs/code/verification.mara.md`, and the code rows of VER-DELETE-ITEM and
-//! VER-INTERRUPTED-EDITS.
+//! VER-CODE-FACTS and VER-CODE-ADD in `docs/code/verification.mara.md`, and the code rows of
+//! VER-DELETE-ITEM and VER-INTERRUPTED-EDITS.
 
 #![cfg(unix)]
 
+mod add;
 mod edits;
 mod facts;
 mod grammar;
+#[path = "../support/grammar_server.rs"]
+mod grammar_server;
 mod markers;
 
 use std::collections::BTreeMap;

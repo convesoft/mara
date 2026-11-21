@@ -66,20 +66,161 @@ pub struct Language {
     pub grammar: Option<GrammarPin>,
 }
 
-/// The version and checksum of a grammar that `code add` stored in the per-user cache
-/// (DES-GRAMMAR-ASSETS).
+/// The version and checksum of a grammar that `code add` stored in the per-user cache, and the
+/// repository it came from (DES-GRAMMAR-ASSETS).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GrammarPin {
     /// Letters, digits, `.`, `-`, `_` and `+`, not starting with `.`.
     pub version: String,
     /// The BLAKE3 hash of the BLAKE3 hashes of the `.wasm` file and of `tags.scm`, in that order.
     pub checksum: Hash,
+    /// The repository the user gave `code add`, in the one form of [`repository`]; `None` for a
+    /// grammar of the built-in catalog.
+    pub repository: Option<String>,
     /// The configuration line of `grammar`, where its problems are reported.
     pub line: usize,
 }
 
 /// The prefix of a grammar checksum's text.
 pub const CHECKSUM_PREFIX: &str = "blake3:";
+
+/// Whether `name` can name a code language: lowercase ASCII letters and digits in parts joined by
+/// single `_` or `-`.
+pub fn is_language_name(name: &str) -> bool {
+    is_name(name)
+}
+
+/// Whether `version` is a grammar version: letters, digits, `.`, `-`, `_` and `+`, not starting
+/// with `.`.
+pub fn is_grammar_version(version: &str) -> bool {
+    let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+');
+    !version.is_empty() && !version.starts_with('.') && version.chars().all(allowed)
+}
+
+/// A URL that `code add` fetches from, read by [`repository`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Repository {
+    /// Its one form: the scheme and the host in lowercase, an IPv6 address in its shortest form,
+    /// the scheme's default port left out and no `/` at the end. Two URLs of the same form name
+    /// the same repository.
+    pub url: String,
+    /// Whether the scheme is `https`.
+    pub secure: bool,
+    /// The host in lowercase; an IPv6 address without brackets.
+    pub host: String,
+    /// The port, the scheme's default when the URL names none.
+    pub port: u16,
+}
+
+/// Reads a grammar repository, or a file URL of the catalog (DES-GRAMMAR-ASSETS): an `https://`
+/// URL, or an `http://` URL whose host is a loopback address (`127.0.0.0/8` or `[::1]`). Its host
+/// is a name of letters, digits, `-` and `.`, or an IP address, a port is 1 to 65535 in at most 5
+/// digits, and it has no credentials, query, fragment, backslash, space or control character,
+/// since `code add` appends file paths to it and pins it. Anything else is refused, with a reason
+/// that names no option.
+pub fn repository(url: &str) -> Result<Repository, String> {
+    let refuse = |why: &str| Err(format!("`{url}` is no grammar repository: {why}"));
+    let (secure, rest) = if let Some(rest) = strip_prefix_ignore_case(url, "https://") {
+        (true, rest)
+    } else if let Some(rest) = strip_prefix_ignore_case(url, "http://") {
+        (false, rest)
+    } else {
+        return refuse("give an `https://` URL, or an `http://` URL of a loopback address");
+    };
+    let odd = |c: char| c.is_whitespace() || c.is_control() || matches!(c, '?' | '#' | '\\');
+    if url.chars().any(odd) {
+        return refuse("it holds a space, a backslash, a query or a fragment");
+    }
+    let (authority, path) = match rest.find('/') {
+        Some(at) => rest.split_at(at),
+        None => (rest, ""),
+    };
+    if authority.contains('@') {
+        return refuse("it holds credentials, which a pin would publish");
+    }
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(bracketed) => {
+            let Some((address, port)) = bracketed.split_once(']') else {
+                return refuse("its host is no IPv6 address");
+            };
+            let Ok(address) = address.parse::<std::net::Ipv6Addr>() else {
+                return refuse("its host is no IPv6 address");
+            };
+            (address.to_string(), port)
+        }
+        None => {
+            let (host, port) = authority.split_at(authority.find(':').unwrap_or(authority.len()));
+            // A final root dot names the same host.
+            let host = host.strip_suffix('.').unwrap_or(host);
+            let named = !host.is_empty()
+                && host.split('.').all(|label| !label.is_empty())
+                && (host.chars()).all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'));
+            if !named {
+                return refuse(
+                    "its host is no name of letters, digits, `-` and `.`, and no IP address",
+                );
+            }
+            (host.to_ascii_lowercase(), port)
+        }
+    };
+    let default = if secure { 443 } else { 80 };
+    let port = match port.strip_prefix(':') {
+        None if port.is_empty() => default,
+        Some(digits)
+            if (1..=5).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            match digits.parse::<u16>() {
+                Ok(port) if port > 0 => port,
+                _ => return refuse("its port is not 1 to 65535"),
+            }
+        }
+        _ => return refuse("its port is not 1 to 65535"),
+    };
+    if !secure && !is_loopback(&host) {
+        return Err(format!(
+            "`{url}` is plain HTTP to a host that is not a loopback address, which anyone on the \
+             path could answer: use `https://`"
+        ));
+    }
+    let shown = match host.contains(':') {
+        true => format!("[{host}]"),
+        false => host.clone(),
+    };
+    let port_text = match port == default {
+        true => String::new(),
+        false => format!(":{port}"),
+    };
+    let scheme = if secure { "https" } else { "http" };
+    Ok(Repository {
+        url: format!(
+            "{scheme}://{shown}{port_text}{}",
+            path.trim_end_matches('/')
+        ),
+        secure,
+        host,
+        port,
+    })
+}
+
+/// Checks a grammar repository as [`repository`] reads it.
+pub fn check_repository(url: &str) -> Result<(), String> {
+    repository(url).map(drop)
+}
+
+fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = text.get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix)
+        .then(|| &text[prefix.len()..])
+}
+
+/// Whether `host` is a loopback address: an IPv4 address in `127.0.0.0/8` or the IPv6 address
+/// `::1`. A name such as `localhost` is none: what it resolves to is not the URL's to say.
+fn is_loopback(host: &str) -> bool {
+    match host.parse::<std::net::IpAddr>() {
+        Ok(address) => address.is_loopback(),
+        Err(_) => false,
+    }
+}
 
 /// A path or pattern relative to the project root, with the configuration line that sets it,
 /// where a problem with it is reported.
@@ -238,18 +379,18 @@ fn prefixes(file: &mut TomlFile, value: &Value) -> Option<Vec<String>> {
     valid.then_some(prefixes)
 }
 
-/// A language's grammar pin, `{ version = "…", checksum = "blake3:…" }`, whose key is at `at`.
+/// A language's grammar pin, `{ version = "…", checksum = "blake3:…" }` and optionally
+/// `repository = "…"`, whose key is at `at`.
 /// `None` when it is invalid: the language is then read at the basic level.
 fn grammar(file: &mut TomlFile, at: std::ops::Range<usize>, value: &Value) -> Option<GrammarPin> {
     const PLACE: &str = "`grammar`";
     let table = file.table("grammar", value)?;
-    file.unknown_keys(table, &["version", "checksum"], PLACE);
+    file.unknown_keys(table, &["version", "checksum", "repository"], PLACE);
     let version = file
         .required(table, "version", at.clone(), PLACE)
         .and_then(|value| {
             let version = file.string("version", value)?;
-            let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+');
-            if version.is_empty() || version.starts_with('.') || !version.chars().all(allowed) {
+            if !is_grammar_version(version) {
                 let message = format!(
                     "a grammar version is letters, digits, `.`, `-`, `_` and `+`, not starting \
                      with `.`: `{version}`"
@@ -273,9 +414,22 @@ fn grammar(file: &mut TomlFile, at: std::ops::Range<usize>, value: &Value) -> Op
             }
             hash
         });
+    let repository = match table.get("repository") {
+        None => Some(None),
+        Some(value) => file
+            .string("repository", value)
+            .and_then(|url| match repository(url) {
+                Ok(read) => Some(Some(read.url)),
+                Err(reason) => {
+                    file.error("invalid-value", value.span(), reason);
+                    None
+                }
+            }),
+    };
     Some(GrammarPin {
         version: version?,
         checksum: checksum?,
+        repository: repository?,
         line: file.line(at.start),
     })
 }
@@ -464,8 +618,14 @@ mod tests {
             "grammar = { version = \"1\", checksum = \"sha256:00\" }".to_owned(),
             "grammar = { version = \"1\", extra = 1 }".to_owned(),
             "[code.languages.e.grammar]\nversion = \"1\"".to_owned(),
+            format!(
+                "grammar = {{ version = \"1\", checksum = \"blake3:{hex}\", repository = \"HTTP://127.0.0.1:8080/g/\" }}"
+            ),
+            format!(
+                "grammar = {{ version = \"1\", checksum = \"blake3:{hex}\", repository = \"http://example.com/g\" }}"
+            ),
         ];
-        let code: String = ["a", "b", "c", "d", "e"]
+        let code: String = ["a", "b", "c", "d", "e", "f", "g"]
             .iter()
             .zip(&languages)
             .map(|(name, grammar)| {
@@ -482,11 +642,19 @@ mod tests {
                 Some(GrammarPin {
                     version: "0.24.2".to_owned(),
                     checksum: Hash::from_hex(&hex).unwrap(),
+                    repository: None,
                     line: 11,
                 }),
                 None,
                 None,
                 None,
+                None,
+                Some(GrammarPin {
+                    version: "1".to_owned(),
+                    checksum: Hash::from_hex(&hex).unwrap(),
+                    repository: Some("http://127.0.0.1:8080/g".to_owned()),
+                    line: 32,
+                }),
                 None,
             ]
         );
@@ -498,8 +666,78 @@ mod tests {
                 (23, "unknown-key"),
                 (23, "missing-key"),
                 (27, "missing-key"),
+                (36, "invalid-value"),
             ]
         );
+    }
+
+    #[test]
+    fn takes_https_repositories_and_plain_http_only_to_loopback_addresses() {
+        for url in [
+            "https://github.com/tree-sitter/tree-sitter-rust/releases/download",
+            "HTTPS://example.com",
+            "http://127.0.0.1:8080/grammars",
+            "http://127.1.2.3",
+            "http://[::1]:9000/",
+        ] {
+            assert_eq!(check_repository(url), Ok(()), "{url}");
+        }
+        for url in [
+            "http://example.com/g",
+            "http://localhost:8080",
+            "http://128.0.0.1",
+            "http://[::2]",
+            "ftp://127.0.0.1/g",
+            "file:///tmp/g",
+            "127.0.0.1:8080",
+            "https://",
+            "https://user:secret@example.com/g",
+            "https://example.com/g?x=1",
+            "https://example.com/g#x",
+            "https://example.com/a b",
+            "https://example.org:abc/g",
+            "https://example.org:/g",
+            "https://example.org:0/g",
+            "https://example.org:65536/g",
+            "https://example.org:123456/g",
+            "https://example.org:443:443/g",
+            "https://exa_mple.org/g",
+            "https://example..org/g",
+            "https://%65xample.org/g",
+            "https://[::1/g",
+            "https://[example.org]/g",
+            "https://example.org\\@other.org/g",
+            "",
+        ] {
+            assert!(check_repository(url).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn gives_each_repository_one_form() {
+        for (url, form, port) in [
+            ("https://example.com/g", "https://example.com/g", 443),
+            ("HTTPS://Example.COM:443/g/", "https://example.com/g", 443),
+            (
+                "https://example.com:8443//",
+                "https://example.com:8443",
+                8443,
+            ),
+            ("https://Example.org.:443/g", "https://example.org/g", 443),
+            (
+                "https://example.com/G/Rust/",
+                "https://example.com/G/Rust",
+                443,
+            ),
+            ("http://127.0.0.1:80/", "http://127.0.0.1", 80),
+            ("Http://127.0.0.1:0080/g", "http://127.0.0.1/g", 80),
+            ("http://[0:0:0:0:0:0:0:1]:9/x", "http://[::1]:9/x", 9),
+        ] {
+            let read = repository(url).unwrap();
+            assert_eq!((read.url.as_str(), read.port), (form, port), "{url}");
+        }
+        let read = repository("http://[::1]:9").unwrap();
+        assert_eq!((read.host.as_str(), read.secure), ("::1", false));
     }
 
     #[test]

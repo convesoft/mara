@@ -1,0 +1,5 @@
+# The built-in grammar catalog of `code add` (DES-GRAMMAR-ASSETS in docs/code/index.mara.md):
+# one `[languages.<name>]` table per grammar, with `version`, `wasm` and `tags` (the URLs of the
+# release's `.wasm` and of its `queries/tags.scm`), `checksum` ("blake3:<hex>"), `extensions` and
+# `comment_prefixes`. Empty until its entries are decided: see the open question there.
+[languages]

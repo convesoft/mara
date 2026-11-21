@@ -20,13 +20,14 @@ const SECTIONS: [&str; 5] = [
     "## Link code",
     "## Validate",
 ];
-/// The operations the full guide leaves to the notes, `prime` itself, the MCP server and the
-/// daemon's control (DES-AGENT-GUIDE).
-const NOT_IN_GUIDE: [&str; 7] = [
+/// The operations the full guide leaves to the notes, `prime` itself, the MCP server, `code add`
+/// and the daemon's control (DES-AGENT-GUIDE).
+const NOT_IN_GUIDE: [&str; 8] = [
     "project init",
     "project convert",
     "prime",
     "mcp",
+    "code add",
     "daemon status",
     "daemon start",
     "daemon stop",

@@ -3,6 +3,7 @@
 //! (DES-PERFORMANCE-HARNESS in `docs/performance.mara.md`).
 
 mod cli;
+mod code_add;
 mod convert;
 mod corpus;
 mod cpu_time;
@@ -12,6 +13,8 @@ mod daemon;
 #[cfg(target_os = "linux")]
 #[path = "../support/daemons.rs"]
 mod daemons;
+#[path = "../support/grammar_server.rs"]
+mod grammar_server;
 #[cfg(target_os = "linux")]
 mod idle_period;
 mod init;

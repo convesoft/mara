@@ -240,7 +240,7 @@ fn per_row_growth_per_doubling() {
 
 /// [`check_growth`] of a case that writes: before each timed run, the files that the previous
 /// run wrote are restored outside the timed span.
-fn check_writes<P>(
+pub fn check_writes<P>(
     corpora: &[(usize, P)],
     name: &str,
     mut run: impl FnMut(usize, &P),
