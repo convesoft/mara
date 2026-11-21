@@ -1,6 +1,6 @@
 ---
 title: A warm code scan in a session copies nothing it does not change and forgets deleted files
-status: todo
+status: in-progress
 type: bug
 parent: mara-779tms
 created_at: 2026-11-20T20:22:51Z
