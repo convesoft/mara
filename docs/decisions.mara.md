@@ -374,6 +374,8 @@
 - The scripts pass `--output-style=static`, so that every task prints its log, the test counts included, also when the output is no terminal.
 - Rejected: Nx's default output style, which prints no task logs when the output is no terminal.
 - CI and the release workflow run the local checks as `pnpm run checks`, with the steps around it that [DES-CI-WORKFLOW](distribution.mara.md#01M82C8WTKYXH8S92ZJQ4FX73R) and [DES-RELEASE-WORKFLOW](distribution.mara.md#01M82C8WTK3M2A69XWRGNNQ0SF) give; the targets that the release adds are named there.
+- Chosen by the worker of mara-7wysb0 on 2026-11-22: `affectedTests` stays off. Each uncached `test` task, in `checks`, CI and the release, runs its full suite. nextest as the runner is mara-rw6rhp: 84 s against 159 s for the full suite, results equal.
+- Rejected: `affectedTests`. A change to `mara` or `mara-engine` runs every integration test of `mara`, because those tests can start its binary, the 60 s `cold_counts` among them: 83.6 s against 84.0 s full, and 83.8 s against 83.3 s. A docs-only edit reruns only `docs-checks:test` (about 2 s) when the Rust test results are cached. The coverage baseline does not collect on this repository: 494 of 825 tests fail under instrumentation, and with their causes worked around a limit test and a daemon test still did; one collection took 156 s and 10 GiB (mara-vxeweg).
 - The table lists what `checks` runs with the default Cargo configuration. The plugin infers `fmt-check`, `lint` and `test` for each crate and batches their work across crates. The manifests define the extra targets and the configurations `wasm32` and `performance`:
 
 | Target | Runs | Cached | Inputs and dependencies |

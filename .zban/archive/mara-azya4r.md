@@ -1,12 +1,13 @@
 ---
 title: CI keeps the coverage baseline on main, and pull requests run the affected tests
-status: todo
+status: cancelled
 type: task
 parent: mara-c8scn7
 blocked_by:
   - mara-7wysb0
   - mara-1avrq4
 created_at: 2026-11-22T18:57:11Z
+closed_at: 2026-11-22T22:02:21Z
 ---
 
 Goal: a pull request's CI run selects its tests against a baseline that the run on `main` collected, and the full suite runs once per merged commit.
@@ -20,3 +21,7 @@ Context: only if the nextest issue of this epic ends with "switch"; otherwise ca
 - [ ] A baseline is never restored without its record, and a run that finds none runs the full suite
 
 Not part of this issue: the baseline of a developer's machine and of worktrees (the nextest issue).
+
+## Reasons for Cancelling
+
+Its context says to cancel it unless the nextest issue ends with "switch". mara-7wysb0 ended with "switch the runner only": selection gained nothing on this repository, and the coverage baseline cannot be collected here (`ADR-NX-RUST-TASKS`; the blockers are mara-vxeweg). The nextest runner is mara-rw6rhp.
