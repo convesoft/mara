@@ -64,12 +64,12 @@ One orchestrator starts a worker for each ready issue and integrates its branch.
 
 ## Local checks
 
-The local checks are `pnpm run checks`; while working, `pnpm run checks:fast` leaves out `mara:test-performance` and `mara-engine:build:wasm32`. Each check is an Nx target, and [ADR-NX-RUST-TASKS](docs/decisions.mara.md#01M8094G2DV9JZ35C8VRMFPWYV) names the command each runs. Run them from the repository root; each must exit 0.
+The local checks are `pnpm run checks`; while working, `pnpm run checks:fast` leaves out `mara:test:performance` and `mara-engine:build:wasm32`. Each check is an Nx target, and [ADR-NX-RUST-TASKS](docs/decisions.mara.md#01M8094G2DV9JZ35C8VRMFPWYV) names the command each runs. Run them from the repository root; each must exit 0.
 
 - Once in a fresh worktree: `pnpm install --frozen-lockfile`. The checks build Soufflé when it is missing.
 - Once on each machine: `cargo run --quiet --bin mara -- --no-daemon code add rust`, because `mara:validate` needs this repository's pinned grammar in the per-user cache ([DES-GRAMMAR-ASSETS](docs/code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
 - `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins.
-- `mara-engine:build:wasm32` is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9); `mara:test-performance` times a release build for [VER-SCALING](docs/verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW).
+- `mara-engine:build:wasm32` is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9); `mara:test:performance` times a release build for [VER-SCALING](docs/verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW).
 - On this machine run Nx with `NX_DAEMON=false NX_USE_LOCAL=true` (no daemon, the worktree's own Nx) under `berth --`, and `pnpm run checks` under `berth --exclusive --`, because the performance test needs the machine to itself.
 
 ## Review

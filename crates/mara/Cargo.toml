@@ -112,10 +112,8 @@ inputs = [
   { runtime = "c=${XDG_CACHE_HOME:-}; case $c in /*) ;; *) c=$HOME/.cache ;; esac; for d in \"$c\" \"$HOME/Library/Caches\"; do (cd \"$d/mara/grammars\" 2>&1 && find -L . -type f -exec sha256sum {} + | LC_ALL=C sort); done; true" },
 ]
 
-# The scaling test of the local checks times a release build: never restored from a cache, and no
-# other task of the run beside it.
-[package.metadata.nx.targets.test-performance]
-command = "cargo test --package mara --test performance --release --locked"
-cache = false
-parallelism = false
-dependsOn = [{ projects = ["cargo-workspace"], target = "souffle" }]
+# The scaling test of the local checks times a release build: `nx run mara:test:performance`, which
+# `pnpm run checks` runs as a command of its own with `--skip-nx-cache` (ADR-NX-RUST-TASKS).
+[package.metadata.nx.targets.test.configurations.performance]
+test = "performance"
+profile = "release"

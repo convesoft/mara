@@ -3,12 +3,12 @@
   "private": true,
   "license": "MIT OR Apache-2.0",
   "scripts": {
-    "checks": "nx run-many -t fmt-check lint test validate zban-check test-performance --output-style=static && nx run mara-engine:build:wasm32 --output-style=static",
+    "checks": "nx run-many -t fmt-check lint test validate zban-check --output-style=static && nx run mara-engine:build:wasm32 --output-style=static && nx run mara:test:performance --skip-nx-cache --output-style=static",
     "checks:fast": "nx run-many -t fmt-check lint test validate zban-check --output-style=static"
   },
   "dependencies": {},
   "devDependencies": {
-    "@convesoft/nx-rust": "1.0.0-rc.1",
+    "@convesoft/nx-rust": "1.0.0-rc.2",
     "@nx/js": "24.0.6",
     "@nx/oxlint": "24.0.6",
     "@swc-node/register": "1.11.1",
