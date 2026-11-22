@@ -25,12 +25,13 @@ Context: AGENTS.md (Deciding during the rewrite). When the epic closes, the orch
 - 2026-11-22: a last issue of the epic (mara-mrmg89) switches to the published package.
 - 2026-11-22 (mara-tt31bp): loaded from its TypeScript source, nx-rust runs no `test` and restores no `build` from the cache, because it starts two helper scripts that exist only in a build. The repository waits for the npm release and takes the plugin from there (chosen over linking to a build of the plugin and over fixing the plugin for source loading). This replaces the decision to load from source; mara-a4ga3m does mara-mrmg89 in the same change, and nothing of the epic or of alpha.6 starts until the package is published.
 - 2026-11-22: the maintainer published `@convesoft/nx-rust@1.0.0-rc.1` (dist-tag `next`; `latest` is still the `0.0.0` placeholder) as the release to use. The repository pins that exact version (integrated with mara-a4ga3m and mara-mrmg89).
+- 2026-11-22: the local checks run only through Nx (`pnpm run checks`); AGENTS.md drops the list of cargo commands, because they duplicate what the targets run (mara-cdwtfm). This settles the provisional decision of 2026-11-21 that kept them beside the targets as the fallback.
 
 ## Decided by the orchestrator
 
 One line per decision made on the maintainer's behalf: what was decided, what it rests on, how to undo it. "Provisional" marks a decision that is the maintainer's to confirm and stands until they answer.
 
-- 2026-11-21, provisional: the Nx targets are added beside the cargo commands, which stay in AGENTS.md as what the targets run and as the fallback; the orchestrator's gate runs the checks both ways until a run has shown the same results, then through Nx. Rests on nx-rust being unreleased and this repository being the first real one it runs on. Undo: remove the cargo commands from "Local checks".
+- 2026-11-21: the Nx targets were added beside the cargo commands, which stayed in AGENTS.md as what the targets run and as the fallback, and the orchestrator's gate ran the checks both ways until the runs had shown the same results. Settled by the maintainer on 2026-11-22 (above): through Nx only.
 - 2026-11-21, provisional: worktrees do not share an Nx cache, so the orchestrator's gate executes its checks itself and restores nothing a worker produced. Rests on the gate being an independent check (the orchestrator's rules). Undo: one cache directory for all worktrees.
 
 - 2026-11-22: `lint` denies warnings through `CARGO_ENCODED_RUSTFLAGS=-Dwarnings` in `.env.lint`, with two accepted limits: a caller's `RUSTFLAGS` does not reach `lint`, and a caller's own `CARGO_ENCODED_RUSTFLAGS` replaces the denial. Rests on the plugin always passing `--message-format=json`, under which cargo ignores `build.warnings`, and on the cargo clippy command staying beside the target; ADR-NX-RUST-TASKS states both limits. Undo: a plugin option for extra clippy arguments, once nx-rust has one.
@@ -40,7 +41,7 @@ One line per decision made on the maintainer's behalf: what was decided, what it
 - 2026-11-22: tools on `PATH` that the tests start (`tar`, `cc`, `mkfifo`, `git`) and local Git archive attributes are not in the key of `mara:test`; backlog mara-5c83v4. Rests on the finding being exotic on this project's machines.
 - 2026-11-22: three cache gaps that the review of mara-jmt2hr found are not fixed, as exotic for this repository: the `hold` file that a grammar test hook reads, `zban`'s lookup in parent folders when a checkout has no `.zban/config.toml`, and a `.nxignore` that would hide files from Nx but not from the checks. Rests on no realistic setup reaching them. Undo: declare them as inputs of `mara:validate` and `zban-check`.
 - 2026-11-22: with `CARGO_TARGET_DIR` set to another folder, `build-souffle.sh`, the binary and the Nx keys disagree on where Soufflé is; backlog mara-6z7bjs. Rests on the behaviour being older than this epic and the default setup working.
-- 2026-11-22: the gate ran the checks both ways on mara-a4ga3m and mara-jmt2hr and got the same results each time (855 passed, 0 failed, 16 ignored; validation 0 errors, 1 warning). It keeps running both, because removing the cargo commands from the local checks is the maintainer's decision.
+- 2026-11-22: the gate ran the checks both ways on mara-a4ga3m and mara-jmt2hr and got the same results each time (855 passed, 0 failed, 16 ignored; validation 0 errors, 1 warning). From mara-cdwtfm on it runs them through Nx only, on an empty private cache.
 
 ## Decisions made by the workers
 
