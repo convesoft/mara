@@ -3,6 +3,8 @@ title: Tests run with nextest
 status: todo
 type: task
 parent: mara-c8scn7
+blocked_by:
+  - mara-1avrq4
 related:
   - mara-7wysb0
 discovered_from: mara-7wysb0
