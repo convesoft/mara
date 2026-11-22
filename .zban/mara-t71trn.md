@@ -38,4 +38,6 @@ One line per decision made on the maintainer's behalf: what was decided, what it
 - 2026-11-22 (mara-8mxw9c): the test total is 856 passed (855 before): the comparison of `project init` with this repository became a test of its own in `docs-checks`. `docs-checks:test` reads the pages, `.mara/` and the templates at run time and keys `TMPDIR` only, because it starts neither the binary nor Soufflé (`ADR-NX-RUST-TASKS`). Two findings of its review are older than the change and stay in the backlog (mara-6z7bjs, mara-5c83v4).
 - 2026-11-22: filed mara-jbkcxe (the workspace version becomes `0.4.0-rc.1`), which the epic had no issue for; it blocks the release workflow issue.
 
+- 2026-11-22 (mara-e8921x): until the parser has read a complete operation name, `--version` in option position is the top-level flag (`mara project --version` is rejected); the performance harness gets no case for it; the code carries no `@mara implements` marker, because the flag is outside the document operation set (`DES-OPERATIONS`, `DES-PERFORMANCE-HARNESS`). Undo: the item text and `crates/mara/src/cli.rs`.
+
 - [ ] The maintainer has read the list

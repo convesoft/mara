@@ -177,6 +177,10 @@ const FORMAT: Opt = Opt {
 /// The flag that prints the work counts (DES-PERFORMANCE-HARNESS).
 const DEBUG_STATS: &str = "debug-stats";
 
+/// The top-level flag that prints `mara <version>`, alone (DES-OPERATIONS). An operation's own
+/// `--version` option is another option.
+const VERSION: &str = "version";
+
 /// The direct-mode flag: the request runs in-process, and no daemon is reached or started
 /// (DES-DAEMON-LIFECYCLE).
 const NO_DAEMON: &str = "no-daemon";
@@ -514,6 +518,15 @@ pub fn run(arguments: &[OsString], work: &mut WorkCounts) -> u8 {
     // `/proc/self/status`, as on macOS, reading it sets it for a moment.
     let caller = Caller::of_this_process();
     let json = requested_json(arguments);
+    if let [only] = arguments
+        && *only == *format!("--{VERSION}")
+    {
+        print(
+            &mut std::io::stdout(),
+            &format!("mara {}\n", env!("CARGO_PKG_VERSION")),
+        );
+        return SUCCESS;
+    }
     let reply = match parse(arguments) {
         Ok((None, _)) => {
             print(&mut std::io::stdout(), &usage());
@@ -598,6 +611,12 @@ fn parse(arguments: &[OsString]) -> Result<(Option<&'static Operation>, Args), F
                 }
                 args.no_daemon |= name == NO_DAEMON;
                 continue;
+            }
+            // [`run`] prints the version for `--version` alone.
+            if name == VERSION && operation.is_none() {
+                return Err(Failure::rejected(format!(
+                    "`mara --{VERSION}` takes no value and no other argument"
+                )));
             }
             let own = operation.map_or(&[][..], |operation| operation.options);
             let Some(option) = [PROJECT, FORMAT]
@@ -695,7 +714,7 @@ fn usage() -> String {
         format!(" [--{} <{}>]{repeat}", option.name, option.value)
     };
     let mut out = format!(
-        "Usage: mara{}{} [--{DEBUG_STATS}] [--{NO_DAEMON}] <operation>\n\nOperations:\n",
+        "Usage: mara{}{} [--{DEBUG_STATS}] [--{NO_DAEMON}] <operation>\n       mara --{VERSION}\n\nOperations:\n",
         option(&PROJECT),
         option(&FORMAT)
     );
@@ -792,6 +811,23 @@ mod tests {
             ),
             ("--debug-stats=1", "takes no value"),
             ("--no-daemon=1", "`--no-daemon` takes no value"),
+            (
+                "--version --debug-stats",
+                "`mara --version` takes no value and no other",
+            ),
+            (
+                "--debug-stats --version",
+                "`mara --version` takes no value and no other",
+            ),
+            (
+                "--version=1",
+                "`mara --version` takes no value and no other",
+            ),
+            (
+                "--version project validate",
+                "`mara --version` takes no value",
+            ),
+            ("project --version", "`mara --version` takes no value"),
             ("project validate -- --no-daemon", "unknown option `--`"),
         ] {
             let message = rejected(text);
@@ -849,5 +885,6 @@ mod tests {
             assert!(usage.contains(&operation.words.join(" ")), "{usage}");
         }
         assert!(usage.contains("mara item validate <id-or-mid> [--limit <n>] [--cursor <cursor>]"));
+        assert!(usage.contains("\n       mara --version\n"), "{usage}");
     }
 }
