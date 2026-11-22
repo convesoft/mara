@@ -43,6 +43,9 @@ One line per decision made on the maintainer's behalf: what was decided, what it
 - 2026-11-22: three cache gaps that the review of mara-jmt2hr found are not fixed, as exotic for this repository: the `hold` file that a grammar test hook reads, `zban`'s lookup in parent folders when a checkout has no `.zban/config.toml`, and a `.nxignore` that would hide files from Nx but not from the checks. Rests on no realistic setup reaching them. Undo: declare them as inputs of `mara:validate` and `zban-check`.
 - 2026-11-22: with `CARGO_TARGET_DIR` set to another folder, `build-souffle.sh`, the binary and the Nx keys disagree on where Soufflé is; backlog mara-6z7bjs. Rests on the behaviour being older than this epic and the default setup working.
 - 2026-11-22: the gate ran the checks both ways on mara-a4ga3m and mara-jmt2hr and got the same results each time (855 passed, 0 failed, 16 ignored; validation 0 errors, 1 warning). From mara-cdwtfm on it runs them through Nx only, on an empty private cache.
+- 2026-11-22: with nx-rust 1.0.0-rc.2 the performance test is the configuration `performance` of `mara:test` (the maintainer: the plugin's `test` option), and the three properties the ADR gave the timing test are kept by the `checks` script, not by the target: it runs as the last `nx` command with `--skip-nx-cache`. Run by hand without that flag, Nx caches it like any configuration of `test`. Rests on a configuration being unable to set `cache` or `parallelism`, and on the maintainer's "ok" to this form. Undo: a `targetDefaults` entry or a hand-written target (mara-788vbe).
+- 2026-11-22: the earlier lines about `CARGO_ENCODED_RUSTFLAGS` and the rc.1 release-age exemption are superseded by mara-788vbe: `.env.lint` sets `CARGO_BUILD_WARNINGS=deny`, which rc.2 applies and keys, and `pnpm-workspace.yaml` exempts exactly `1.0.0-rc.2`. Only `lint` denies warnings, as before; a `build.warnings` in a `.cargo/config.toml` was left out because it would also fail other cargo commands. Undo: the previous variable.
+- 2026-11-22: the review of mara-788vbe found that a hand-run, cached `mara:test:performance` does not key a `souffle` placed beside the `mara` executable. Not fixed: it is the gap of backlog mara-6z7bjs, exotic in a development checkout, and `checks` skips the cache. A root `rustfmt.toml` against per-user Rustfmt configuration is backlog mara-c9kja2.
 
 ## Decisions made by the workers
 
@@ -75,3 +78,10 @@ One line per decision made on the maintainer's behalf: what was decided, what it
 - The scripts pass `--output-style=static`. Rejected: the default output style, which printed no task logs when stdout was not a terminal.
 - `validate`'s key holds the run-stage inputs of `cargo run`, declared one by one. Nx has no input that names another target's inputs, and the plugin's named input `default` for `mara` holds only the crate's files, so neither covers the toolchain or the `CARGO_*` variables. Configuration outside the repository stays the documented limit.
 - `validate` keys every file under `crates/`. Files that git ignores are left out of the key, as Mara itself leaves out ignored directories before it looks for a nested project.
+
+### mara-788vbe (Move the nx-rust pin to 1.0.0-rc.2)
+
+- `lint` denies warnings through `CARGO_BUILD_WARNINGS=deny` in `.env.lint` (ADR-NX-RUST-TASKS).
+- `mara:validate` keeps naming the Cargo configuration, the toolchain file and the `CARGO_TARGET_*` variables, because rc.2 gives extra targets none of the inferred inputs (ADR-NX-RUST-TASKS).
+- `checks` runs `mara:test:performance` as its last command; run by hand without `--skip-nx-cache`, Nx caches it like any configuration of `test` (ADR-NX-RUST-TASKS).
+- No root `rustfmt.toml` in this change; filed as mara-c9kja2 for the maintainer.
