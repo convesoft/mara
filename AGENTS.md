@@ -47,7 +47,7 @@ One orchestrator starts a worker for each ready issue and integrates its branch.
 - The orchestrator files such a question as an issue tagged `maintainer` that blocks the original issue, sets that issue back to `todo` and continues with other ready issues. It stops only when none is ready.
 - No worker starts an issue tagged `maintainer` or `deferred`.
 - When a slice's epic closes, the orchestrator appends the `## Decisions made` lists of its issues to the slice's review issue. That issue blocks the release, not the next slice. An overturned decision becomes a new issue.
-- A worker changes nothing outside its worktree and its temporary directories.
+- A worker changes nothing outside its worktree and its temporary directories except for remote operations authorized by the integration rules below.
 
 ## Engineering
 
@@ -71,6 +71,7 @@ The local checks are `pnpm run checks`; while working, `pnpm run checks:fast` le
 - `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins.
 - `mara-engine:build:wasm32` is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9); `mara:test:performance` times a release build for [VER-SCALING](docs/verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW).
 - On this machine run Nx with `NX_DAEMON=false NX_USE_LOCAL=true` (no daemon, the worktree's own Nx) under `berth --`, and `pnpm run checks` under `berth --exclusive --`, because the performance test needs the machine to itself.
+- CI runs the local checks on the pushes and pull requests named by [DES-CI-WORKFLOW](docs/distribution.mara.md#01M82C8WTKYXH8S92ZJQ4FX73R). CI replaces no local run.
 
 ## Review
 
@@ -84,14 +85,22 @@ The local checks are `pnpm run checks`; while working, `pnpm run checks:fast` le
 - Never amend, rewrite history or push without authorization.
 - Semantic Versioning. The alpha slices carry annotated `v0.4.0-alpha.N` tags. From `0.4.0-rc.1` on, only the release workflow tags a version, when it publishes it ([DES-RELEASE-WORKFLOW](docs/distribution.mara.md#01M82C8WTK3M2A69XWRGNNQ0SF)); nobody tags by hand, and an agent starts that workflow only as a dry run.
 
-### Until the rewrite is on `main`
+### Pull requests
 
-- The rewrite integrates on `chore/clear-worktree-for-rewrite`.
-- One branch and worktree per zban issue, cut from the integration branch's tip. The orchestrator first sets the issue `in-progress` on the integration branch, so no two workers take the same issue.
-- Before its branch is integrated, a worker rebases it onto the integration branch's tip and reruns its checks. Rebasing its own unmerged branch is allowed.
-- A worker never merges into the integration branch. The orchestrator integrates one branch at a time: squash merge into one commit, then delete the branch. Follow-up work starts from the new tip.
-- CI checks each push to the integration branch ([DES-CI-WORKFLOW](docs/distribution.mara.md#01M82C8WTKYXH8S92ZJQ4FX73R)); it replaces neither run of the local checks. Run the [local checks](#local-checks) before handing over a branch and again before integrating it.
-- The integration branch reaches `origin/main` only by fast-forward: `git push origin chore/clear-worktree-for-rewrite:main`, with branch protection lifted for that push. Never squash it and never use GitHub's "Rebase and merge": both change commit SHAs, and `d7f0e73` and the alpha tags must stay on `main`.
+- One branch and worktree per zban issue, cut from `origin/main`. The worker sets its issue `in-progress` in the first commit of its branch.
+- Before it opens its pull request, the worker merges `origin/main` into its branch, runs the [local checks](#local-checks) and pushes the branch. The worker is authorized to push its issue branch and open its pull request to `main`.
+- The pull request follows [the template](.github/pull_request_template.md). Give it a title that follows the commit rules above. Write each paragraph of the description on one line and complete the `Refs:` footer with the issue ID.
+- A worker never merges its own pull request, never force-pushes and never pushes to `main`.
+- Only the orchestrator squash-merges pull requests to `main`, one at a time after the required checks pass. Use the pull request title as the squash commit subject and the description as its body. The orchestrator's tracker-only changes go through a pull request of their own that changes only `.zban/`.
+- Nobody rewrites the history of `main`: `d7f0e73` and the alpha tags stay on it.
+
+### Until `main` is fast-forwarded
+
+[Pull requests](#pull-requests) apply from the fast-forward of `main` on. Until then:
+
+- The rewrite integrates on `chore/clear-worktree-for-rewrite`. For each zban issue, the orchestrator first sets it `in-progress` on the integration branch. The worker then creates one branch from its tip in a dedicated worktree.
+- A worker rebases its own unmerged branch onto, or merges into it, the integration branch's tip, reruns the local checks and hands over the branch unpushed. This rule authorizes the rebase. Only the orchestrator integrates into the integration branch. It reruns the local checks, squash-merges one branch at a time and deletes each merged branch.
+- The maintainer fast-forwards `origin/main` to the integration branch: `git push origin chore/clear-worktree-for-rewrite:main`, with branch protection lifted for that push. Never squash it and never use GitHub's "Rebase and merge": both change commit SHAs.
 
 ## Nx
 
