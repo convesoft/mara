@@ -1,6 +1,6 @@
 ---
 title: "Tests run with nextest and affected selection, and a full run only where it is needed: measure, then switch"
-status: todo
+status: in-progress
 type: task
 parent: mara-c8scn7
 blocked_by:

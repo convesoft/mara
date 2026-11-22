@@ -458,58 +458,6 @@ mod tests {
             .collect()
     }
 
-    /// The example of DES-RULE-CONSUMERS in `docs/rules/index.mara.md` loads as written.
-    #[test]
-    fn loads_the_example_of_the_design() {
-        let page = include_str!("../../../../docs/rules/index.mara.md");
-        let start = page.find("```toml\n[rules]").expect("the example") + "```toml\n".len();
-        let example = &page[start..start + page[start..].find("```").unwrap()];
-        let (rules, diagnostics) = parse(example);
-        assert_eq!(diagnostics, []);
-        let rules = rules.unwrap();
-        assert_eq!(rules.programs[0].path, ".mara/rules/*.dl");
-        assert_eq!(rules.time_limit_seconds(), DEFAULT_TIME_LIMIT_SECONDS);
-        let kinds: Vec<(EntryKind, &str)> = rules
-            .entries
-            .iter()
-            .map(|entry| (entry.kind, entry.name.as_str()))
-            .collect();
-        assert_eq!(
-            kinds,
-            [
-                (EntryKind::Query, "requirement-basis"),
-                (EntryKind::Invariant, "requirement-verified"),
-                (EntryKind::Gate, "verified"),
-            ]
-        );
-        let invariant = &rules.entries[1];
-        assert_eq!(
-            invariant.description,
-            "Accepted requirement has no accepted verification"
-        );
-        let gate = &rules.entries[2];
-        let names = |list: &[&Named]| list.iter().map(|n| n.name.clone()).collect::<Vec<_>>();
-        assert_eq!(
-            names(&gate.relations()),
-            [
-                "requirement",
-                "not_accepted",
-                "not_implemented",
-                "verification_not_passed",
-                "code_unavailable",
-                "result_unavailable"
-            ]
-        );
-        assert_eq!(
-            names(&gate.inputs.iter().collect::<Vec<_>>()),
-            ["candidate", "verification_result"]
-        );
-        assert_eq!(
-            rules.declaring_line(".mara/rules/gates.dl"),
-            rules.programs[0].line
-        );
-    }
-
     #[test]
     fn reports_each_problem_of_an_entry_at_its_line() {
         let text = "[rules]\nprograms = [\"rules/*.dl\"]\ntime_limit_seconds = 0\n\

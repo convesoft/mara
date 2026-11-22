@@ -1,6 +1,7 @@
 //! The parser reads this repository's documents in `docs/` without losing an item, whatever their
 //! line endings (DES-REGIONS, mara-t6xn9z). Whether they are valid is the `project validate` local
-//! check of AGENTS.md (mara-37qtf2). The test reads them from the checkout and writes nothing.
+//! check of AGENTS.md (mara-37qtf2). The test reads them from the checkout at run time and writes
+//! nothing.
 
 use std::fs;
 use std::path::Path;
