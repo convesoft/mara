@@ -182,6 +182,13 @@
 - Rejected: `ubuntu-latest`, which moves to a new release without a change in the repository. Rejected: the release's `ubuntu-22.04`, the image GitHub retires first; the release runs the checks there anyway.
 - Chosen by the worker: the performance test in every run, on shared runners.
 - Rejected: leaving it to the nightly job. [VER-SCALING](verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW) runs it on every pull request, and [ADR-SCALING-CPU-TIME](#01M7DTPFQMCA1VN75741RKEDR6) measured it beside other loads.
+- Chosen by the worker of mara-1avrq4 on 2026-11-22: Soufflé's CI cache entry is saved by a step of its own after the checks, also when one failed.
+- Rejected: the cache action's save at the job's end, which runs only for a passing job, so that the next run after a failure builds Soufflé again.
+- Chosen by the worker: each push run has a concurrency group of its own; the runs of a pull request share one.
+- Rejected: one group per ref without cancelling, in which a newer push run cancels an older one still pending.
+- Chosen by the worker: third-party actions pinned by major version, as zban's and nx-rust's workflows pin them.
+- Rejected: pinning by commit SHA, which neither reference does.
+- Chosen by the worker: each job stops after 60 minutes, over three times a run without caches (18 minutes).
 
 ---
 

@@ -26,7 +26,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       # Full history and tags: the conversion tests and the key of `mara:test` read `v0.3.0`.
       - uses: actions/checkout@v7
@@ -38,15 +38,11 @@ jobs:
       - run: rustup toolchain install
       # Installs the pnpm version that `packageManager` in package.json names.
       - uses: pnpm/action-setup@v6
-      # Node 24, the oldest Node that DES-PACKAGES supports.
+      # Node 24, the oldest Node that DES-PACKAGES supports. Both images have every tool that
+      # scripts/build-souffle.sh names, so no build tool is installed.
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: Report the tools of scripts/build-souffle.sh
-        run: |
-          for tool in curl tar sha256sum cmake c++ flex bison readelf ninja; do
-            printf '%s: %s\n' "$tool" "$(command -v "$tool" || echo missing)"
-          done
 
       - run: pnpm install --frozen-lockfile
 
