@@ -16,3 +16,5 @@ Decided by the maintainer: until `@convesoft/nx-rust` is on npm, the repository 
 Decided by the orchestrator, provisional (review issue of this epic): the Nx targets are added beside the cargo commands, which stay documented as the fallback, and the orchestrator's gate runs both until a run has shown the same results; worktrees do not share an Nx cache, so the gate executes its checks itself.
 
 nx-rust: Nx 24, Cargo 1.91 or later, Linux and macOS; its documentation is `nx-rust/docs/` of that checkout (setup, targets, caching, configuration, testing).
+
+Changed by the maintainer on 2026-11-22 (mara-tt31bp): the plugin is not loaded from the local checkout. The repository waits for the npm release of `@convesoft/nx-rust` and depends on it from the start; mara-a4ga3m does mara-mrmg89 in the same change.

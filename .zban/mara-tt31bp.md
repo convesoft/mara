@@ -1,5 +1,5 @@
 ---
-title: "Decide how nx-rust is loaded until it is on npm: from its source it runs no test and caches no build"
+title: "Wait for the npm release of @convesoft/nx-rust: mara-a4ga3m takes the plugin from npm"
 status: todo
 type: task
 tags:
@@ -26,4 +26,9 @@ Two more findings about the plugin, for the maintainer to take upstream (nothing
 - `build.warnings = "deny"` does nothing under nx-rust: Cargo 1.100 ignores it (and `CARGO_BUILD_WARNINGS`) with `--message-format=json`, which the plugin always passes (plain cargo: exit 101 without the flag, exit 0 with it). The plugin's docs recommend the setting and it still enters the cache key. This repository denies warnings with `RUSTFLAGS=-D warnings` in `.env.lint` instead.
 - From source, every executor run prints `Convert compiler options from json failed, No inputs were found in config file 'tsconfig.json'` (`@swc-node/register` 1.11.1 reading the preset's `tsconfig.json` with `"files": []`). Cosmetic; gone with a built package.
 
-- [ ] The maintainer has chosen, and mara-a4ga3m is unblocked with the answer in its brief
+- [x] The maintainer has chosen
+- [ ] A real version of `@convesoft/nx-rust` (not the `0.0.0` placeholder) is on npm, and the orchestrator has resumed mara-a4ga3m with it
+
+## Decided by the maintainer on 2026-11-22
+
+Option 3, "Wait for npm". mara-a4ga3m stays parked until a real version of `@convesoft/nx-rust` is published. Its worker then takes the package from npm at an exact version, names the plugin by its package name, drops what only the source needed (the `link:` dependency, the absolute path, `NX_PREFER_NODE_STRIP_TYPES=false`, and the transpiler packages and tsconfig files only if nothing else needs them), and closes mara-mrmg89 in the same change. This replaces the decision of 2026-11-22 to load the plugin from its TypeScript source. Nothing of the epic or of alpha.6 (mara-xzfeyj) starts until then. This issue stays open as the marker of that wait; the orchestrator closes it when the package is there.

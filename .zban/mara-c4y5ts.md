@@ -23,6 +23,7 @@ Context: AGENTS.md (Deciding during the rewrite). When the epic closes, the orch
 - 2026-11-22: the workspace files are copied from Nx's TypeScript preset, generated in a temporary directory, so that they agree with what Nx generates and hold what the alpha.6 packages need; the generator never runs inside the checkout.
 - 2026-11-22: of the generator's agent files, the repository takes the Nx skills it will use and the managed Nx block of `AGENTS.md`; the size rule of `AGENTS.md` does not count that block. The linter and the formatter of the JS side are oxlint and oxfmt.
 - 2026-11-22: a last issue of the epic (mara-mrmg89) switches to the published package.
+- 2026-11-22 (mara-tt31bp): loaded from its TypeScript source, nx-rust runs no `test` and restores no `build` from the cache, because it starts two helper scripts that exist only in a build. The repository waits for the npm release and takes the plugin from there (chosen over linking to a build of the plugin and over fixing the plugin for source loading). This replaces the decision to load from source; mara-a4ga3m does mara-mrmg89 in the same change, and nothing of the epic or of alpha.6 starts until the package is published.
 
 ## Decided by the orchestrator
 
