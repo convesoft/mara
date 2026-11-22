@@ -62,6 +62,12 @@ jobs:
             target/wasm32-unknown-unknown
           key: cargo-dirs-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
           restore-keys: cargo-dirs-${{ matrix.os }}-${{ runner.arch }}-
+      - name: List what the Cargo cache restored (temporary probe)
+        run: |
+          find target -maxdepth 2 | sort
+          ls -A ~/.cargo/registry
+          if compgen -G 'target/souffle-*' >/dev/null; then echo "::error::the Cargo cache restored Soufflé"; exit 1; fi
+          echo "no target/souffle-* among what the Cargo cache restored"
       # Soufflé comes only from its own entry: scripts/build-souffle.sh keeps an existing binary that
       # passes its checks, so a binary of an older script must not be restored.
       - name: Restore Soufflé

@@ -46,3 +46,12 @@ Evidence:
 - Job timeout 60 minutes, over three times a cold run. Recorded in `ADR-CI-CHECKS`.
 - The `zban-check` key runs `zban --version` and hashes the file `zban` starts from, looked up with `node_modules/.bin` first. Recorded in the root `Cargo.toml` comment, `DES-CI-WORKFLOW` and `ADR-NX-RUST-TASKS`.
 - The pnpm store is not cached: `DES-CI-WORKFLOW` names only the Soufflé and Cargo caches, and the install takes seconds.
+
+## Fix round 1 (review at 407de74)
+
+- Cargo's CI cache archived `target` whole, `target/souffle-*` included, because the cache action applies a negative pattern only to the paths it lists and tar then archives `target` recursively. Its entry now names `target/debug`, `target/release` and `target/wasm32-unknown-unknown` and Cargo's registry, under the new key prefix `cargo-dirs-`, and it is restored before Soufflé's entry. Outside it: `target/souffle-2.5`, nx-rust's stages `target/.nx-rust-stage`, the tests' scratch directory `target/tmp`, `target/.rustc_info.json`; Nx's cache and workspace data are in `.nx/`.
+- `zban-check`'s key ran no `zban`, so a missing native package replayed a pass. It now holds `zban --version`, run as the command runs it, and the SHA-256 of the file it starts from.
+- Wording of `DES-CI-WORKFLOW`: `hashFiles(...)` for the keys, "an untracked, non-ignored file".
+- Final green run of the final workflow form, which differs only in the push trigger: https://github.com/convesoft/mara/actions/runs/45075452128 on d288e26, x64 13m27s, arm64 13m33s, 860 passed, 0 failed, 16 ignored and `project validate` 0 errors, 0 warnings on both; the new `cargo-dirs-` key and its fallback restored nothing, and each image saved a new entry (1.5 GiB x64, 1.3 GiB arm64).
+- Local `pnpm run checks` on d288e26: exit 0, 860 passed, 0 failed, 16 ignored, `project validate` 0 errors, 0 warnings.
+- Decision: Cargo's entry names its directories under a new prefix. Rejected: `target` with `!target/souffle-*`. Recorded in `ADR-CI-CHECKS` and `DES-CI-WORKFLOW`.
