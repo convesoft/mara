@@ -182,6 +182,15 @@
 - Rejected: `ubuntu-latest`, which moves to a new release without a change in the repository. Rejected: the release's `ubuntu-22.04`, the image GitHub retires first; the release runs the checks there anyway.
 - Chosen by the worker: the performance test in every run, on shared runners.
 - Rejected: leaving it to the nightly job. [VER-SCALING](verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW) runs it on every pull request, and [ADR-SCALING-CPU-TIME](#01M7DTPFQMCA1VN75741RKEDR6) measured it beside other loads.
+- Chosen by the worker of mara-1avrq4 on 2026-11-22: Soufflé's CI cache entry is saved by a step of its own after the checks, also when one failed.
+- Rejected: the cache action's save at the job's end, which runs only for a passing job, so that the next run after a failure builds Soufflé again.
+- Chosen by the worker: each push run has a concurrency group of its own; the runs of a pull request share one.
+- Rejected: one group per ref without cancelling, in which a newer push run cancels an older one still pending.
+- Chosen by the worker: third-party actions pinned by major version, as zban's and nx-rust's workflows pin them.
+- Rejected: pinning by commit SHA, which neither reference does.
+- Chosen by the worker: each job stops after 60 minutes, over three times a run without caches (18 minutes).
+- Chosen by the worker of mara-1avrq4: Cargo's CI cache entry names the profile and target-triple directories under `target/` one by one, under a new key prefix, so that it cannot hold Soufflé and no entry of the earlier design is restored.
+- Rejected: `target` with the exclusion `!target/souffle-*`. The cache action archives the directory `target` whole, Soufflé included, so that a changed `scripts/build-souffle.sh` could get the old binary back.
 
 ---
 
@@ -387,7 +396,7 @@
 | `mara:validate` | `cargo run --package mara --locked --quiet -- --no-daemon project validate` | Yes | Depends on `mara:build` and `souffle`, whose outputs are in its key; `docs/`, `.mara/`, every file under `crates/` (Rust files, `.gitignore` files and any nested project's `.mara/config.toml`), the root `.gitignore`; the root `.cargo/config.toml` and `.cargo/config`, `rust-toolchain.toml` and every `CARGO_TARGET_*` variable, such as the host's runner, which `cargo run` reads; the mode and SHA-256 of Soufflé; the files of the per-user grammar cache, links followed, in the XDG folder and in macOS's `~/Library/Caches`; `TMPDIR` and the `MARA_TEST_*` hooks that the debug build reads |
 | `mara:test:performance` | `cargo test -p '<package ID of mara>' --test performance --profile release --locked`, as the configuration `performance` of `mara:test`, with `test = "performance"` and `profile = "release"` | Never restored: `checks` runs it with `--skip-nx-cache` | Those of `mara:test`, the dependency on `souffle` included; an `nx` command of its own after the other checks |
 | `mara-engine:build:wasm32` | `cargo build -p '<package ID of mara-engine>' --target wasm32-unknown-unknown --locked`, as the configuration `wasm32` of the inferred `build`, with `targetTriple = "wasm32-unknown-unknown"` | Yes | The plugin's inputs; the configuration is in the key |
-| `cargo-workspace:zban-check` | `zban check` | Yes | `.zban/`, archive included; the SHA-256 of the `zban` on `PATH` |
+| `cargo-workspace:zban-check` | `zban check` | Yes | `.zban/`, archive included; the `zban` that the command runs, the devDependency in `node_modules/.bin`, which Nx puts first on the command's `PATH`, else the one on `PATH`: its `--version` output, which is the dispatcher's error where its native package is missing, and the SHA-256 of the file it starts from |
 | `mara-npm:lint` | Oxlint on `packages/mara-npm` | Yes | Inputs inferred by `@nx/oxlint` |
 
 - `mara:test` also depends on `souffle`. Nx keys a task with a `dependentTasksOutputFiles` input only after its dependencies have run: the plugin gives `mara:test` one, and `mara:validate` declares one, so both key the Soufflé that `souffle` built in the same run.
