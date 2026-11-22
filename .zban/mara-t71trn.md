@@ -53,4 +53,6 @@ One line per decision made on the maintainer's behalf: what was decided, what it
 - 2026-11-22 (mara-1avrq4): CI caches the three directories cargo writes under `target/` and Cargo's registry, by name, so that the Soufflé directory cannot be in that cache; Soufflé has its own entry keyed by its build script, without a fallback (`DES-CI-WORKFLOW`, `ADR-CI-CHECKS`). `zban` is an exact devDependency, and `zban-check` keys the version and the file of the `zban` it runs. A warm run takes about 10 minutes on each image, a cold one about 17.
 - 2026-11-22: reviewers' findings dropped as exotic: a local Git ignore rule that hides a zban warning from the key of `zban-check` (mara-1avrq4); a missing deadline on the MCP read of the version test (mara-e8921x).
 
+- 2026-11-23 (mara-ezzbnc): the check names for branch protection are `Checks (ubuntu-24.04)` and `Checks (ubuntu-24.04-arm)`; no job of the release workflow is recommended as a required check, because its dry run on pull requests starts only when release inputs change and a required check that never runs blocks the merge. The maintainer sets branch protection.
+
 - [ ] The maintainer has read the list
