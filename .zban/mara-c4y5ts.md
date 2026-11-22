@@ -26,6 +26,7 @@ Context: AGENTS.md (Deciding during the rewrite). When the epic closes, the orch
 - 2026-11-22 (mara-tt31bp): loaded from its TypeScript source, nx-rust runs no `test` and restores no `build` from the cache, because it starts two helper scripts that exist only in a build. The repository waits for the npm release and takes the plugin from there (chosen over linking to a build of the plugin and over fixing the plugin for source loading). This replaces the decision to load from source; mara-a4ga3m does mara-mrmg89 in the same change, and nothing of the epic or of alpha.6 starts until the package is published.
 - 2026-11-22: the maintainer published `@convesoft/nx-rust@1.0.0-rc.1` (dist-tag `next`; `latest` is still the `0.0.0` placeholder) as the release to use. The repository pins that exact version (integrated with mara-a4ga3m and mara-mrmg89).
 - 2026-11-22: the local checks run only through Nx (`pnpm run checks`); AGENTS.md drops the list of cargo commands, because they duplicate what the targets run (mara-cdwtfm). This settles the provisional decision of 2026-11-21 that kept them beside the targets as the fallback.
+- 2026-11-22: the maintainer published `@convesoft/nx-rust@1.0.0-rc.2`, which fixes what this epic reported about rc.1 and ships its documentation in the package, and said to switch to it. The pin and the release-age exemption move to that exact version, and the workarounds it makes unnecessary go (mara-788vbe).
 
 ## Decided by the orchestrator
 
