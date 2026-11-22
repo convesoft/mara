@@ -4,7 +4,7 @@ name: CI
 
 on:
   push:
-    branches: [chore/clear-worktree-for-rewrite, main, ci/github-actions-local-checks]
+    branches: [chore/clear-worktree-for-rewrite, main]
   pull_request:
 
 permissions:
