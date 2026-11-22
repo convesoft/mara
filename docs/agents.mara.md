@@ -1,5 +1,14 @@
 # Agent guidance
 
+## Both versions on one machine
+
+The 0.3.0 skill and MCP server read only the `:::mara` format; this version reads only its own and converts the other ([migration](migration.mara.md#steps)). While both are in use:
+
+- Run every command of this version through one exact launcher, `npx -y @convesoft/mara@<version>` with the exact prerelease version, or a project's exact dependency (`npx mara`): a bare `mara` may resolve to an installed 0.3.0. The MCP server, `prime` and `--version` use the same launcher, `npx -y @convesoft/mara@<version> mcp --project <root>` and `npx -y @convesoft/mara@<version> prime`.
+- Launch the MCP server per project, pinned to the version that project's format needs: `npx -y @convesoft/mara@0.3.0 mcp --project <root>` for a 0.3.0 project. Give the two servers different names in a client that has both.
+- Install the 0.3.0 skill in the scope of each 0.3.0 project: in a converted project it teaches the format the documents no longer use, and this version's guide comes from `prime` and the server instructions ([DES-AGENT-GUIDE](#01M7BGRHWQHQJJHC6XCXVDWDM8)). If you installed it for your user, move it into the 0.3.0 projects and disable or remove the user-scoped copy. Replace a converted project's references to the skill with the `prime` command above.
+- A 0.3.0 tool pointed at a converted project that still holds `.mara/project.toml` reads its documents as narrative without items, reports no format mismatch and can write `:::mara` blocks into them; step 8 of the migration removes that file. In this version, operations on legacy documents and schema reject the project with `legacy-project`. The CLI and MCP guides give conversion instructions.
+
 ## Requirements
 
 ---

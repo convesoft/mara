@@ -40,4 +40,7 @@ One line per decision made on the maintainer's behalf: what was decided, what it
 
 - 2026-11-22 (mara-e8921x): until the parser has read a complete operation name, `--version` in option position is the top-level flag (`mara project --version` is rejected); the performance harness gets no case for it; the code carries no `@mara implements` marker, because the flag is outside the document operation set (`DES-OPERATIONS`, `DES-PERFORMANCE-HARNESS`). Undo: the item text and `crates/mara/src/cli.rs`.
 
+- 2026-11-22 (mara-397g3g): the migration steps tell the user to delete the files the conversion leaves for 0.3.0, in a commit of its own after the conversion commit, so that every state can be restored from Git (docs/migration.mara.md, "Steps"). Rests on 0.3.0 otherwise reading the converted project as one without items (read in the 0.3.0 source, not run). Undo: make step 8 optional.
+- 2026-11-22 (mara-397g3g): the README installs the prerelease with `--save-exact`, and agent setups pin the MCP server and every command of this version to the exact prerelease version through one launcher; a 0.3.0 skill belongs to the 0.3.0 projects, not to the user (docs/agents.mara.md). Undo: the page text.
+
 - [ ] The maintainer has read the list
