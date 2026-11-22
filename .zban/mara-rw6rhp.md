@@ -1,6 +1,6 @@
 ---
 title: Tests run with nextest
-status: todo
+status: in-progress
 type: task
 parent: mara-c8scn7
 blocked_by:

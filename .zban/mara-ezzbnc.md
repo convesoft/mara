@@ -1,6 +1,6 @@
 ---
 title: "The rewrite integrates by pull requests after the fast-forward of main: AGENTS.md, the template and the required checks"
-status: todo
+status: in-progress
 type: task
 parent: mara-c8scn7
 blocked_by:

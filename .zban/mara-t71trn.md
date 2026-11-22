@@ -50,4 +50,7 @@ One line per decision made on the maintainer's behalf: what was decided, what it
 - 2026-11-22 (mara-svq540): the packer reads the version and the artifact directory from `cargo metadata`, so the Pack dispatcher job of the release installs the pinned Rust toolchain though it compiles nothing; `pack-native` runs as `mara-npm:pack-native:release`, refuses `CARGO_BUILD_TARGET` and cannot see a `build.target` of a Cargo configuration file (`DES-RELEASE-WORKFLOW`). The three targets are not part of `pnpm run checks`.
 - 2026-11-22 (mara-svq540): not shown before the release workflow runs: the arm64 package, the `GLIBC_` floor on the `ubuntu-22.04` image (the check fails on this machine by design), the registry mode of the install check. The dry run of mara-a3aq0n is their first evidence.
 
+- 2026-11-22 (mara-1avrq4): CI caches the three directories cargo writes under `target/` and Cargo's registry, by name, so that the Soufflé directory cannot be in that cache; Soufflé has its own entry keyed by its build script, without a fallback (`DES-CI-WORKFLOW`, `ADR-CI-CHECKS`). `zban` is an exact devDependency, and `zban-check` keys the version and the file of the `zban` it runs. A warm run takes about 10 minutes on each image, a cold one about 17.
+- 2026-11-22: reviewers' findings dropped as exotic: a local Git ignore rule that hides a zban warning from the key of `zban-check` (mara-1avrq4); a missing deadline on the MCP read of the version test (mara-e8921x).
+
 - [ ] The maintainer has read the list
