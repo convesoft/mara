@@ -1,6 +1,6 @@
 ---
 title: Every local check is an Nx target, and package.json scripts combine them
-status: todo
+status: in-progress
 type: feature
 parent: mara-1fab1q
 blocked_by:
@@ -25,5 +25,6 @@ A custom target is cached only if its inputs are declared completely; one that c
 
 - [ ] Each row above is an Nx target with its inputs and its dependencies on other targets, and each gives the result of the cargo or `zban` command it replaces
 - [ ] `package.json` has scripts that combine them: at least one that runs every local check, and the fast subset a developer runs while working
-- [ ] AGENTS.md "Local checks" names the script as the way to run them, and keeps the cargo commands as what the targets run and as the fallback while nx-rust is not released; the file stays within 120 lines
+- [ ] AGENTS.md "Local checks" names the script as the way to run them, and keeps the cargo commands as what the targets run and as the fallback (they stay until the maintainer says otherwise); the file stays within 120 lines, not counting the managed Nx block
+- [ ] ADR-NX-RUST-TASKS: the custom targets and their inputs are recorded there, and its Warnings bullet lists each rejected alternative on its own line (left over from the re-check of mara-a4ga3m)
 - [ ] The summary shows: a full run in a fresh worktree; a second run at the same tree and what it restored; and for one change each to a crate's source, a page under `docs/` and an issue file under `.zban/`, which targets ran again
