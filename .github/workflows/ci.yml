@@ -4,7 +4,7 @@ name: CI
 
 on:
   push:
-    branches: [chore/clear-worktree-for-rewrite, main]
+    branches: [chore/clear-worktree-for-rewrite, main, ci/github-actions-local-checks]
   pull_request:
 
 permissions:
@@ -46,6 +46,22 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Cargo's entry holds the profile and target-triple directories that the checks build into and
+      # Cargo's registry, by name, so that it cannot hold `target/souffle-2.5`. Not in it: the
+      # stages of nx-rust (`target/.nx-rust-stage`), the tests' scratch directory (`target/tmp`) and
+      # rustc's version cache (`target/.rustc_info.json`).
+      - name: Restore Cargo's build directories and registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/debug
+            target/release
+            target/wasm32-unknown-unknown
+          key: cargo-dirs-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: cargo-dirs-${{ matrix.os }}-${{ runner.arch }}-
       # Soufflé comes only from its own entry: scripts/build-souffle.sh keeps an existing binary that
       # passes its checks, so a binary of an older script must not be restored.
       - name: Restore Soufflé
@@ -54,17 +70,6 @@ jobs:
         with:
           path: target/souffle-2.5
           key: souffle-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-souffle.sh') }}
-      - name: Restore Cargo's build directory and registry
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-            !target/souffle-*
-          key: cargo-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
-          restore-keys: cargo-${{ matrix.os }}-${{ runner.arch }}-
 
       # The grammar that .mara/config.toml pins, which `mara:validate` needs (DES-GRAMMAR-ASSETS).
       - run: cargo run --locked --quiet --bin mara -- --no-daemon code add rust
