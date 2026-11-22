@@ -5,3 +5,8 @@ allowBuilds:
   "@swc/core": false
 minimumReleaseAgeExclude:
   - "@convesoft/nx-rust@1.0.0-rc.2"
+  - "@convesoft/zban-darwin-arm64@1.0.0-rc.1"
+  - "@convesoft/zban-darwin-x64@1.0.0-rc.1"
+  - "@convesoft/zban-linux-arm64@1.0.0-rc.1"
+  - "@convesoft/zban-linux-x64@1.0.0-rc.1"
+  - "@convesoft/zban@1.0.0-rc.1"

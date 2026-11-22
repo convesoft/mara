@@ -178,6 +178,9 @@ importers:
       '@convesoft/nx-rust':
         specifier: 1.0.0-rc.2
         version: 1.0.0-rc.2(nx@24.0.6(@swc-node/register@1.11.1(@swc/core@1.15.8(@swc/helpers@0.5.18))(@swc/types@0.1.28)(supports-color@7.2.0)(typescript@6.0.3))(@swc/core@1.15.8(@swc/helpers@0.5.18)))
+      '@convesoft/zban':
+        specifier: 1.0.0-rc.1
+        version: 1.0.0-rc.1
       '@nx/js':
         specifier: 24.0.6
         version: 24.0.6(@babel/traverse@7.29.15(supports-color@7.2.0))(@swc-node/register@1.11.1(@swc/core@1.15.8(@swc/helpers@0.5.18))(@swc/types@0.1.28)(supports-color@7.2.0)(typescript@6.0.3))(@swc/core@1.15.8(@swc/helpers@0.5.18))(nx@24.0.6(@swc-node/register@1.11.1(@swc/core@1.15.8(@swc/helpers@0.5.18))(@swc/types@0.1.28)(supports-color@7.2.0)(typescript@6.0.3))(@swc/core@1.15.8(@swc/helpers@0.5.18)))(supports-color@7.2.0)
@@ -775,6 +778,31 @@ packages:
     resolution: {integrity: sha512-7flxyCtt7PGDTkdeI2V/JmTFBGYm18kTafZAbrA+WVDnaQYIHkplBf+7g8ovpkPphHyhnQj7X5tWfOMtL+kO6Q==}
     peerDependencies:
       nx: ^24
+
+  '@convesoft/zban-darwin-arm64@1.0.0-rc.1':
+    resolution: {integrity: sha512-COEGic4h0an4Pl0Ga79grgHKZb/PM95aPwrgbVBbss9S7cMKRuKdve9WjDoPfBOOzyGoGZLD9zEgGeKFyM9FaA==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@convesoft/zban-darwin-x64@1.0.0-rc.1':
+    resolution: {integrity: sha512-kiLMUgWSlXMQh6EhoD7dszqwGBjk7WHvkhbb5iW5FwIHweMGeRe4FPKmIr2DyxAZJR6o3w1tn6/3SDdOtz8B1Q==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@convesoft/zban-linux-arm64@1.0.0-rc.1':
+    resolution: {integrity: sha512-/T+LgG8Xvfag6K99ONR75HnVOP+mhDSd/vdaz71zLPVq5Pr5ZQbk9hGhUb2t9R8C0C3WqAis53I62t4ETQ7+5Q==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@convesoft/zban-linux-x64@1.0.0-rc.1':
+    resolution: {integrity: sha512-8xVSTykyOi4LDroq2ZIVnUFdeftGWHCuFZyuHqU0mATymhKBRIHFTVRgv5M82w8j8E9lN6fLrDTXDo7FYGucVQ==}
+    cpu: [x64]
+    os: [linux]
+
+  '@convesoft/zban@1.0.0-rc.1':
+    resolution: {integrity: sha512-dCBjcL0/HToiPJkoQUlAPjrLmU56hhLcicGo5jULKWjDVr63xZkrBQxd3RZvtUEW8r4RUf4XTk7wG/u3opzC+g==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   '@emnapi/core@1.11.2':
     resolution: {integrity: sha512-TC8MkTuZUtcTSiFeuC0ksCh9QIJ5+F21MvZ4Wn4ORfYaFJ/0dsiudv5tVkejgwZlwQ39jL9WWDe2lz8x0WglOA==}
@@ -3110,6 +3138,25 @@ snapshots:
       nx: 24.0.6(@swc-node/register@1.11.1(@swc/core@1.15.8(@swc/helpers@0.5.18))(@swc/types@0.1.28)(supports-color@7.2.0)(typescript@6.0.3))(@swc/core@1.15.8(@swc/helpers@0.5.18))
       smol-toml: 1.9.0
       tslib: 2.9.1
+
+  '@convesoft/zban-darwin-arm64@1.0.0-rc.1':
+    optional: true
+
+  '@convesoft/zban-darwin-x64@1.0.0-rc.1':
+    optional: true
+
+  '@convesoft/zban-linux-arm64@1.0.0-rc.1':
+    optional: true
+
+  '@convesoft/zban-linux-x64@1.0.0-rc.1':
+    optional: true
+
+  '@convesoft/zban@1.0.0-rc.1':
+    optionalDependencies:
+      '@convesoft/zban-darwin-arm64': 1.0.0-rc.1
+      '@convesoft/zban-darwin-x64': 1.0.0-rc.1
+      '@convesoft/zban-linux-arm64': 1.0.0-rc.1
+      '@convesoft/zban-linux-x64': 1.0.0-rc.1
 
   '@emnapi/core@1.11.2':
     dependencies:

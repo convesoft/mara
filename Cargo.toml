@@ -21,8 +21,10 @@ command = "scripts/build-souffle.sh"
 outputs = ["{workspaceRoot}/target/souffle-2.5"]
 cache = false
 
-# `zban check` reads `.zban/`, archive included, and its result depends on the installed `zban`.
+# `zban check` reads `.zban/`, archive included, and its result depends on the `zban` it runs: the
+# exact devDependency in `node_modules/.bin`, which Nx puts first on the command's PATH, else one on
+# PATH. The key looks it up the same way, also when `nx` runs without `pnpm`.
 [workspace.metadata.nx.project.targets.zban-check]
 command = "zban check"
 cache = true
-inputs = ["{workspaceRoot}/.zban/**/*", { runtime = "sha256sum \"$(command -v zban)\" 2>&1; true" }]
+inputs = ["{workspaceRoot}/.zban/**/*", { runtime = "PATH=\"$PWD/node_modules/.bin:$PATH\"; sha256sum \"$(command -v zban)\" 2>&1; true" }]
