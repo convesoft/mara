@@ -1,6 +1,6 @@
 ---
 title: "Specify the rc.1 slice: prerelease versions on npm, CI, Linux packages and the release workflow"
-status: todo
+status: in-progress
 type: task
 parent: mara-c8scn7
 created_at: 2026-11-22T18:44:35Z

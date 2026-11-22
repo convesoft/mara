@@ -1,6 +1,6 @@
 ---
 title: The checks that guard this repository's docs are a project of their own, and mara:test no longer reads docs/
-status: todo
+status: in-progress
 type: task
 parent: mara-c8scn7
 created_at: 2026-11-22T19:14:52Z
