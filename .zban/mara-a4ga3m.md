@@ -1,6 +1,6 @@
 ---
 title: "Initialize the Nx workspace with nx-rust: the crates are projects and their inferred targets pass"
-status: todo
+status: in-progress
 type: feature
 parent: mara-1fab1q
 blocked_by:

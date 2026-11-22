@@ -1,6 +1,6 @@
 ---
 title: Use the published @convesoft/nx-rust instead of the local checkout
-status: todo
+status: in-progress
 type: task
 parent: mara-1fab1q
 blocked_by:

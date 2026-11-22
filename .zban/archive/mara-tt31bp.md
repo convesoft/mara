@@ -1,11 +1,12 @@
 ---
 title: "Wait for the npm release of @convesoft/nx-rust: mara-a4ga3m takes the plugin from npm"
-status: todo
+status: done
 type: task
 tags:
   - maintainer
 discovered_from: mara-a4ga3m
 created_at: 2026-11-22T00:18:19Z
+closed_at: 2026-11-22T00:33:08Z
 ---
 
 Goal: the maintainer chooses how this repository gets nx-rust until the package is on npm, so that mara-a4ga3m can finish: its `test` target must run and its `build` target must be cached.
@@ -27,8 +28,18 @@ Two more findings about the plugin, for the maintainer to take upstream (nothing
 - From source, every executor run prints `Convert compiler options from json failed, No inputs were found in config file 'tsconfig.json'` (`@swc-node/register` 1.11.1 reading the preset's `tsconfig.json` with `"files": []`). Cosmetic; gone with a built package.
 
 - [x] The maintainer has chosen
-- [ ] A real version of `@convesoft/nx-rust` (not the `0.0.0` placeholder) is on npm, and the orchestrator has resumed mara-a4ga3m with it
+- [x] A real version of `@convesoft/nx-rust` (not the `0.0.0` placeholder) is on npm, and the orchestrator has resumed mara-a4ga3m with it
 
 ## Decided by the maintainer on 2026-11-22
 
 Option 3, "Wait for npm". mara-a4ga3m stays parked until a real version of `@convesoft/nx-rust` is published. Its worker then takes the package from npm at an exact version, names the plugin by its package name, drops what only the source needed (the `link:` dependency, the absolute path, `NX_PREFER_NODE_STRIP_TYPES=false`, and the transpiler packages and tsconfig files only if nothing else needs them), and closes mara-mrmg89 in the same change. This replaces the decision of 2026-11-22 to load the plugin from its TypeScript source. Nothing of the epic or of alpha.6 (mara-xzfeyj) starts until then. This issue stays open as the marker of that wait; the orchestrator closes it when the package is there.
+
+## Summary of Changes
+
+`@convesoft/nx-rust@1.0.0-rc.1` was published on 2026-11-22 at 00:26 UTC under the dist-tag `next` (391 files, built from `0078ee2`; `latest` is still the `0.0.0` placeholder). The orchestrator resumed mara-a4ga3m with it: the worker pins that exact version and does mara-mrmg89 in the same change. No code changed for this issue.
+
+More findings about the plugin from the review of mara-a4ga3m at `6ee187d`, for the maintainer to take upstream (reproductions in `~/.tmp/codex/review-mara-a4ga3m-6ee187d/findings.md`); none blocks this repository, which uses none of these settings:
+
+- `lint` hashes the value of `CLIPPY_CONF_DIR`, not the configuration file it selects: an edit of that file restores the old result.
+- `fmt-check` does not follow a per-user Rustfmt configuration (`$XDG_CONFIG_HOME/rustfmt/rustfmt.toml`): an edit restores the old result.
+- `check`, and the compilation of `test`, do not follow Cargo configuration outside the repository (`build.rustflags` in the Cargo home): an edit restores the old result. The plugin prints its warning about configuration outside the repository.
