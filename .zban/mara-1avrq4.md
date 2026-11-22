@@ -1,6 +1,6 @@
 ---
 title: "CI: GitHub Actions runs the local checks on Linux x64 and arm64"
-status: todo
+status: in-progress
 type: task
 parent: mara-c8scn7
 blocked_by:

@@ -1,6 +1,6 @@
 ---
 title: "Guidance for rc.1: README installation with the next dist-tag and the migration steps from 0.3.0"
-status: todo
+status: in-progress
 type: task
 parent: mara-c8scn7
 blocked_by:

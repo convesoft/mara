@@ -1,6 +1,6 @@
 ---
 title: "CLI: mara --version prints the version"
-status: todo
+status: in-progress
 type: feature
 parent: mara-c8scn7
 discovered_from: mara-a57pzn
