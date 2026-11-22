@@ -13,6 +13,7 @@ Goal: the maintainer reviews what the orchestrator and the workers decided on th
 
 - 2026-11-22: the rewrite is published before 0.4.0, as `0.4.0-rc.1` under the npm dist-tag `next`, and the Node library and browser slice (mara-xzfeyj) becomes `0.4.0-rc.2`. A small epic resolves CI and publishing, with the zban and nx-rust repositories as references. rc.1 is to be used to migrate other repositories from the 0.3.0 format.
 - 2026-11-22: tests are to run with nextest and affected selection for rapid local development, after measurements ("Agree better to gather numbers"); the full suite runs only where it is really necessary; the tests are to be decoupled from `docs/` where that is possible; a script that T3 Code runs for a new worktree copies the baseline into it; cargo-nextest and cargo-affected may be installed on the machine ("Feel free to install them").
+- 2026-11-22: the tests that read this repository's docs "are not source code tests": they run beside `mara:validate`, as a project of their own with only the docs as their concern (mara-8mxw9c).
 - 2026-11-22: `main` will be fast-forwarded to the integration branch, and the slice after rc.1 (mara-xzfeyj) integrates by pull requests (mara-bkqvgd).
 
 ## Decided by the orchestrator
