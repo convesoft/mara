@@ -1,5 +1,23 @@
 # Migration from 0.3.0
 
+## Steps
+
+Run these at the root of a 0.3.0 project, the directory whose `.mara/` holds `project.toml`, with `mara` standing for the prerelease's launcher ([README](../README.md#install-the-prerelease)). Step 1 and step 7 each end in a commit, and step 8 is a commit of its own, so every state can be restored from Git.
+
+1. Commit the 0.3.0 state. `git status --ignored .mara` lists the files under `.mara/` that Git does not hold: commit them (`git add -f` for ignored ones) or copy them out of the repository.
+2. `mara project convert`. If it refuses with `invalid-argument` for items without a status or a schema without status values, rerun it as `mara project convert --status <status>` with the status those items get.
+3. Review `git diff`, open the new `.mara/config.toml` and `.mara/schema.toml`, and read the entries of `.mara/conversion-report.json`: each names a 0.3.0 file and line and what was left out or changed there. [Conversion mapping](#01M7CMW71TXDY6VCTJS7XNSQRM) lists every case.
+4. Carry over by hand what the report names and no tool converts:
+   - Code links, such as `[[implemented_by:code:<path>]]`, stay as text. Declare each code language under `[code]` in `.mara/config.toml` and add a marker in the code ([DES-CODE-MARKERS](code/index.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)); a marker in an undeclared language links nothing. Delete the old text only once `mara relation list <ID>` shows the link.
+   - YAML rules become Soufflé programs that you write over the fact bridge ([DES-FACT-BRIDGE](rules/index.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)) and register, with a consumer entry each, in `.mara/config.toml` ([DES-RULE-CONSUMERS](rules/index.mara.md#01M7BF6HE529B61Q2ZNXFQ1JXE)); the conversion configures none. `mara query list` shows the entries; `mara project validate` runs the invariants, and `mara query execute`, `view` and `gate` the others.
+   - Items reported with an empty body need their text.
+5. `mara project validate` must report 0 errors.
+6. Move the project's agent setup to the prerelease ([Agent guidance](agents.mara.md#both-versions-on-one-machine)).
+7. Commit steps 2 to 6 together. A rerun of `project convert` now fails with `not-a-legacy-project`.
+8. Delete what the conversion left for 0.3.0, in a commit of its own: `.mara/project.toml`, `.mara/schema.yaml`, the YAML rule files, `.mara/code/` and the files of step 1. No operation of this version reads them, and without `.mara/project.toml` 0.3.0 no longer recognizes this directory as a project root.
+
+To go back after step 8, revert the commits of steps 8 and 7, newest first; after step 7 and before step 8, revert only the commit of step 7; before step 7, `git restore` the changed files and delete the untracked new ones. Then put back what step 1 copied out.
+
 ## Requirements
 
 ---

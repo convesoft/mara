@@ -14,3 +14,5 @@ created_at: 2026-11-13T22:10:06Z
 - [ ] `SECURITY.md`
 
 Note from the orchestrator, 2026-11-21 (found by the worker of mara-cp1skx): the status paragraph of README.md (line 7) still describes 0.4.0-alpha.1: it says `mara` "does not edit documents yet" and that documents are written by hand. It is wrong since alpha.2 and is rewritten by this issue.
+
+Note from mara-397g3g, 2026-11-22: the README status paragraph is rewritten there for rc.1 (installation from `next`, first steps). This issue brings it to 0.4.0 from `latest`. docs/migration.mara.md now opens with `## Steps` and docs/agents.mara.md with `## Both versions on one machine`; the agent-setup item here (the line for a project's agent instructions, the hook alternative) is still open.
