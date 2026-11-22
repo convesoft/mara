@@ -2,7 +2,10 @@
   "name": "@convesoft/mara-source",
   "private": true,
   "license": "MIT OR Apache-2.0",
-  "scripts": {},
+  "scripts": {
+    "checks": "nx run-many -t fmt-check lint test validate zban-check test-performance --output-style=static && nx run mara-engine:build:wasm32 --output-style=static",
+    "checks:fast": "nx run-many -t fmt-check lint test validate zban-check --output-style=static"
+  },
   "dependencies": {},
   "devDependencies": {
     "@convesoft/nx-rust": "1.0.0-rc.1",

@@ -11,3 +11,18 @@ repository = "https://github.com/convesoft/mara"
 [profile.profiling]
 inherits = "release"
 debug = "line-tables-only"
+
+# Nx targets of the workspace project `cargo-workspace` (ADR-NX-RUST-TASKS). `souffle` builds or
+# checks the pinned Soufflé that the tests and `project validate` run; it is not cached, because
+# what it builds depends on the host's C++ toolchain and a download, and its check of an existing
+# binary takes about a second.
+[workspace.metadata.nx.project.targets.souffle]
+command = "scripts/build-souffle.sh"
+outputs = ["{workspaceRoot}/target/souffle-2.5"]
+cache = false
+
+# `zban check` reads `.zban/`, archive included, and its result depends on the installed `zban`.
+[workspace.metadata.nx.project.targets.zban-check]
+command = "zban check"
+cache = true
+inputs = ["{workspaceRoot}/.zban/**/*", { runtime = "sha256sum \"$(command -v zban)\" 2>&1; true" }]

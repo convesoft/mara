@@ -64,9 +64,11 @@ One orchestrator starts a worker for each ready issue and integrates its branch.
 
 ## Local checks
 
-Run `scripts/build-souffle.sh` once in a fresh worktree first: `cargo test` needs the Soufflé it builds. Run `cargo run --quiet --bin mara -- --no-daemon code add rust` once on each machine first: `project validate` needs this repository's pinned grammar in the per-user cache ([DES-GRAMMAR-ASSETS](docs/code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)). Run them from the repository root; each must exit 0. `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins. The `wasm32` build is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9). The release test times a release build for [VER-SCALING](docs/verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW).
+Without Nx, run `scripts/build-souffle.sh` once in a fresh worktree first: `cargo test` needs the Soufflé it builds. Run `cargo run --quiet --bin mara -- --no-daemon code add rust` once on each machine first: `project validate` needs this repository's pinned grammar in the per-user cache ([DES-GRAMMAR-ASSETS](docs/code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)). Run them from the repository root; each must exit 0. `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins. The `wasm32` build is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9). The release test times a release build for [VER-SCALING](docs/verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW).
 
-Nx runs the crates' cargo targets ([ADR-NX-RUST-TASKS](docs/decisions.mara.md#01M8094G2DV9JZ35C8VRMFPWYV)). Run `pnpm install --frozen-lockfile` once in a fresh worktree. On this machine run Nx as `NX_DAEMON=false NX_USE_LOCAL=true berth -- pnpm nx <command>`: no daemon, the worktree's own Nx.
+Run them as `pnpm run checks`, which runs each as an Nx target and builds Soufflé when it is missing; `pnpm run checks:fast` leaves out the performance test and the `wasm32` build ([ADR-NX-RUST-TASKS](docs/decisions.mara.md#01M8094G2DV9JZ35C8VRMFPWYV)). Run `pnpm install --frozen-lockfile` once in a fresh worktree. On this machine run Nx with `NX_DAEMON=false NX_USE_LOCAL=true` (no daemon, the worktree's own Nx) under `berth --`, and `pnpm run checks` under `berth --exclusive --`, because the performance test needs the machine to itself.
+
+The targets run these commands, which remain the fallback:
 
 ```sh
 cargo fmt --all --check

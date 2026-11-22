@@ -277,7 +277,7 @@
 | ID | ADR-NX-RUST-TASKS |
 | Status | Accepted |
 
-- Chosen by the maintainer on 2026-11-21: Nx with `@convesoft/nx-rust` runs the repository's tasks. The plugin makes each crate a project with the targets it infers, such as `fmt-check`, `lint`, `check`, `build` and `test`, and adds a project for the workspace. Every target runs cargo: Cargo stays the build tool, and the cargo commands of AGENTS.md keep working.
+- Chosen by the maintainer on 2026-11-21: Nx with `@convesoft/nx-rust` runs the repository's tasks. The plugin makes each crate a project with the targets it infers, such as `fmt-check`, `lint`, `check`, `build` and `test`, and adds a project for the workspace. The inferred targets run cargo: Cargo stays the build tool, and the cargo commands of AGENTS.md keep working. The hand-written targets and their commands are in the table below.
 - Chosen by the maintainer on 2026-11-22: the root files are those of Nx's TypeScript preset (`create-nx-workspace@24.0.6 --preset=ts`), generated outside the checkout, with oxlint and oxfmt in place of its Prettier. Nx and its plugins are pinned at 24.0.6, the version nx-rust is tested with.
 - Chosen by the maintainer on 2026-11-22: the plugin comes from the npm registry at an exact version, named in `nx.json` by its package name. The pinned version is `1.0.0-rc.1`, a release candidate (dist-tag `next`). It is younger than pnpm's minimum release age, so `minimumReleaseAgeExclude` in `pnpm-workspace.yaml` exempts exactly that version; remove the entry once the release is older than pnpm's limit, or when the pin moves to `1.0.0`. Every Rust cache key holds the plugin's version.
 - Rejected by the maintainer: loading the plugin from the TypeScript source of a local checkout. It runs no `test` and restores no `build`, because two of its helper scripts exist only in a build.
@@ -286,10 +286,35 @@
 - Rejected by the maintainer: a vendored tarball.
 - Rejected by the maintainer: a GitHub pre-release.
 - Rejected: cargo commands and scripts alone. The alpha.6 slice builds JS packages and napi and WASM artifacts beside the crates (mara-xzfeyj), which cargo neither orders nor caches.
-- Nx's cache and workspace data stay in the checkout (`cacheDirectory` in `nx.json`), so that worktrees share no result. Rejected: Nx 24's default, one per-user folder for every checkout of the repository.
-- Cache keys: files outside a crate that `include_str!` reads are its `fileInputs`, which reach every compiling target and the crates that depend on it. What only `mara`'s tests read at run time is an input of its `test` target: `docs/`, `.mara/`, `CI`, `MARA_NO_DAEMON`, the `MARA_TEST_*` hooks, `TMPDIR`, the mode and SHA-256 of the pinned Soufflé in the artifact directory that `CARGO_TARGET_DIR` names, and the tree of the tag `v0.3.0`. No target validates this repository's own project, so the per-user grammar is no input. Rejected: `envInputs` and `runtimeInputs`, which would also run `build`, `check` and `lint` again.
-- The keys do not follow tool configuration outside the repository: Cargo configuration in the Cargo home, a per-user Rustfmt configuration, and the file that `CLIPPY_CONF_DIR` selects. After changing one, run with `--skip-nx-cache`.
-- Warnings: `.env.lint`, which Nx loads for `lint` tasks only, sets `CARGO_ENCODED_RUSTFLAGS=-Dwarnings`, which cargo prefers to `RUSTFLAGS`. A caller's `RUSTFLAGS` therefore does not reach `lint`, and a caller's `CARGO_ENCODED_RUSTFLAGS` replaces the denial. Rejected: `build.warnings`, which cargo 1.100 ignores under the `--message-format=json` that nx-rust passes. Rejected: `RUSTFLAGS` in `.env.lint`, which Nx does not set over a caller's value. Rejected: `.cargo/config.toml` or `[workspace.lints]`, which deny warnings for every cargo command.
+- Nx's cache and workspace data stay in the checkout (`cacheDirectory` in `nx.json`), so that worktrees share no result.
+- Rejected: Nx 24's default, one per-user folder for every checkout of the repository.
+- Cache keys: files outside a crate that `include_str!` reads are its `fileInputs`, which reach every compiling target and the crates that depend on it. What `mara`'s tests read at run time, and no compiling target, is an input of its `test` target: `docs/`, `.mara/`, `CI`, `MARA_NO_DAEMON`, the `MARA_TEST_*` hooks, `TMPDIR`, the mode and SHA-256 of the pinned Soufflé in the artifact directory that `CARGO_TARGET_DIR` names, and the tree of the tag `v0.3.0`. `mara:validate` reads `docs/`, `.mara/` and that Soufflé too, and keys them itself (table below).
+- Rejected: declaring them for the whole crate (`envInputs`, `runtimeInputs`), which would also run `build`, `check` and `lint` again.
+- The keys, those of `mara:validate` included, do not follow tool configuration outside the repository: Cargo configuration in the Cargo home, a per-user Rustfmt configuration, and the file that `CLIPPY_CONF_DIR` selects. After changing one, run with `--skip-nx-cache`.
+- The local checks of AGENTS.md are Nx targets, and two `package.json` scripts combine them: `checks` runs every one, and `checks:fast` all but `mara:test-performance` and `mara-engine:build:wasm32`. `checks` runs the `wasm32` build as a second `nx` command, because `nx run-many` applies a configuration to every project it selects.
+- The scripts pass `--output-style=static`, so that every task prints its log, the test counts included, also when the output is no terminal.
+- Rejected: Nx's default output style, which prints no task logs when the output is no terminal.
+- What the plugin does not infer is an extra target in Nx metadata of the manifests, each running the command of its local check:
+
+| Target | Runs | Cached | Inputs and dependencies |
+| --- | --- | --- | --- |
+| `cargo-workspace:souffle` | `scripts/build-souffle.sh` | No | Output `target/souffle-2.5` |
+| `mara:validate` | `cargo run --package mara --locked --quiet -- --no-daemon project validate` | Yes | Depends on `mara:build` and `souffle`, whose outputs are in its key; `docs/`, `.mara/`, every file under `crates/` (Rust files, `.gitignore` files and any nested project's `.mara/config.toml`), the root `.gitignore`; the root `.cargo/config.toml` and `.cargo/config`, `rust-toolchain.toml` and every `CARGO_TARGET_*` variable, such as the host's runner, which `cargo run` reads; the mode and SHA-256 of Soufflé; the files of the per-user grammar cache, links followed, in the XDG folder and in macOS's `~/Library/Caches`; `TMPDIR` and the `MARA_TEST_*` hooks that the debug build reads |
+| `mara:test-performance` | `cargo test --package mara --test performance --release --locked` | No | Depends on `souffle`; `parallelism` is false, so no other task of the run runs beside it |
+| `mara-engine:build:wasm32` | The inferred `build` with `targetTriple = "wasm32-unknown-unknown"` | Yes | The plugin's inputs; the configuration is in the key |
+| `cargo-workspace:zban-check` | `zban check` | Yes | `.zban/`, archive included; the SHA-256 of the `zban` on `PATH` |
+
+- `mara:test` also depends on `souffle`. Nx keys a task with a `dependentTasksOutputFiles` input only after its dependencies have run: the plugin gives `mara:test` one, and `mara:validate` declares one, so both key the Soufflé that `souffle` built in the same run.
+- `souffle` is not cached: what it builds depends on the host's C++ toolchain and a download, and with the binary present it only checks it, in about a second.
+- Rejected: caching `souffle` with the script and the tool versions as inputs. A fresh worktree's cache is empty, so a hit could only follow a deleted `target/`.
+- `mara:test-performance` is not cached, because a restored timing measures nothing. Nx keeps the other tasks of its run away from it; other processes on the machine are the caller's matter, and AGENTS.md says how on the maintainer's machine.
+- Rejected: an extra target with its own command for the `wasm32` build. It would have to repeat the plugin's toolchain and environment inputs.
+- Rejected: a root `project.json` for `souffle` and `zban-check`. Nx would merge it into the workspace project, and its name would rename that project.
+- Warnings: `.env.lint`, which Nx loads for `lint` tasks only, sets `CARGO_ENCODED_RUSTFLAGS=-Dwarnings`, which cargo prefers to `RUSTFLAGS`. A caller's `RUSTFLAGS` therefore does not reach `lint`, and a caller's `CARGO_ENCODED_RUSTFLAGS` replaces the denial.
+- Rejected: `build.warnings`, which cargo 1.100 ignores under the `--message-format=json` that nx-rust passes.
+- Rejected: `RUSTFLAGS` in `.env.lint`, which Nx does not set over a caller's value.
+- Rejected: `-Dwarnings` in `.cargo/config.toml`, which denies warnings for every cargo command.
+- Rejected: `[workspace.lints]`, which denies warnings for every cargo command.
 - The plugin runs in locked mode, as the local checks that read `Cargo.lock` pass `--locked`.
 - oxfmt leaves out `docs/`, `.mara/` and `.zban/`, whose layouts Mara and zban write; `crates/`, which rustfmt formats and whose test data is compared byte for byte; and the agent files in `.agents/` and `.claude/`.
 - The Nx skills live once, in `.agents/skills/`, which Codex and Antigravity read; `.claude/skills` links to it, because Claude Code reads project skills only from there.
