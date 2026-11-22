@@ -36,3 +36,39 @@ tempfile = "3.27"
 libc = "0.2.191"
 # An interrupted evaluation removes its private directory before Mara ends (DES-RULE-EXECUTION).
 signal-hook = { version = "0.3.18", default-features = false }
+
+# Nx keys (nx-rust): files outside the crate that its integration tests read by `include_str!`,
+# which every compiling target builds.
+[package.metadata.nx]
+fileInputs = [
+  "../../docs/code/index.mara.md",
+  "../../docs/project.mara.md",
+  "../../docs/template/vocabulary.mara.md",
+]
+
+# What the tests read at run time: `docs/` and `.mara/` of this repository, the variables that the
+# client and its test hooks read, `TMPDIR`, under which the daemon tests derive socket paths of
+# limited length, the mode and bytes of the pinned Soufflé that `scripts/build-souffle.sh` builds
+# beside the artifact directory, and the tag `v0.3.0` that the conversion tests archive.
+[package.metadata.nx.targets.test]
+inputs = [
+  "...",
+  "{workspaceRoot}/docs/**/*",
+  "{workspaceRoot}/.mara/**/*",
+  { env = "CI" },
+  { env = "MARA_NO_DAEMON" },
+  { env = "TMPDIR" },
+  { env = "MARA_TEST_PAUSE" },
+  { env = "MARA_TEST_PAUSE_EVALUATION" },
+  { env = "MARA_TEST_PAUSE_WATCH" },
+  { env = "MARA_TEST_DERIVED" },
+  { env = "MARA_TEST_IDLE_SECONDS" },
+  { env = "MARA_TEST_GRAMMAR_LOAD_MS" },
+  { env = "MARA_TEST_GRAMMAR_BUDGET_MS" },
+  { env = "MARA_TEST_GRAMMAR_STALL" },
+  { env = "MARA_TEST_GRAMMAR_LOAD_STALL" },
+  { env = "MARA_TEST_GRAMMAR_EVENTS" },
+  { env = "MARA_TEST_GRAMMAR_CATALOG" },
+  { runtime = "s=${CARGO_TARGET_DIR:-target}/souffle-2.5/souffle; ls -Ln \"$s\" 2>&1 | cut -c1-10; sha256sum \"$s\" 2>&1; true" },
+  { runtime = "git rev-parse 'v0.3.0^{tree}' 2>&1 || true" },
+]

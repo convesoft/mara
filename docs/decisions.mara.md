@@ -265,3 +265,32 @@
 - Chosen by the maintainer on 2026-11-15: `project convert` has no scaling case, and its counter case runs on a small fixed 0.3.0 input. Each user runs the conversion once.
 - Rejected: a 0.3.0 mode of the corpus generator. It is test tooling for one operation.
 - Rejected: copies of the `v0.3.0` corpus at 1×, 4× and 16× with their MIDs and IDs made unique. It is test tooling for one operation too.
+
+---
+
+<a id="01M8094G2DV9JZ35C8VRMFPWYV"></a>
+
+### Run the repository's tasks with Nx and nx-rust
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-NX-RUST-TASKS |
+| Status | Accepted |
+
+- Chosen by the maintainer on 2026-11-21: Nx with `@convesoft/nx-rust` runs the repository's tasks. The plugin makes each crate a project with the targets it infers, such as `fmt-check`, `lint`, `check`, `build` and `test`, and adds a project for the workspace. Every target runs cargo: Cargo stays the build tool, and the cargo commands of AGENTS.md keep working.
+- Chosen by the maintainer on 2026-11-22: the root files are those of Nx's TypeScript preset (`create-nx-workspace@24.0.6 --preset=ts`), generated outside the checkout, with oxlint and oxfmt in place of its Prettier. Nx and its plugins are pinned at 24.0.6, the version nx-rust is tested with.
+- Chosen by the maintainer on 2026-11-22: the plugin comes from the npm registry at an exact version, named in `nx.json` by its package name. The pinned version is `1.0.0-rc.1`, a release candidate (dist-tag `next`). It is younger than pnpm's minimum release age, so `minimumReleaseAgeExclude` in `pnpm-workspace.yaml` exempts exactly that version; remove the entry once the release is older than pnpm's limit, or when the pin moves to `1.0.0`. Every Rust cache key holds the plugin's version.
+- Rejected by the maintainer: loading the plugin from the TypeScript source of a local checkout. It runs no `test` and restores no `build`, because two of its helper scripts exist only in a build.
+- Rejected by the maintainer: linking to a build of the plugin in a local checkout.
+- Rejected by the maintainer: changing the plugin so that it runs from its source.
+- Rejected by the maintainer: a vendored tarball.
+- Rejected by the maintainer: a GitHub pre-release.
+- Rejected: cargo commands and scripts alone. The alpha.6 slice builds JS packages and napi and WASM artifacts beside the crates (mara-xzfeyj), which cargo neither orders nor caches.
+- Nx's cache and workspace data stay in the checkout (`cacheDirectory` in `nx.json`), so that worktrees share no result. Rejected: Nx 24's default, one per-user folder for every checkout of the repository.
+- Cache keys: files outside a crate that `include_str!` reads are its `fileInputs`, which reach every compiling target and the crates that depend on it. What only `mara`'s tests read at run time is an input of its `test` target: `docs/`, `.mara/`, `CI`, `MARA_NO_DAEMON`, the `MARA_TEST_*` hooks, `TMPDIR`, the mode and SHA-256 of the pinned Soufflé in the artifact directory that `CARGO_TARGET_DIR` names, and the tree of the tag `v0.3.0`. No target validates this repository's own project, so the per-user grammar is no input. Rejected: `envInputs` and `runtimeInputs`, which would also run `build`, `check` and `lint` again.
+- The keys do not follow tool configuration outside the repository: Cargo configuration in the Cargo home, a per-user Rustfmt configuration, and the file that `CLIPPY_CONF_DIR` selects. After changing one, run with `--skip-nx-cache`.
+- Warnings: `.env.lint`, which Nx loads for `lint` tasks only, sets `CARGO_ENCODED_RUSTFLAGS=-Dwarnings`, which cargo prefers to `RUSTFLAGS`. A caller's `RUSTFLAGS` therefore does not reach `lint`, and a caller's `CARGO_ENCODED_RUSTFLAGS` replaces the denial. Rejected: `build.warnings`, which cargo 1.100 ignores under the `--message-format=json` that nx-rust passes. Rejected: `RUSTFLAGS` in `.env.lint`, which Nx does not set over a caller's value. Rejected: `.cargo/config.toml` or `[workspace.lints]`, which deny warnings for every cargo command.
+- The plugin runs in locked mode, as the local checks that read `Cargo.lock` pass `--locked`.
+- oxfmt leaves out `docs/`, `.mara/` and `.zban/`, whose layouts Mara and zban write; `crates/`, which rustfmt formats and whose test data is compared byte for byte; and the agent files in `.agents/` and `.claude/`.
+- The Nx skills live once, in `.agents/skills/`, which Codex and Antigravity read; `.claude/skills` links to it, because Claude Code reads project skills only from there.
+

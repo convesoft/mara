@@ -14,7 +14,7 @@ For every document in this repository, this file included:
 - State each fact once; link to it everywhere else.
 - No introductions, summaries, "this document describes…", or restated headings.
 - Requirement: one testable obligation in 1–3 sentences. Design: bullets and tables. Rationale only in Decision items: the choice and rejected alternatives, one line each.
-- Size limits: README ≤ 60 lines, AGENTS.md ≤ 120 lines.
+- Size limits: README ≤ 60 lines, AGENTS.md ≤ 120 lines without the managed Nx block.
 
 ## Mara documents
 
@@ -66,6 +66,8 @@ One orchestrator starts a worker for each ready issue and integrates its branch.
 
 Run `scripts/build-souffle.sh` once in a fresh worktree first: `cargo test` needs the Soufflé it builds. Run `cargo run --quiet --bin mara -- --no-daemon code add rust` once on each machine first: `project validate` needs this repository's pinned grammar in the per-user cache ([DES-GRAMMAR-ASSETS](docs/code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)). Run them from the repository root; each must exit 0. `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins. The `wasm32` build is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9). The release test times a release build for [VER-SCALING](docs/verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW).
 
+Nx runs the crates' cargo targets ([ADR-NX-RUST-TASKS](docs/decisions.mara.md#01M8094G2DV9JZ35C8VRMFPWYV)). Run `pnpm install --frozen-lockfile` once in a fresh worktree. On this machine run Nx as `NX_DAEMON=false NX_USE_LOCAL=true berth -- pnpm nx <command>`: no daemon, the worktree's own Nx.
+
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked --config 'build.warnings="deny"'
@@ -96,3 +98,31 @@ zban check
 - A worker never merges into the integration branch. The orchestrator integrates one branch at a time: squash merge into one commit, then delete the branch. Follow-up work starts from the new tip.
 - No CI exists until the last slice (`mara-4dr2p2`), and no workflow file is added before it. Run the [local checks](#local-checks) before handing over a branch and again before integrating it.
 - The integration branch reaches `origin/main` only by fast-forward: `git push origin chore/clear-worktree-for-rewrite:main`, with branch protection lifted for that push. Never squash it and never use GitHub's "Rebase and merge": both change commit SHAs, and `d7f0e73` and the alpha tags must stay on `main`.
+
+## Nx
+
+The block below names an Nx MCP server and `nx_docs`; neither is configured here.
+
+<!-- nx configuration start-->
+<!-- Leave the start & end comments to automatically receive updates. -->
+
+# General Guidelines for working with Nx
+
+- For navigating/exploring the workspace, invoke the `nx-workspace` skill first - it has patterns for querying projects, targets, and dependencies
+- When running tasks (for example build, lint, test, e2e, etc.), always prefer running the task through `nx` (i.e. `nx run`, `nx run-many`, `nx affected`) instead of using the underlying tooling directly
+- Prefix nx commands with the workspace's package manager (e.g., `pnpm nx build`, `npm exec nx test`) - avoids using globally installed CLI
+- You have access to the Nx MCP server and its tools, use them to help the user
+- For Nx plugin best practices, check `node_modules/@nx/<plugin>/PLUGIN.md`. Not all plugins have this file - proceed without it if unavailable.
+- NEVER guess CLI flags - always check nx_docs or `--help` first when unsure
+
+## Scaffolding & Generators
+
+- For scaffolding tasks (creating apps, libs, project structure, setup), ALWAYS invoke the `nx-generate` skill FIRST before exploring or calling MCP tools
+
+## When to use nx_docs
+
+- USE for: advanced config options, unfamiliar flags, migration guides, plugin configuration, edge cases
+- DON'T USE for: basic generator syntax (`nx g @nx/react:app`), standard commands, things you already know
+- The `nx-generate` skill handles generator discovery internally - don't call nx_docs just to look up generator syntax
+
+<!-- nx configuration end-->

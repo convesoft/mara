@@ -12,7 +12,7 @@
 | [Agent guidance](agents.mara.md) | `mara prime`, MCP server instructions |
 | [Performance](performance.mara.md) | Work and time obligations, test harness, profiling |
 | [Distribution](distribution.mara.md) | Packages, bundled Soufflé |
-| [Decisions](decisions.mara.md) | Decisions on format, project files, engine inputs, packaging, agent guidance and performance tests |
+| [Decisions](decisions.mara.md) | Decisions on format, project files, engine inputs, packaging, agent guidance, performance tests and repository tooling |
 | [Verification](verification.mara.md) | Checks of format, identity, project, validation, init, conversion, agent guide, hosts compared, performance |
 
 | Subject | Holds |

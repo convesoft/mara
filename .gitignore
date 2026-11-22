@@ -1,1 +1,17 @@
 /target/
+
+# Node and Nx: dependencies, build output and Nx's own folders, anchored so that nothing under
+# docs/ or .mara/ is ignored
+/node_modules
+/dist
+/tmp
+/out-tsc
+/packages/**/node_modules
+/packages/**/dist
+/packages/**/tmp
+/packages/**/out-tsc
+/.nx/cache
+/.nx/workspace-data
+/.nx/polygraph
+/.nx/self-healing
+/.nx/migrate-runs

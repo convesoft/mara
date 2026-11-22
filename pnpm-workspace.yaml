@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+allowBuilds:
+  nx: true
+  "@swc/core": false
+minimumReleaseAgeExclude:
+  - "@convesoft/nx-rust@1.0.0-rc.1"

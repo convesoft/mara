@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "cacheDirectory": ".nx/cache",
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "production": ["default"],
+    "sharedGlobals": []
+  },
+  "plugins": [
+    {
+      "plugin": "@nx/js/typescript",
+      "options": {
+        "typecheck": {
+          "targetName": "typecheck"
+        },
+        "build": {
+          "targetName": "build",
+          "configName": "tsconfig.lib.json",
+          "buildDepsName": "build-deps",
+          "watchDepsName": "watch-deps"
+        }
+      }
+    },
+    {
+      "plugin": "@nx/oxlint",
+      "options": {
+        "targetName": "lint"
+      }
+    },
+    {
+      "plugin": "@convesoft/nx-rust",
+      "options": {
+        "locked": true
+      }
+    }
+  ],
+  "targetDefaults": {
+    "@convesoft/nx-rust:cargo": {},
+    "@convesoft/nx-rust:cargo-outputs": {},
+    "@convesoft/nx-rust:run": {},
+    "@convesoft/nx-rust:lockfile": {},
+    "@convesoft/nx-rust:release-publish": {}
+  },
+  "analytics": false
+}

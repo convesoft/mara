@@ -1,0 +1,22 @@
+{
+  "name": "@convesoft/mara-source",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "scripts": {},
+  "dependencies": {},
+  "devDependencies": {
+    "@convesoft/nx-rust": "1.0.0-rc.1",
+    "@nx/js": "24.0.6",
+    "@nx/oxlint": "24.0.6",
+    "@swc-node/register": "1.11.1",
+    "@swc/core": "1.15.8",
+    "@swc/helpers": "0.5.18",
+    "@types/node": "^24.0.0",
+    "nx": "24.0.6",
+    "oxfmt": "^0.79.0",
+    "oxlint": "^1.75.0",
+    "tslib": "^2.3.0",
+    "typescript": "~6.0.3"
+  },
+  "packageManager": "pnpm@12.21.0"
+}
