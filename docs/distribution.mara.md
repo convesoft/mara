@@ -14,7 +14,7 @@
 | Status | Accepted |
 | Satisfies | [NEED-TOOLCHAIN-FREE-INSTALL](product.mara.md#01M7BF6H8C2X09EX518DVSWDCE) |
 
-`npx @convesoft/mara@<version>` runs the CLI, rule evaluation included, with no Rust toolchain, no C++ compiler, no separately installed Soufflé and no npm lifecycle script.
+On each native platform that [DES-PACKAGES](#01M7BF6GWZ72PGJNA3VQNZMDC8) lists for a published version, `npx @convesoft/mara@<version>` runs the CLI, the MCP server, the daemon and rule evaluation with no Rust toolchain, no C++ compiler, no separately installed Soufflé and no npm lifecycle script.
 
 ---
 
@@ -32,12 +32,42 @@
 | Status | Accepted |
 | Satisfies | [REQ-RUN-WITHOUT-TOOLCHAIN](#01M7BF6GWPMWDV4VT1BA7NEZYN) |
 
-- An npm dispatcher package selects a prebuilt native package for the platform.
-- A native package holds the CLI binary, the Node addon and the `souffle` binary. The browser package holds the engine and Soufflé WASM modules.
-- Every package carries the same version.
-- Platforms: Linux x64 and arm64 (glibc) with Landlock ([ADR-SANDBOX-REQUIRED](rules/decisions.mara.md#01M7K4XZRS4DDAREPZSWC0WZF7)), macOS arm64.
-- Node 24 or later.
-- The first npm release is 0.4.0. Alpha slices are Git tags only.
+Versions:
+
+- The slices `0.4.0-alpha.1` to `0.4.0-alpha.5` are Git tags only.
+- The prereleases of 0.4.0 are published to npm under the dist-tag `next`: `0.4.0-rc.1`, the CLI, MCP server, daemon and rule evaluation on Linux (mara-c8scn7), then `0.4.0-rc.2`, the slice that these documents call 0.4.0-alpha.6, which adds the Node library and the browser (mara-xzfeyj).
+- `latest` stays 0.3.0 on every package until 0.4.0 is published under it (mara-chjvk9).
+- Every package of a version carries the workspace version, `[workspace.package].version` of `Cargo.toml`, which the release workflow publishes ([DES-RELEASE-WORKFLOW](#01M82C8WTK3M2A69XWRGNNQ0SF)).
+
+Packages, each on npm since 0.3.0 but the browser package:
+
+| Package | Platform | From |
+| --- | --- | --- |
+| `@convesoft/mara`, the dispatcher | Any | 0.4.0-rc.1 |
+| `@convesoft/mara-linux-x64-gnu` | Linux x64, glibc | 0.4.0-rc.1 |
+| `@convesoft/mara-linux-arm64-gnu` | Linux arm64, glibc | 0.4.0-rc.1 |
+| `@convesoft/mara-darwin-arm64` | macOS arm64 | Before 0.4.0 (mara-ag4ees) |
+| The browser package, with the engine and Soufflé WASM modules | Any | 0.4.0-rc.2 |
+
+- The dispatcher holds `package.json`, `bin/mara.cjs`, `README.md`, `LICENSE-MIT` and `LICENSE-APACHE`. Its manifest declares `bin` `mara`, `engines.node` `>=24`, every native package that the version publishes as an optional dependency at exactly its own version, and no `scripts` and no `dependencies`.
+- A native package holds `package.json`, `bin/mara` and `bin/souffle`, both mode 0755, `LICENSE-MIT`, `LICENSE-APACHE`, Soufflé's licence as `LICENSE-SOUFFLE`, and `THIRD-PARTY-LICENSES` with the licence of each crate compiled into that `mara`. Its manifest declares `os`, `cpu`, `libc` `["glibc"]` on Linux and the licence `(MIT OR Apache-2.0) AND UPL-1.0`, and no `bin` and no `scripts`. From 0.4.0-rc.2 it also holds the Node addon.
+- Each packed file list is checked by name before anything is published: a package holds exactly the files above.
+- Platforms: Linux x64 and arm64 with glibc 2.35 or later and Landlock ([ADR-SANDBOX-REQUIRED](rules/decisions.mara.md#01M7K4XZRS4DDAREPZSWC0WZF7)); macOS arm64 from mara-ag4ees. Node 24 or later.
+- The published Linux binaries are built on the GitHub images `ubuntu-22.04` and `ubuntu-22.04-arm`, whose glibc is 2.35 ([ADR-LINUX-BUILD-IMAGE](decisions.mara.md#01M82C8WTKAM5575JF0MN21ZA4)). No `GLIBC_` symbol version that `bin/mara` or `bin/souffle` needs exceeds 2.35.
+
+The dispatcher:
+
+- It selects the native package for `process.platform` and `process.arch`, and runs its `bin/mara` with the caller's arguments and standard streams. It forwards `SIGINT`, `SIGTERM` and `SIGHUP` to it, and exits with its exit status, or ends itself by the signal that ended it.
+- It starts no `mara` and exits 1 with a message on stderr in each of these cases:
+
+| Case | The message names |
+| --- | --- |
+| A platform or architecture without a native package | The platform and architecture, and the supported platforms |
+| Linux on which Node reports no glibc version (`process.report.getReport().header.glibcVersionRuntime`), such as musl | That glibc 2.35 or later is required, and the supported platforms |
+| Linux with a glibc older than 2.35 | The required and the found version |
+| The native package is not installed | The package, and to reinstall `@convesoft/mara` with optional dependencies |
+
+- A native `mara` started directly on a glibc older than 2.35 fails with the dynamic loader's message, which names the missing `GLIBC_` version.
 
 ---
 
@@ -51,13 +81,93 @@
 | Status | Accepted |
 | Satisfies | [REQ-RUN-WITHOUT-TOOLCHAIN](#01M7BF6GWPMWDV4VT1BA7NEZYN) |
 
-- CI builds one pinned Soufflé release for each platform: natively with a static C++ runtime and without OpenMP, and with Emscripten for the browser.
+- One pinned Soufflé release is built for each platform: natively with a static C++ runtime and without OpenMP, and with Emscripten for the browser (mara-4dr2p2, by 0.4.0-rc.2).
+- CI builds it natively on each of its images for the tests ([DES-CI-WORKFLOW](#01M82C8WTKYXH8S92ZJQ4FX73R)). The release workflow builds it again, from source, on each of its build images, and ships that binary ([DES-RELEASE-WORKFLOW](#01M82C8WTK3M2A69XWRGNNQ0SF)).
 - Soufflé 2.5 needs a one-line patch to build with Emscripten's Clang: in `src/interpreter/Index.h:423`, `data = src.data;` becomes `data = src.data.load();`. Upstream `master` no longer has that line.
 - Soufflé's licence is UPL-1.0.
 - [scripts/build-souffle.sh](../scripts/build-souffle.sh) is the native build for the local platform. It pins the release by tag and the SHA-256 of the downloaded archive, checked before anything is built, and fails when the binary needs a shared C++ runtime or OpenMP or fails a smoke run of `souffle --no-preprocessor -l ""` on JSON facts with no compiler on `PATH`.
 - The binary is `target/souffle-<version>/souffle` under the workspace root, with Soufflé's `LICENSE` beside it; the version is 2.5. A rerun only checks an existing binary. The source and build tree live in `target/souffle-<version>/work/` and are removed after a successful build.
 - A test or packaging step reads the binary from that path. A test that needs it and does not find it fails with a message that names `scripts/build-souffle.sh`.
-- `mara` runs the `souffle` in its own directory, else `../souffle-2.5/souffle` from there, which is that path for a binary Cargo built in the same `target/`; never one on `PATH`. Without either, each evaluation is a fault that names both paths and `scripts/build-souffle.sh`.
+- `mara` runs the `souffle` in its own directory, which is where a native package puts it, else `../souffle-2.5/souffle` from there, which is that path for a binary Cargo built in the same `target/`; never one on `PATH`. Without either, each evaluation is a fault that names both paths and `scripts/build-souffle.sh`.
+
+---
+
+<a id="01M82C8WTKYXH8S92ZJQ4FX73R"></a>
+
+### Continuous integration
+
+| Type | Design |
+| --- | --- |
+| ID | DES-CI-WORKFLOW |
+| Status | Accepted |
+| Contributes to | [GOAL-FAST-AT-SCALE](product.mara.md#01M7BF6H5JHS6GZ8CMB98MBTMM) |
+
+- The workflow `.github/workflows/ci.yml` runs on each push to `chore/clear-worktree-for-rewrite` and to `main`, and on each pull request. A newer run of the same pull request cancels the older one; a push run is never cancelled.
+- Its permissions are `contents: read`, for every job. It uses no secret and writes nothing: no publication, tag, release, comment or cache entry other than its own CI cache.
+- One job per image, `Checks (ubuntu-24.04)` and `Checks (ubuntu-24.04-arm)`, neither stopped by the other's failure. Each job, in order:
+
+| Step | What it does |
+| --- | --- |
+| Checkout | The pushed or merged commit, with full history and tags: the conversion tests and the key of `mara:test` read the tag `v0.3.0` ([ADR-NX-RUST-TASKS](decisions.mara.md#01M8094G2DV9JZ35C8VRMFPWYV)) |
+| Toolchains | `rustup toolchain install`, which installs what `rust-toolchain.toml` pins; the pnpm of `packageManager`; Node 24, the oldest Node that [DES-PACKAGES](#01M7BF6GWZ72PGJNA3VQNZMDC8) supports; the build tools that `scripts/build-souffle.sh` names and the image lacks |
+| Dependencies | `pnpm install --frozen-lockfile`. `zban` is a devDependency at an exact version, so that `cargo-workspace:zban-check` runs the same `zban` in CI and locally |
+| Caches restored | Soufflé's directory `target/souffle-2.5`, keyed by the image, the architecture and the SHA-256 of `scripts/build-souffle.sh`, with no fallback; Cargo's build directory without `target/souffle-*` and Cargo's registry, keyed by the image, the architecture, `rust-toolchain.toml` and `Cargo.lock`, with the newest entry of the same image and architecture as fallback. Soufflé comes only from its own entry, because the script keeps an existing binary that passes its checks |
+| Grammar | `cargo run --locked --quiet --bin mara -- --no-daemon code add rust`, which fetches the grammar that `.mara/config.toml` pins into the per-user cache and checks it against the pin ([DES-GRAMMAR-ASSETS](code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)); it is fetched on each run, never cached |
+| Checks | `pnpm run checks` with `NX_DAEMON=false`, the same command as the local checks, so that a failure in CI reproduces with it; Nx runs `scripts/build-souffle.sh`, which only checks a restored binary |
+| Clean tree | `git status --porcelain` prints nothing: no check changed a tracked file or left an untracked one |
+
+- Nx's cache directory is never saved or restored between runs: each run executes every target, and reuses a result only within the run.
+- Which tests a `test` target runs in CI, the full suite or those a change affects, is what [ADR-NX-RUST-TASKS](decisions.mara.md#01M8094G2DV9JZ35C8VRMFPWYV) gives for the event; where it gives no mode, the full suite.
+- `mara:test:performance` runs on GitHub's shared runners, as the last `nx` command of `pnpm run checks`, so that no other check of the job runs beside it. Its result counts like any check's, with no automatic retry: [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) defines it for shared machines.
+- Not part of CI: the nightly 64× run of the counter test (`--ignored`), the `hyperfine` budgets of [VER-TIME-BUDGETS](verification.mara.md#01M7BF6HH06WEJ67P04H22BM66) and the Emscripten build of Soufflé. A platform of [DES-PACKAGES](#01M7BF6GWZ72PGJNA3VQNZMDC8) without a native package has no job.
+- CI adds no Nx target and builds no package.
+
+---
+
+<a id="01M82C8WTK3M2A69XWRGNNQ0SF"></a>
+
+### Release workflow
+
+| Type | Design |
+| --- | --- |
+| ID | DES-RELEASE-WORKFLOW |
+| Status | Accepted |
+| Satisfies | [REQ-RUN-WITHOUT-TOOLCHAIN](#01M7BF6GWPMWDV4VT1BA7NEZYN) |
+
+- The workflow `.github/workflows/release.yml` starts:
+  - on `workflow_dispatch`, with the inputs `dist_tag`, a string, default `next`, and `dry_run`, a boolean, default true;
+  - on each push to `main` and to `chore/clear-worktree-for-rewrite`, without a path filter, so that every tip of either branch has passed a dry run;
+  - on each pull request that changes a release input: the workflow file, the packaging script, the dispatcher's project under `packages/`, `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, `Cargo.toml`, a crate's `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `nx.json` or `scripts/build-souffle.sh`.
+- Every run but a dispatch without the dry run is a dry run. A push or pull-request run uses the dist-tag `next`.
+- Runs of the same ref queue; a newer run of the same pull request cancels the older one.
+- The version is set by hand before a release: one commit changes `[workspace.package].version` in `Cargo.toml` and the workspace crates' entries in `Cargo.lock`. The workflow reads it with `cargo metadata` and changes no file of the repository.
+- Every job checks out the commit that Prepare records. Every published file is built in the run on that commit, and no package is packed before the checks passed on it on both platforms: no CI cache is restored, and the Nx cache directory starts empty.
+- Publish and Tag run in the GitHub environment `release`, whose required reviewer is the maintainer, which administrators cannot bypass, and whose deployment branch policy allows only `main`: no run publishes or tags without the maintainer's approval. The workflow neither creates nor changes the environment.
+- The workflow's permissions are `contents: read`; a job that needs more says so below. Its jobs, in order:
+
+| Job | Runs on | Permissions | What it does |
+| --- | --- | --- | --- |
+| Prepare | `ubuntu-24.04` | `contents: read` | Records the commit. Reads the version and refuses one that is not SemVer. Refuses a dist-tag that does not match `^[a-z][a-z0-9._-]*$`, and the dist-tag `latest` for a version with a prerelease part. On a dispatch: refuses a run without the dry run on another ref than `refs/heads/main`, and a version whose tag `v<version>` exists or that npm has for any of the packages |
+| Checks | `ubuntu-22.04` and `ubuntu-22.04-arm`, one job each, neither stopped by the other's failure | `contents: read` | The checkout, toolchains, dependencies and grammar steps of [DES-CI-WORKFLOW](#01M82C8WTKYXH8S92ZJQ4FX73R), with full history and tags; then `pnpm run checks`, the full suite. Keeps the `target/souffle-2.5` that the checks built as an artifact of the run |
+| Pack dispatcher | `ubuntu-24.04` | `contents: read` | After both Checks jobs: the dispatcher packed by `pack-dispatcher` |
+| Build | `ubuntu-22.04` and `ubuntu-22.04-arm` | `contents: read` | After Pack dispatcher: the steps of Checks up to the dependencies; `target/souffle-2.5` from that platform's Checks artifact, which `scripts/build-souffle.sh` only checks; the native package packed by `pack-native`; the check that no `GLIBC_` symbol version of its `mara` or `souffle` exceeds 2.35 ([DES-PACKAGES](#01M7BF6GWZ72PGJNA3VQNZMDC8)); the install verification on the packed dispatcher and native package ([VER-INSTALL-WITHOUT-TOOLCHAIN](verification.mara.md#01M82C8WTK2PAA1SBEWCAJ4ND8)) |
+| Dry run | `ubuntu-24.04` | `contents: read` | Every dry run: checks that the tarballs of every package are there, then `npm publish --dry-run --access public --tag <dist_tag>` of each, native packages first |
+| Publish | `ubuntu-24.04`, environment `release` | `contents: read`, `id-token: write` | A dispatch without the dry run: records each package's dist-tags; publishes each native package with `npm publish <tarball> --provenance --access public --tag <dist_tag>` through npm Trusted Publishing, with npm 11.5.1 or later and no npm token; waits until npm shows every native package, polling for at most 30 minutes; publishes the dispatcher the same way |
+| Registry check | `ubuntu-22.04` and `ubuntu-22.04-arm` | `contents: read` | After Publish: in an empty directory, `npx --yes --ignore-scripts @convesoft/mara@<version> --version` prints `mara <version>`, retried for at most 30 minutes until npm serves it; the install verification's cases but the tarballs' file lists, on `@convesoft/mara@<version>` installed from the registry with `--ignore-scripts`; for each package, `<dist_tag>` names the version and every other dist-tag names what it named before Publish |
+| Tag | `ubuntu-24.04`, environment `release` | `contents: write`, used through the job's `GITHUB_TOKEN` | After every registry check: the annotated tag `v<version>`, message `Mara <version>`, on the recorded commit, pushed; a GitHub release of that tag with GitHub's generated notes, marked as a prerelease and not as the latest release when the version has a prerelease part; every package's tarball and their `SHA256SUMS` attached |
+
+- A re-run of the failed jobs of the same run continues a partial publication with the same tarballs:
+  - Publish skips a package version already on npm whose `dist.shasum` equals the SHA-1 of its tarball, and fails on another; a registry error is retried, and only a version npm reports absent is published.
+  - Tag accepts an existing `v<version>` that names the recorded commit and fails on another; it reuses an existing release of the tag; it uploads each tarball and `SHA256SUMS` that the release lacks, and fails when an attached one's SHA-256 differs from the run's.
+- The release workflow adds three Nx targets of the dispatcher's project under `packages/`, none cached, because each writes or checks published files and reads built binaries or the machine's `PATH`:
+
+| Target | Runs | Depends on |
+| --- | --- | --- |
+| `pack-dispatcher` | The packaging script for the dispatcher alone | Nothing built |
+| `pack-native` | The packaging script for the native package of the host's platform, on the `mara` of `mara:build:release`, the `souffle` and `LICENSE` of `cargo-workspace:souffle` and the repository's licences; it writes `THIRD-PARTY-LICENSES` for that build | `mara:build:release`, a configuration `release` of the inferred `build` with `profile = "release"`; `cargo-workspace:souffle` |
+| `verify-install` | The install verification, on packed tarballs or on a version from the registry | Nothing built |
+
+- Publication, the waits, the registry check and the tag are steps of the workflow, not targets.
 
 ---
 

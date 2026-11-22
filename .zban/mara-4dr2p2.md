@@ -10,19 +10,19 @@ created_at: 2026-11-14T11:05:37Z
 
 Goal: the checks, builds and measurements that the docs assign to CI run in CI.
 
-Everything connected to CI is deferred to this issue on purpose (maintainer's decision, 2026-11-14): the maintainer is building dedicated tooling for CI and publishing, and it is not ready. That tooling also replaces `git-cliff` for the changelog.
+The nightly checks and the Emscripten build of Soufflé are deferred to this issue (maintainer's decision, 2026-11-14, narrowed by the rc.1 epic): the nightly 64× run of the counter test, the `hyperfine` budgets and the Emscripten build. CI on every push and pull request and the release workflow belong to the rc.1 epic (mara-1avrq4, mara-a3aq0n). The maintainer's tooling also replaces `git-cliff` for the changelog.
 
 Until this issue starts:
 
-- No workflow file is added, and no issue waits for a CI run.
-- Every check that an issue or a Verification item assigns to CI, to "every pull request" or to a nightly run is run locally: by the worker before it hands over its branch, and again before the branch is integrated.
-- Soufflé is built by a local script, for the local platform only.
+- The rc.1 epic adds CI and the release workflow (DES-CI-WORKFLOW, DES-RELEASE-WORKFLOW in docs/distribution.mara.md); no nightly workflow exists.
+- Every check that an issue or a Verification item assigns to a nightly run is run locally: by the worker before it hands over its branch, and again before the branch is integrated.
+- Soufflé is built natively only (`scripts/build-souffle.sh`), locally, in CI and in the release workflow.
 - Time budgets are not measured. REQ-TIME-BUDGETS and VER-TIME-BUDGETS stay Draft.
 
 Tasks:
 
 Moved to mara-1avrq4 (rc.1 epic): the workflows for format, lint, tests, the `wasm32` build of the engine crate and `mara project validate` on `docs/`, and the native Linux builds of Soufflé.
-- [ ] Counter and scaling tests on every pull request, 64× nightly (VER-WORK-COUNTERS, VER-SCALING, DES-PERFORMANCE-HARNESS)
+- [ ] The 64× run of the counter test (`--ignored`) nightly (VER-WORK-COUNTERS, DES-PERFORMANCE-HARNESS); the counter and scaling tests already run in CI (DES-CI-WORKFLOW)
 - [ ] The pinned Soufflé built in CI with Emscripten (DES-SOUFFLE-BUILD; moved from mara-vt2ktq and mara-xsm8w6)
 - [ ] Nightly `hyperfine` run on a reference machine, which the maintainer names, including a read during a long validation (VER-TIME-BUDGETS; moved from mara-p27z9t)
 - [ ] Budgets set from the first measurements; REQ-TIME-BUDGETS and VER-TIME-BUDGETS moved to Accepted

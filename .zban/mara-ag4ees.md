@@ -20,7 +20,7 @@ Everything connected to macOS is deferred to this issue on purpose (maintainer's
 
 Until this issue starts:
 
-- No workflow has a macOS job. CI itself starts with mara-4dr2p2, which this issue follows.
+- No workflow has a macOS job. CI and the release workflow start with the rc.1 epic (mara-1avrq4, mara-a3aq0n), on Linux only.
 - No other issue builds, tests or packages anything for macOS, or asks the maintainer to try something on a Mac.
 - macOS arm64 stays a supported platform of 0.4.0. This issue delivers it; the release waits for it.
 

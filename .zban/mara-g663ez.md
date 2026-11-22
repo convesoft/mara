@@ -16,3 +16,5 @@ Context: Seen once during `cargo test --workspace --locked` at `b7e4bc6` plus ma
 
 - [ ] Find whether a reset before any byte of the answer can only come from a dying daemon, and if so, whether the client should run the read in process (the daemon-loss items in docs/daemon/)
 - [ ] Make the test deterministic
+
+Seen again on 2026-11-22 in `pnpm run checks` at 60043d1 (mara-a57pzn, a docs-only change), with the same `daemon-lost` message; the previous run on the same code passed.

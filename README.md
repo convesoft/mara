@@ -14,7 +14,7 @@ The last release is 0.3.0 (`npx -y @convesoft/mara@0.3.0`, source at tag `v0.3.0
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | See what an item looks like         | [Item format](docs/format.mara.md)                                                                              |
 | Read the specification              | [docs/index.mara.md](docs/index.mara.md)                                                                        |
-| Find work                           | `zban list --ready`, or the Markdown issues in `.zban/`: one epic per release slice, `0.4.0-alpha.1` to `0.4.0` |
+| Find work                           | `zban list --ready`, or the Markdown issues in `.zban/`: one epic per release slice                             |
 | Contribute, as a person or an agent | [AGENTS.md](AGENTS.md)                                                                                          |
 
 ## Licence

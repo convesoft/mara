@@ -35,7 +35,7 @@ For every document in this repository, this file included:
 ## Work tracking
 
 - Work lives in zban issues under `.zban/`. `zban prime` prints the workflow; change issues only with `zban`.
-- One epic per release slice, `0.4.0-alpha.1` to `0.4.0`. Each issue has one outcome and names the Mara IDs it implements.
+- One epic per release slice; [DES-PACKAGES](docs/distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8) names the slices up to `0.4.0`. Each issue has one outcome and names the Mara IDs it implements.
 - A decision made while working goes into a Mara document, not only into an issue.
 
 ## Deciding during the rewrite
@@ -82,7 +82,7 @@ The local checks are `pnpm run checks`; while working, `pnpm run checks:fast` le
 - Conventional Commits without scopes: `<type>: <description>`, with `!` for a breaking change. Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`.
 - Commit a completed, verified change as one logical commit unless told otherwise. Stage only intended files, and include the zban issue files the change touches.
 - Never amend, rewrite history or push without authorization.
-- Semantic Versioning. Tag releasable slices with annotated `vX.Y.Z[-prerelease]` tags.
+- Semantic Versioning. The alpha slices carry annotated `v0.4.0-alpha.N` tags. From `0.4.0-rc.1` on, only the release workflow tags a version, when it publishes it ([DES-RELEASE-WORKFLOW](docs/distribution.mara.md#01M82C8WTK3M2A69XWRGNNQ0SF)); nobody tags by hand, and an agent starts that workflow only as a dry run.
 
 ### Until the rewrite is on `main`
 
@@ -90,7 +90,7 @@ The local checks are `pnpm run checks`; while working, `pnpm run checks:fast` le
 - One branch and worktree per zban issue, cut from the integration branch's tip. The orchestrator first sets the issue `in-progress` on the integration branch, so no two workers take the same issue.
 - Before its branch is integrated, a worker rebases it onto the integration branch's tip and reruns its checks. Rebasing its own unmerged branch is allowed.
 - A worker never merges into the integration branch. The orchestrator integrates one branch at a time: squash merge into one commit, then delete the branch. Follow-up work starts from the new tip.
-- No CI exists until the last slice (`mara-4dr2p2`), and no workflow file is added before it. Run the [local checks](#local-checks) before handing over a branch and again before integrating it.
+- CI checks each push to the integration branch ([DES-CI-WORKFLOW](docs/distribution.mara.md#01M82C8WTKYXH8S92ZJQ4FX73R)); it replaces neither run of the local checks. Run the [local checks](#local-checks) before handing over a branch and again before integrating it.
 - The integration branch reaches `origin/main` only by fast-forward: `git push origin chore/clear-worktree-for-rewrite:main`, with branch protection lifted for that push. Never squash it and never use GitHub's "Rebase and merge": both change commit SHAs, and `d7f0e73` and the alpha tags must stay on `main`.
 
 ## Nx

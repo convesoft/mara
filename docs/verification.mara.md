@@ -404,3 +404,31 @@ In the setup of [VER-BROWSER-WORKSPACE](hosts/verification.mara.md#01M7JQJKGBSCM
 | `project init` of each template, and `project convert` of the 0.3.0 input of [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA), in a workspace and through the daemon from Chromium | Fail with `unavailable-operation` naming the operation; the next export is empty, and the daemon's project is byte-identical |
 | The fixtures of [VER-GRAMMAR-MARKERS](code/verification.mara.md#01M7JKT47QR2NYFK59JRV8EV7G), with both grammars pinned, in a workspace: each operation that reads code | The result of CLI direct mode on the same files with both grammars removed from the cache, but for each `unavailable-grammar` message, which says the browser cannot load grammars; `project validate` is invalid |
 | The setup of [VER-PROGRAM-FAULTS](rules/verification.mara.md#01M7HZYKB4R632Q63YWS8CY1FJ) with a program that passes, in a workspace whose Soufflé module the test's server answers with status 404, and in a second run with a truncated module | A fault without a line at the configuration line of each declared program; `project validate` is invalid, `query execute` and `query view` fail, and the gate and both items are unavailable |
+
+---
+
+<a id="01M82C8WTK2PAA1SBEWCAJ4ND8"></a>
+
+### Install the packed packages on a machine without a toolchain
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-INSTALL-WITHOUT-TOOLCHAIN |
+| Status | Accepted |
+| Methods | Test |
+| Methods | Analysis |
+| Verifies | [REQ-RUN-WITHOUT-TOOLCHAIN](distribution.mara.md#01M7BF6GWPMWDV4VT1BA7NEZYN) |
+
+The install verification runs on each platform of the version ([DES-PACKAGES](distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8)): in the release workflow's Build job on that platform's build image, before anything is published, on the packed dispatcher and native package, and in its Registry check job on the version installed from npm ([DES-RELEASE-WORKFLOW](distribution.mara.md#01M82C8WTK3M2A69XWRGNNQ0SF)); and locally on Linux x64, on packed tarballs. It installs the packages with `npm install --ignore-scripts` into an empty directory under its temporary directory, packed tarballs without fetching a package of the version from the registry; installing, unpacking and reading the binaries' symbols run with the caller's environment. It stages links to `node` and `npm` in a private directory under its temporary directory. It then runs each case through `node_modules/.bin/mara`, each operation with `--no-daemon` but in the daemon case, with an environment that holds only `PATH`, naming only that private directory, `HOME`, a new directory under its temporary directory, and `XDG_RUNTIME_DIR`, a new directory of mode 0700 whose path is short enough for the daemon's socket ([DES-DAEMON-LIFECYCLE](daemon/index.mara.md#01M7BF6GR80WA207P4BBFWW671)). A case that fails names its command and output.
+
+| Case | Method | Expectation |
+| --- | --- | --- |
+| `cargo`, `rustc`, `cc`, `c++`, `g++`, `clang` and `souffle` looked up in that `PATH` | Test | None is found; otherwise the verification fails naming it before any other case |
+| `mara --version` | Test | Prints `mara <version>` and exits 0 |
+| `project init` in an empty directory, `item create` of an Accepted requirement without a basis, then `project validate --debug-stats` | Test | Exits 1; among the diagnostics, an error of the invariant `requirement-has-basis` at that item; the stats line counts at least one program run, which only the package's `souffle` can have run |
+| `mara mcp` started in that project, sent an `initialize` request, then its standard input closed | Test | Answers with `serverInfo` named `mara` and of version `<version>`, and exits 0 within 5 s |
+| `daemon start`, `project validate`, `daemon status`, `daemon stop` in that project | Test | The validation's result as in direct mode; `served` of the status is 1; after the stop no process of the verification runs |
+| The dispatcher installed without its optional dependencies, then `mara --version` | Test | Exits 1; stderr names the native package and says to reinstall with optional dependencies |
+| The dispatcher run with Node reporting glibc 2.34, then reporting none, through a preload module of the verification that replaces `process.report.getReport` | Test | Exits 1 without starting `mara`; stderr names 2.35 and 2.34, then that glibc 2.35 or later is required |
+| Each packed tarball's file list | Test | Exactly the files that DES-PACKAGES lists for that package, the two binaries with mode 0755 |
+| The `GLIBC_` symbol versions that `bin/mara` and `bin/souffle` of the native package need | Analysis | None exceeds 2.35 |

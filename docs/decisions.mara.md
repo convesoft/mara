@@ -114,6 +114,77 @@
 
 ---
 
+<a id="01M82C8WTKAM5575JF0MN21ZA4"></a>
+
+### Build the Linux binaries on Ubuntu 22.04
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-LINUX-BUILD-IMAGE |
+| Status | Accepted |
+| Justifies | [DES-PACKAGES](distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8) |
+
+- Chosen by the worker of mara-a57pzn on 2026-11-22: the GitHub images `ubuntu-22.04` and `ubuntu-22.04-arm`, whose glibc is 2.35, the images of 0.3.0's release. This preserves 0.3.0's Linux glibc floor.
+- Rejected: `ubuntu-24.04`, CI's image. Its glibc 2.39 refuses Debian 12 (2.36) and Ubuntu 22.04 (2.35).
+- Rejected: static musl binaries, as zban ships. Soufflé was never built against musl, and the platforms are glibc ([ADR-KEEP-PLATFORMS-AND-NODE](#01M7CMW6YNXSQAS7H0ATKG4GH0)).
+- Rejected: a build in an older container, such as a manylinux image. Soufflé needs CMake, Bison, Flex and a C++17 compiler inside it, a second build environment beside CI's.
+- Known limit: GitHub keeps at most two generally available Ubuntu images and listed 26.04, 24.04 and 22.04 on 2026-11-22. When it retires `ubuntu-22.04`, the minimum glibc changes by a new decision.
+
+---
+
+<a id="01M82C8WTKPTQCXJQT024J3GP5"></a>
+
+### Publish from a dispatched workflow that defaults to a dry run
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-DISPATCHED-RELEASE |
+| Status | Accepted |
+| Justifies | [DES-RELEASE-WORKFLOW](distribution.mara.md#01M82C8WTK3M2A69XWRGNNQ0SF) |
+
+- Chosen by the maintainer on 2026-11-22: a `workflow_dispatch` with a dist-tag and a dry run that is the default and the only run an agent starts. The workflow creates the tag, after the packages are on npm; nobody tags by hand.
+- Rejected: 0.3.0's publication on each push to `main` that changes `CHANGELOG.md`. Every merge of that file published.
+- Chosen by the maintainer on 2026-11-22: publication only from `main`, in the environment `release`, whose branch policy is `main`; `main` is fast-forwarded to the integration branch after a dry run passes on its tip (mara-bkqvgd).
+- Rejected: publishing from the integration branch, or making it the default branch. 0.3.0's provenance and the environment's branch policy name `main`.
+- Chosen by the worker of mara-a57pzn on 2026-11-22: the path `.github/workflows/release.yml`.
+- Rejected: a new workflow file name. The Trusted Publisher entries of the 0.3.0 packages and their provenance name `release.yml`.
+- Chosen by the maintainer on 2026-11-22: both workflows in the form they keep for 0.4.0 and after; `dist_tag` is the maintainer's input, and a push or pull-request dry run uses `next`.
+- Rejected by the maintainer: gates that hold only for a slice, such as `next` only or no version without a prerelease part.
+- Chosen by the worker: GitHub's generated release notes.
+- Rejected: `nx release changelog`, as zban and nx-rust use it. It needs a release configuration in `nx.json`, which nothing else here uses. Rejected: 0.3.0's `CHANGELOG.md` with git-cliff, which the maintainer's tooling replaces (mara-4dr2p2).
+- Chosen by the worker: the version set by hand in `Cargo.toml`.
+- Rejected: `nx release version`. It needs a release group in `nx.json` for one string, and runs `cargo update --workspace` online (nx-rust's `docs/release.mara.md`).
+- Rejected: the version as an input of the dispatch, as nx-rust's release takes it. `mara --version` and the MCP `serverInfo` come from `Cargo.toml` and would disagree with the package.
+- Chosen by the worker: write permissions only in the Publish and Tag jobs, which a dry run never starts.
+- Rejected: one job that publishes or, in a dry run, runs `npm publish --dry-run`, as zban's. A dry run would hold `id-token: write` and `contents: write`.
+- Chosen by the worker: the release restores no cache.
+- Rejected: restoring CI's Cargo and Soufflé caches. A published binary would come from another run's build.
+
+---
+
+<a id="01M82C8WTKTJW5PRD24K1XRBES"></a>
+
+### Run the local checks' own command in CI
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-CI-CHECKS |
+| Status | Accepted |
+| Justifies | [DES-CI-WORKFLOW](distribution.mara.md#01M82C8WTKYXH8S92ZJQ4FX73R) |
+
+- Chosen by the worker of mara-a57pzn on 2026-11-22: each CI job runs `pnpm run checks`.
+- Rejected: a copy of the script's `nx` commands in the workflow. The two would drift.
+- Chosen by the worker: no Nx cache between CI runs.
+- Rejected: saving `.nx/cache` in the CI cache. Its keys hold no Cargo or Rustfmt configuration outside the repository ([ADR-NX-RUST-TASKS](#01M8094G2DV9JZ35C8VRMFPWYV)), and a restored result checks nothing on the pushed commit.
+- Chosen by the worker: the images `ubuntu-24.04` and `ubuntu-24.04-arm`.
+- Chosen by the worker: the toolchain that `rust-toolchain.toml` pins, and no other.
+- Rejected: a job on the oldest supported Rust, as zban's CI runs. The workspace declares no `rust-version`; it pins one toolchain (AGENTS.md).
+- Rejected: `ubuntu-latest`, which moves to a new release without a change in the repository. Rejected: the release's `ubuntu-22.04`, the image GitHub retires first; the release runs the checks there anyway.
+- Chosen by the worker: the performance test in every run, on shared runners.
+- Rejected: leaving it to the nightly job. [VER-SCALING](verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW) runs it on every pull request, and [ADR-SCALING-CPU-TIME](#01M7DTPFQMCA1VN75741RKEDR6) measured it beside other loads.
+
+---
+
 <a id="01M7BGRHX3NVNZS0NGQ0BKPSH1"></a>
 
 ### Deliver agent guidance from the binary, not a skill
@@ -296,6 +367,7 @@
 - Rejected by the maintainer: keeping the cargo commands in AGENTS.md as a second way to run the local checks. They duplicate what the targets run.
 - The scripts pass `--output-style=static`, so that every task prints its log, the test counts included, also when the output is no terminal.
 - Rejected: Nx's default output style, which prints no task logs when the output is no terminal.
+- CI and the release workflow run the local checks as `pnpm run checks`, with the steps around it that [DES-CI-WORKFLOW](distribution.mara.md#01M82C8WTKYXH8S92ZJQ4FX73R) and [DES-RELEASE-WORKFLOW](distribution.mara.md#01M82C8WTK3M2A69XWRGNNQ0SF) give; the targets that the release adds are named there.
 - The table lists what `checks` runs with the default Cargo configuration. The plugin infers `fmt-check`, `lint` and `test` for each crate and batches their work across crates. The manifests define the extra targets and the configurations `wasm32` and `performance`:
 
 | Target | Runs | Cached | Inputs and dependencies |
