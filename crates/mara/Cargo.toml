@@ -37,24 +37,13 @@ libc = "0.2.191"
 # An interrupted evaluation removes its private directory before Mara ends (DES-RULE-EXECUTION).
 signal-hook = { version = "0.3.18", default-features = false }
 
-# Nx keys (nx-rust): files outside the crate that its integration tests read by `include_str!`,
-# which every compiling target builds.
-[package.metadata.nx]
-fileInputs = [
-  "../../docs/code/index.mara.md",
-  "../../docs/project.mara.md",
-  "../../docs/template/vocabulary.mara.md",
-]
-
-# What the tests read at run time: `docs/` and `.mara/` of this repository, the variables that the
-# client and its test hooks read, `TMPDIR`, under which the daemon tests derive socket paths of
+# Nx keys (nx-rust): what the tests read at run time: the variables that the client and its test
+# hooks read, `TMPDIR`, under which the daemon tests derive socket paths of
 # limited length, the mode and bytes of the pinned Soufflé that `scripts/build-souffle.sh` builds
 # beside the artifact directory, and the tag `v0.3.0` that the conversion tests archive.
 [package.metadata.nx.targets.test]
 inputs = [
   "...",
-  "{workspaceRoot}/docs/**/*",
-  "{workspaceRoot}/.mara/**/*",
   { env = "CI" },
   { env = "MARA_NO_DAEMON" },
   { env = "TMPDIR" },

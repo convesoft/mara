@@ -19,11 +19,6 @@ toml = { version = "1.1.8", default-features = false, features = ["std", "parse"
 name = "diagnostic_memory"
 harness = false
 
-# Nx keys (nx-rust): files outside the crate that its unit tests read by `include_str!`, which every
-# compiling target builds.
-[package.metadata.nx]
-fileInputs = ["../../docs/format.mara.md", "../../docs/rules/index.mara.md"]
-
 # The `wasm32` architecture check of the local checks: `nx run mara-engine:build:wasm32`.
 [package.metadata.nx.targets.build.configurations.wasm32]
 targetTriple = "wasm32-unknown-unknown"

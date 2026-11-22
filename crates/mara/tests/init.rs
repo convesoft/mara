@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::SystemTime;
 
-use serde_json::{Map, Value, json};
+use mara_engine::read::{self, Paging, SchemaLayer, schema_layer};
+use mara_engine::schema::parse_schema;
+use serde_json::{Value, json};
 
 /// The schema and the configuration of every template.
 const SCHEMA: &str = ".mara/schema.toml";
@@ -23,6 +25,15 @@ const FILES: [&str; 5] = [
     ".mara/rules/readiness.dl",
     ".mara/rules/risk-matrix.dl",
     CONFIG,
+];
+
+/// What `project init` writes into each of [`FILES`], unchanged.
+const TEMPLATE: [&str; 5] = [
+    include_str!("../templates/engineering/schema.toml"),
+    include_str!("../templates/engineering/rules/knowledge.dl"),
+    include_str!("../templates/engineering/rules/readiness.dl"),
+    include_str!("../templates/engineering/rules/risk-matrix.dl"),
+    include_str!("../templates/engineering/config.toml"),
 ];
 
 /// The files of the `empty` template, in the order they are written.
@@ -149,7 +160,6 @@ fn changed(before: &Tree, after: &Tree) -> Vec<String> {
 
 #[test]
 fn writes_the_engineering_template_into_the_working_or_a_named_directory() {
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     for named in [None, Some("existing"), Some("new/project")] {
         let dir = Dir::new();
         if named == Some("existing") {
@@ -175,19 +185,11 @@ fn writes_the_engineering_template_into_the_working_or_a_named_directory() {
         expected.extend(FILES.iter().map(|file| format!("{target}{file}")));
         expected.sort();
         assert_eq!(changed(&before, &tree(&dir.root)), expected, "{named:?}");
-        // The schema and the programs are this repository's; the configuration starts with
-        // the documented example.
-        for file in &FILES[..4] {
-            let ours = fs::read_to_string(repository.join(file)).unwrap();
-            assert_eq!(dir.read(&format!("{target}{file}")), ours, "{file}");
+        // Each file is the template's, unchanged; that the template is this repository's
+        // project is a check of `docs-checks`.
+        for (file, contents) in FILES.iter().zip(TEMPLATE) {
+            assert_eq!(dir.read(&format!("{target}{file}")), contents, "{file}");
         }
-        let config = dir.read(&format!("{target}{CONFIG}"));
-        let example = documented_example("DES-PROJECT-CONFIGURATION");
-        assert!(config.starts_with(example), "{config}");
-        assert!(
-            config[example.len()..].starts_with("\n[rules]\n"),
-            "{config}"
-        );
         let mut validate = vec!["project", "validate", "--format", "json"];
         validate.extend(named.iter().flat_map(|named| ["--project", *named]));
         let run = dir.run(&validate).status(0);
@@ -269,37 +271,45 @@ fn the_engineering_programs_compile_and_are_listed() {
     assert_eq!(entries.len(), 4, "{entries:?}");
 }
 
+/// `schema list` and `schema get` of the project return every declaration of the template's
+/// schema, as the engine reads it, and nothing else; that the schema declares the vocabulary page
+/// is a check of `docs-checks`.
 #[test]
 fn the_engineering_schema_declares_the_engineering_vocabulary_and_nothing_else() {
     let dir = Dir::new();
     dir.run(&["project", "init"]).status(0);
-    let expected = vocabulary();
+    let (schema, diagnostics) = parse_schema(SCHEMA, TEMPLATE[0].as_bytes());
+    assert_eq!(diagnostics, []);
+    let schema = schema.unwrap();
+    let layer = SchemaLayer {
+        schema: &schema,
+        key: schema_layer(None, None),
+        path: SCHEMA,
+    };
+    let paging = Paging {
+        limit: 100,
+        cursor: None,
+    };
+    let page = read::schema_list(&layer, &paging).unwrap();
+    let expected: Value = serde_json::from_str(&page.json).unwrap();
+    let expected = expected["declarations"].as_array().unwrap().clone();
+    assert!(!expected.is_empty());
     let listed = dir
         .run(&["schema", "list", "--limit", "100", "--format", "json"])
         .status(0)
         .json();
     assert_eq!(listed["next_cursor"], Value::Null);
-    let names = |declarations: &[Value]| -> BTreeSet<(String, String)> {
-        declarations
-            .iter()
-            .map(|declaration| {
-                let text = |key: &str| declaration[key].as_str().unwrap().to_owned();
-                (text("kind"), text("name"))
-            })
-            .collect()
-    };
-    let listed = listed["declarations"].as_array().unwrap();
-    assert_eq!(names(listed), names(&expected));
-    assert_eq!(listed.len(), expected.len());
+    assert_eq!(listed["declarations"].as_array().unwrap(), &expected);
     for declaration in expected {
         let name = declaration["name"].as_str().unwrap();
         let got = dir
             .run(&["schema", "get", name, "--format", "json"])
             .status(0)
             .json();
-        let got = got["declarations"].as_array().unwrap();
-        assert_eq!(got.len(), 1, "{name}: {got:?}");
-        assert_eq!(sorted_targets(got[0].clone()), declaration, "{name}");
+        let page = read::schema_get(&layer, name, &paging).unwrap();
+        let want: Value = serde_json::from_str(&page.json).unwrap();
+        assert_eq!(got["declarations"], want["declarations"], "{name}");
+        assert_eq!(got["declarations"].as_array().unwrap().len(), 1, "{name}");
     }
 }
 
@@ -354,7 +364,7 @@ fn writes_the_empty_template() {
     assert_eq!(run.json()["diagnostics"], json!([]));
     assert_eq!(
         dir.read(CONFIG),
-        documented_example("DES-PROJECT-CONFIGURATION")
+        include_str!("../templates/empty/config.toml")
     );
 }
 
@@ -590,163 +600,4 @@ fn paused(dir: &Dir, mut at: impl FnMut(&str, usize)) -> (Run, Vec<String>) {
         }
     }
     (Run::of(child, &args), seen)
-}
-
-/// The declarations of DES-ENGINEERING-VOCABULARY, read from its page, as `schema get` returns
-/// them.
-fn vocabulary() -> Vec<Value> {
-    const PAGE: &str = include_str!("../../../docs/template/vocabulary.mara.md");
-    let name = |label: &str| label.to_lowercase().replace(' ', "_");
-    let names = |labels: &str| -> Vec<String> { labels.split(", ").map(name).collect() };
-    let statuses: Vec<String> = PAGE
-        .lines()
-        .find_map(|line| line.strip_prefix("Every type has `Status`:"))
-        .expect("the page names the statuses")
-        .split('`')
-        .skip(1)
-        .step_by(2)
-        .map(name)
-        .collect();
-    let mut declarations = Vec::new();
-    for row in table(PAGE, "| Type | ID prefix | Use for | Extra fields |") {
-        let [kind, prefix, use_for, extra] = &row[..] else {
-            panic!("a type row has four cells: {row:?}");
-        };
-        let mut fields: Vec<Value> = extra
-            .split('`')
-            .skip(1)
-            .collect::<Vec<_>>()
-            .chunks(2)
-            .map(|pair| {
-                let spec = pair[1].trim_start_matches(':').trim().trim_end_matches('.');
-                let (repeatable, spec) = match spec.strip_prefix("repeatable") {
-                    Some(rest) => (true, rest.trim_start_matches(';').trim()),
-                    None => (false, spec),
-                };
-                let (kind, values) = match spec {
-                    "text" => ("text", Value::Null),
-                    values => ("enum", json!(names(values))),
-                };
-                json!({"name": name(pair[0]), "kind": kind, "values": values,
-                       "required": false, "repeatable": repeatable})
-            })
-            .collect();
-        fields.sort_by_key(|field| field["name"].as_str().unwrap().to_owned());
-        declarations.push(json!({
-            "kind": "type",
-            "name": name(kind),
-            "id_prefix": prefix.trim_matches('`'),
-            "description": format!("{use_for}."),
-            "statuses": statuses,
-            "fields": fields,
-        }));
-    }
-    let header = "| Key on the source item | Shown on the target as | Source → target types | Constraint | Means |";
-    for row in table(PAGE, header) {
-        let [key, shown, ends, constraint, means] = &row[..] else {
-            panic!("a relation row has five cells: {row:?}");
-        };
-        let mut targets = Map::new();
-        let mut same_type = false;
-        for group in ends.split("; ") {
-            let (sources, types) = group.split_once(" → ").expect("sources → targets");
-            for source in names(sources) {
-                let types = match types {
-                    "the same type" => {
-                        same_type = true;
-                        vec![source.clone()]
-                    }
-                    types => names(types),
-                };
-                targets.insert(source, json!(types));
-            }
-        }
-        let acyclic = match constraint.as_str() {
-            "No cycles" => true,
-            "" | "Child → parent" => false,
-            other => panic!("an unknown constraint {other:?}"),
-        };
-        declarations.push(sorted_targets(json!({
-            "kind": "relation",
-            "name": name(key),
-            "inverse": name(shown),
-            "description": format!("{means}."),
-            "targets": targets,
-            "same_type": same_type,
-            "acyclic": acyclic,
-        })));
-    }
-    // `Implements`, which only code markers carry.
-    let line = PAGE
-        .lines()
-        .find(|line| line.starts_with("`Implements` (code → "))
-        .expect("the page declares `Implements`");
-    let between = |start: &str, end: char| {
-        let rest = &line[line.find(start).expect(start) + start.len()..];
-        rest[..rest.find(end).unwrap()].to_owned()
-    };
-    declarations.push(sorted_targets(json!({
-        "kind": "relation",
-        "name": "implements",
-        "inverse": name(&between("shown on the target as `", '`')),
-        "description": between("Its schema description is \"", '"'),
-        "targets": {"code": names(&between("(code → ", ';'))},
-        "same_type": false,
-        "acyclic": false,
-    })));
-    declarations
-}
-
-/// The cells of each row of the table under `header` on `page`.
-fn table(page: &str, header: &str) -> Vec<Vec<String>> {
-    let mut lines = page.lines().skip_while(|line| *line != header).skip(2);
-    let mut rows = Vec::new();
-    for line in lines.by_ref() {
-        let Some(inner) = line
-            .strip_prefix('|')
-            .and_then(|line| line.strip_suffix('|'))
-        else {
-            break;
-        };
-        rows.push(
-            inner
-                .split('|')
-                .map(|cell| cell.trim().to_owned())
-                .collect(),
-        );
-    }
-    assert!(!rows.is_empty(), "no table under {header:?}");
-    rows
-}
-
-/// A declaration with each relation's target types sorted, which the comparison ignores.
-fn sorted_targets(mut declaration: Value) -> Value {
-    if let Some(targets) = declaration
-        .get_mut("targets")
-        .and_then(Value::as_object_mut)
-    {
-        for types in targets.values_mut() {
-            types
-                .as_array_mut()
-                .unwrap()
-                .sort_by_key(|name| name.to_string());
-        }
-    }
-    declaration
-}
-
-/// The first TOML code block of the item with `id` on `docs/project.mara.md`.
-fn documented_example(id: &str) -> &'static str {
-    const PAGE: &str = include_str!("../../../docs/project.mara.md");
-    let start = PAGE
-        .find(&format!("| ID | {id} |"))
-        .unwrap_or_else(|| panic!("docs/project.mara.md has no item {id}"));
-    let block = PAGE[start..]
-        .split_once("```toml\n")
-        .unwrap_or_else(|| panic!("{id} has no TOML example"))
-        .1;
-    block
-        .split_once("```")
-        .unwrap_or_else(|| panic!("the TOML example of {id} does not end"))
-        .0
 }

@@ -36,62 +36,6 @@ fn ids(document: &Document) -> Vec<&str> {
 }
 
 #[test]
-fn reads_the_documented_example() {
-    let page = include_str!("../../../../docs/format.mara.md");
-    let (_, example) = page.split_once("```markdown\n").expect("an example");
-    let (example, _) = example.split_once("\n```\n").expect("the example ends");
-    let document = parse_text(example);
-    assert_eq!(problems(&document), []);
-    assert!(document.mentions.is_empty());
-    let [requirement, decision] = &document.items[..] else {
-        panic!("two items: {:?}", document.items);
-    };
-
-    assert_eq!(requirement.mid, "01M1PXP2KGVW5ZF2JGP9K4XE9B");
-    assert_eq!(requirement.title, "Phishing-resistant authentication");
-    assert_eq!(requirement.line, 7);
-    let rows: Vec<_> = requirement
-        .rows
-        .iter()
-        .map(|row| (row.line, row.name.as_str(), row.value.as_str()))
-        .collect();
-    assert_eq!(
-        rows,
-        [
-            (11, "type", "Requirement"),
-            (13, "id", "REQ-PHISHING-RESISTANT-AUTH"),
-            (14, "status", "Accepted"),
-            (
-                15,
-                "satisfies",
-                "[NEED-SECURE-SIGN-IN](../needs.mara.md#01M1PXQ0R8T4D2VW6YH3KJ5N7A)"
-            ),
-        ]
-    );
-    let link = requirement.rows[3].link.as_ref().expect("a relation link");
-    assert_eq!(link.text, "NEED-SECURE-SIGN-IN");
-    assert_eq!(link.path, "../needs.mara.md");
-    assert_eq!(link.fragment.as_deref(), Some("01M1PXQ0R8T4D2VW6YH3KJ5N7A"));
-    assert_eq!(link.line, 15);
-    assert_eq!(&example[link.span.clone()], requirement.rows[3].value);
-    let body = &example[requirement.body.clone()];
-    assert!(body.starts_with("Users must authenticate"), "{body:?}");
-    assert!(body.ends_with("- Passkeys must be supported."), "{body:?}");
-    assert!(example[requirement.span.clone()].starts_with("<a id="));
-
-    assert_eq!(decision.value("id"), Some("ADR-USE-WEBAUTHN"));
-    let link = decision.rows[3].link.as_ref().expect("a same-file link");
-    assert_eq!(
-        (link.path.as_str(), link.fragment.as_deref()),
-        ("", Some(requirement.mid.as_str()))
-    );
-    assert_eq!(
-        &example[decision.body.clone()],
-        "WebAuthn provides phishing-resistant authentication."
-    );
-}
-
-#[test]
 fn breaks_regions_at_thematic_breaks_outside_code_only() {
     let text = format!(
         "# Breaks\n\n***\n\n{}\n___\n\n{}\n```text\n---\n```\n\n- - -\n\n{}",

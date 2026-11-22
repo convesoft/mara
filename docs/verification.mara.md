@@ -317,7 +317,7 @@ Rust integration tests run every validation and read operation of the CLI, faili
 | Methods | Test |
 | Verifies | [REQ-PROJECT-INIT](project.mara.md#01M7BF6H8Z02SNKXD2XPGVD87M) |
 
-Rust integration tests run `project init` with the real CLI in disposable directories.
+Rust integration tests run `project init` with the real CLI in disposable directories (`crates/mara/tests/init.rs`). For `schema list` and `schema get`, the CLI output must match the engine's output for the template. The docs-checks test (`crates/docs-checks/tests/template.rs`) compares that engine output with the vocabulary page.
 
 | Case | Expectation |
 | --- | --- |
