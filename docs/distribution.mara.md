@@ -36,8 +36,8 @@ Versions:
 
 - The slices `0.4.0-alpha.1` to `0.4.0-alpha.5` are Git tags only.
 - The prereleases of 0.4.0 are published to npm under the dist-tag `next`: `0.4.0-rc.1`, the CLI, MCP server, daemon and rule evaluation on Linux (mara-c8scn7), then `0.4.0-rc.2`, the slice that these documents call 0.4.0-alpha.6, which adds the Node library and the browser (mara-xzfeyj).
-- `latest` stays 0.3.0 on every package until 0.4.0 is published under it (mara-chjvk9).
-- Every package of a version carries the workspace version, `[workspace.package].version` of `Cargo.toml`, which the release workflow publishes ([DES-RELEASE-WORKFLOW](#01M82C8WTK3M2A69XWRGNNQ0SF)).
+- `latest` stays 0.3.0 on every package that 0.3.0 published until 0.4.0 is published under it (mara-chjvk9).
+- Every package of a version carries the workspace version, the version of the package `mara` that `cargo metadata --no-deps` reports, which the release workflow publishes ([DES-RELEASE-WORKFLOW](#01M82C8WTK3M2A69XWRGNNQ0SF)). It has no build metadata, which npm drops; packaging fails on a version with build metadata.
 
 Packages, each on npm since 0.3.0 but the browser package:
 
@@ -51,13 +51,16 @@ Packages, each on npm since 0.3.0 but the browser package:
 
 - The dispatcher holds `package.json`, `bin/mara.cjs`, `README.md`, `LICENSE-MIT` and `LICENSE-APACHE`. Its manifest declares `bin` `mara`, `engines.node` `>=24`, every native package that the version publishes as an optional dependency at exactly its own version, and no `scripts` and no `dependencies`.
 - A native package holds `package.json`, `bin/mara` and `bin/souffle`, both mode 0755, `LICENSE-MIT`, `LICENSE-APACHE`, Soufflé's licence as `LICENSE-SOUFFLE`, and `THIRD-PARTY-LICENSES` with the licence of each crate compiled into that `mara`. Its manifest declares `os`, `cpu`, `libc` `["glibc"]` on Linux and the licence `(MIT OR Apache-2.0) AND UPL-1.0`, and no `bin` and no `scripts`. From 0.4.0-rc.2 it also holds the Node addon.
-- Each packed file list is checked by name before anything is published: a package holds exactly the files above.
+- `THIRD-PARTY-LICENSES` holds the licence files of every crate that `cargo metadata` resolves for the host as a normal or build dependency of `mara`, transitively, without the workspace's crates; features are resolved for the whole workspace, so the list may hold more crates than the build and never fewer. A crate that ships no licence file takes those of the crate of its upstream repository that the packaging script's table names for it, with the same declared licence; packaging fails, naming the crate, for any other.
+- The dispatcher's table of platforms is the one list of native packages: the packaging script reads it for the dispatcher's optional dependencies and each native package's `os`, `cpu` and `libc`.
+- Each packed file list is checked by name and mode before anything is published: a package holds exactly the files above, each once, and packaging fails otherwise.
 - Platforms: Linux x64 and arm64 with glibc 2.35 or later and Landlock ([ADR-SANDBOX-REQUIRED](rules/decisions.mara.md#01M7K4XZRS4DDAREPZSWC0WZF7)); macOS arm64 from mara-ag4ees. Node 24 or later.
 - The published Linux binaries are built on the GitHub images `ubuntu-22.04` and `ubuntu-22.04-arm`, whose glibc is 2.35 ([ADR-LINUX-BUILD-IMAGE](decisions.mara.md#01M82C8WTKAM5575JF0MN21ZA4)). No `GLIBC_` symbol version that `bin/mara` or `bin/souffle` needs exceeds 2.35.
 
 The dispatcher:
 
-- It selects the native package for `process.platform` and `process.arch`, and runs its `bin/mara` with the caller's arguments and standard streams. It forwards `SIGINT`, `SIGTERM` and `SIGHUP` to it, and exits with its exit status, or ends itself by the signal that ended it.
+- It selects the native package for `process.platform` and `process.arch`, and runs its `bin/mara`, with no shell, the caller's arguments, environment and standard streams, only when that package is installed for the dispatcher and its version equals the dispatcher's. Installed for the dispatcher means found in a `node_modules` folder on the dispatcher's own ancestor path, as npm, pnpm and `npx` install it, the first in the order of Node's resolution; a package that Node would find only in its global folders or through `NODE_PATH` counts as not installed.
+- It forwards `SIGINT`, `SIGTERM` and `SIGHUP` to `mara`, and exits with its exit status. When a signal ends `mara`, the dispatcher ends itself by that signal where Node can re-raise it; for a signal it cannot re-raise, such as `SIGPIPE`, which Node ignores, or `SIGUSR1`, which starts Node's inspector, it exits with the status 128 plus the signal's number.
 - It starts no `mara` and exits 1 with a message on stderr in each of these cases:
 
 | Case | The message names |
@@ -65,9 +68,9 @@ The dispatcher:
 | A platform or architecture without a native package | The platform and architecture, and the supported platforms |
 | Linux on which Node reports no glibc version (`process.report.getReport().header.glibcVersionRuntime`), such as musl | That glibc 2.35 or later is required, and the supported platforms |
 | Linux with a glibc older than 2.35 | The required and the found version |
-| The native package is not installed | The package, and to reinstall `@convesoft/mara` with optional dependencies |
+| The native package is not installed, or not at the dispatcher's version | The package and the version, and to reinstall `@convesoft/mara` with optional dependencies |
 
-- A native `mara` started directly on a glibc older than 2.35 fails with the dynamic loader's message, which names the missing `GLIBC_` version.
+- If the system lacks a required `GLIBC_` version, the dynamic loader names it when starting the native `mara` directly.
 
 ---
 
@@ -137,7 +140,7 @@ The dispatcher:
 - The workflow `.github/workflows/release.yml` starts:
   - on `workflow_dispatch`, with the inputs `dist_tag`, a string, default `next`, and `dry_run`, a boolean, default true;
   - on each push to `main` and to `chore/clear-worktree-for-rewrite`, without a path filter, so that every tip of either branch has passed a dry run;
-  - on each pull request that changes a release input: the workflow file, the packaging script, the dispatcher's project under `packages/`, `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, `Cargo.toml`, a crate's `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `nx.json` or `scripts/build-souffle.sh`.
+  - on each pull request that changes a release input: the workflow file, `packages/mara-npm`, `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, `Cargo.toml`, a crate's `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `nx.json` or `scripts/build-souffle.sh`.
 - Every run but a dispatch without the dry run is a dry run. A push or pull-request run uses the dist-tag `next`.
 - Runs of the same ref queue; a newer run of the same pull request cancels the older one.
 - The version is set by hand before a release: one commit changes `[workspace.package].version` in `Cargo.toml` and the workspace crates' entries in `Cargo.lock`. The workflow reads it with `cargo metadata` and changes no file of the repository.
@@ -149,8 +152,8 @@ The dispatcher:
 | --- | --- | --- | --- |
 | Prepare | `ubuntu-24.04` | `contents: read` | Records the commit. Reads the version and refuses one that is not SemVer. Refuses a dist-tag that does not match `^[a-z][a-z0-9._-]*$`, and the dist-tag `latest` for a version with a prerelease part. On a dispatch: refuses a run without the dry run on another ref than `refs/heads/main`, and a version whose tag `v<version>` exists or that npm has for any of the packages |
 | Checks | `ubuntu-22.04` and `ubuntu-22.04-arm`, one job each, neither stopped by the other's failure | `contents: read` | The checkout, toolchains, dependencies and grammar steps of [DES-CI-WORKFLOW](#01M82C8WTKYXH8S92ZJQ4FX73R), with full history and tags; then `pnpm run checks`, the full suite. Keeps the `target/souffle-2.5` that the checks built as an artifact of the run |
-| Pack dispatcher | `ubuntu-24.04` | `contents: read` | After both Checks jobs: the dispatcher packed by `pack-dispatcher` |
-| Build | `ubuntu-22.04` and `ubuntu-22.04-arm` | `contents: read` | After Pack dispatcher: the steps of Checks up to the dependencies; `target/souffle-2.5` from that platform's Checks artifact, which `scripts/build-souffle.sh` only checks; the native package packed by `pack-native`; the check that no `GLIBC_` symbol version of its `mara` or `souffle` exceeds 2.35 ([DES-PACKAGES](#01M7BF6GWZ72PGJNA3VQNZMDC8)); the install verification on the packed dispatcher and native package ([VER-INSTALL-WITHOUT-TOOLCHAIN](verification.mara.md#01M82C8WTK2PAA1SBEWCAJ4ND8)) |
+| Pack dispatcher | `ubuntu-24.04` | `contents: read` | After both Checks jobs: the steps of Checks up to the dependencies, so that the pinned Rust toolchain is installed although nothing is compiled, because nx-rust builds the project graph with cargo and the packaging script reads the version with `cargo metadata`; then the dispatcher packed by `pack-dispatcher` |
+| Build | `ubuntu-22.04` and `ubuntu-22.04-arm` | `contents: read` | After Pack dispatcher: the steps of Checks up to the dependencies; `target/souffle-2.5` from that platform's Checks artifact, which `scripts/build-souffle.sh` only checks; the native package packed by `pack-native`; the install verification on the packed dispatcher and native package, whose analysis checks that no `GLIBC_` symbol version of its `mara` or `souffle` exceeds 2.35 ([VER-INSTALL-WITHOUT-TOOLCHAIN](verification.mara.md#01M82C8WTK2PAA1SBEWCAJ4ND8)) |
 | Dry run | `ubuntu-24.04` | `contents: read` | Every dry run: checks that the tarballs of every package are there, then `npm publish --dry-run --access public --tag <dist_tag>` of each, native packages first |
 | Publish | `ubuntu-24.04`, environment `release` | `contents: read`, `id-token: write` | A dispatch without the dry run: records each package's dist-tags; publishes each native package with `npm publish <tarball> --provenance --access public --tag <dist_tag>` through npm Trusted Publishing, with npm 11.5.1 or later and no npm token; waits until npm shows every native package, polling for at most 30 minutes; publishes the dispatcher the same way |
 | Registry check | `ubuntu-22.04` and `ubuntu-22.04-arm` | `contents: read` | After Publish: in an empty directory, `npx --yes --ignore-scripts @convesoft/mara@<version> --version` prints `mara <version>`, retried for at most 30 minutes until npm serves it; the install verification's cases but the tarballs' file lists, on `@convesoft/mara@<version>` installed from the registry with `--ignore-scripts`; for each package, `<dist_tag>` names the version and every other dist-tag names what it named before Publish |
@@ -159,15 +162,18 @@ The dispatcher:
 - A re-run of the failed jobs of the same run continues a partial publication with the same tarballs:
   - Publish skips a package version already on npm whose `dist.shasum` equals the SHA-1 of its tarball, and fails on another; a registry error is retried, and only a version npm reports absent is published.
   - Tag accepts an existing `v<version>` that names the recorded commit and fails on another; it reuses an existing release of the tag; it uploads each tarball and `SHA256SUMS` that the release lacks, and fails when an attached one's SHA-256 differs from the run's.
-- The release workflow adds three Nx targets of the dispatcher's project under `packages/`, none cached, because each writes or checks published files and reads built binaries or the machine's `PATH`:
+- The project `mara-npm` in `packages/mara-npm` holds the dispatcher `bin/mara.cjs`, the packaging script `scripts/pack.mjs` and the install verification `scripts/verify-install.mjs`. The Nx project is defined by `project.json`, outside the pnpm workspace.
+- The packaging script reads the version, the repository and Cargo's artifact directory with `cargo metadata --no-deps`. It packs with `npm pack --ignore-scripts --offline --no-update-notifier` and an empty npm cache of its own, into a temporary name in `dist/npm` of the workspace, and renames the checked tarball over an earlier one of the same name; a failed pack leaves that earlier tarball as it was.
+- The project's Nx targets are not cached, because each writes or checks published files and reads built binaries or the machine's `PATH`:
 
 | Target | Runs | Depends on |
 | --- | --- | --- |
 | `pack-dispatcher` | The packaging script for the dispatcher alone | Nothing built |
-| `pack-native` | The packaging script for the native package of the host's platform, on the `mara` of `mara:build:release`, the `souffle` and `LICENSE` of `cargo-workspace:souffle` and the repository's licences; it writes `THIRD-PARTY-LICENSES` for that build | `mara:build:release`, a configuration `release` of the inferred `build` with `profile = "release"`; `cargo-workspace:souffle` |
-| `verify-install` | The install verification, on packed tarballs or on a version from the registry | Nothing built |
+| `pack-native` | Run as `nx run mara-npm:pack-native:release`: the packaging script for the native package of the host's platform, on the `mara` of `mara:build:release`, which it reads from `release/mara` in the artifact directory that `cargo metadata` names, so that `CARGO_TARGET_DIR` and Cargo's configuration apply as they do to the build; with `CARGO_BUILD_TARGET` set it fails. It cannot see a `build.target` set in a Cargo configuration file, which this repository does not set; with one it would read a `release/mara` that the build did not write. It packs the `souffle` and `LICENSE` of `cargo-workspace:souffle` and the repository's licences; it writes `THIRD-PARTY-LICENSES` for that build. Without the configuration it fails before packing, because Nx gives a dependency the configuration of the command, not the target's default | `mara:build:release`, a configuration `release` of the inferred `build` with `profile = "release"`; `cargo-workspace:souffle` |
+| `verify-install` | The install verification, on the tarballs in `dist/npm`, or with `--registry=<version>` on that version from the registry | Nothing built |
 
 - Publication, the waits, the registry check and the tag are steps of the workflow, not targets.
+- The three targets are not part of `pnpm run checks`, because they need a release build and write tarballs: the release workflow runs them, and anyone can on demand.
 
 ---
 

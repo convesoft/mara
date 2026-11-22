@@ -388,6 +388,7 @@
 | `mara:test:performance` | `cargo test -p '<package ID of mara>' --test performance --profile release --locked`, as the configuration `performance` of `mara:test`, with `test = "performance"` and `profile = "release"` | Never restored: `checks` runs it with `--skip-nx-cache` | Those of `mara:test`, the dependency on `souffle` included; an `nx` command of its own after the other checks |
 | `mara-engine:build:wasm32` | `cargo build -p '<package ID of mara-engine>' --target wasm32-unknown-unknown --locked`, as the configuration `wasm32` of the inferred `build`, with `targetTriple = "wasm32-unknown-unknown"` | Yes | The plugin's inputs; the configuration is in the key |
 | `cargo-workspace:zban-check` | `zban check` | Yes | `.zban/`, archive included; the SHA-256 of the `zban` on `PATH` |
+| `mara-npm:lint` | Oxlint on `packages/mara-npm` | Yes | Inputs inferred by `@nx/oxlint` |
 
 - `mara:test` also depends on `souffle`. Nx keys a task with a `dependentTasksOutputFiles` input only after its dependencies have run: the plugin gives `mara:test` one, and `mara:validate` declares one, so both key the Soufflé that `souffle` built in the same run.
 - `souffle` is not cached: what it builds depends on the host's C++ toolchain and a download, and with the binary present it only checks it, in about a second.

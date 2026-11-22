@@ -1,0 +1,30 @@
+{
+  "name": "mara-npm",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "targets": {
+    "pack-dispatcher": {
+      "command": "node packages/mara-npm/scripts/pack.mjs dispatcher dist/npm",
+      "cache": false
+    },
+    "pack-native": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": [
+        { "projects": ["mara"], "target": "build" },
+        { "projects": ["cargo-workspace"], "target": "souffle" }
+      ],
+      "options": {
+        "command": "echo 'pack-native packs the release build: run nx run mara-npm:pack-native:release' >&2; exit 1"
+      },
+      "configurations": {
+        "release": {
+          "command": "node packages/mara-npm/scripts/pack.mjs native target/souffle-2.5/souffle target/souffle-2.5/LICENSE dist/npm"
+        }
+      }
+    },
+    "verify-install": {
+      "command": "node packages/mara-npm/scripts/verify-install.mjs",
+      "cache": false
+    }
+  }
+}

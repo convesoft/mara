@@ -106,3 +106,8 @@ inputs = [
 [package.metadata.nx.targets.test.configurations.performance]
 test = "performance"
 profile = "release"
+
+# The `mara` that the native npm package ships: `nx run mara:build:release`, on which the target
+# `pack-native` of `packages/mara-npm` depends (DES-RELEASE-WORKFLOW).
+[package.metadata.nx.targets.build.configurations.release]
+profile = "release"
