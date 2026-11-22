@@ -66,6 +66,17 @@ fn report(round: usize, snapshot: &Snapshot) -> Vec<Diagnostic> {
 }
 
 fn main() {
+    // nextest lists a binary's tests with libtest's `--list --format terse`, and its ignored tests
+    // with `--ignored` added (https://nexte.st/docs/design/custom-test-harnesses/). Any other
+    // arguments run the check, as nextest's `diagnostic_memory --exact --nocapture` and cargo's
+    // plain run do.
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments.iter().any(|argument| argument == "--list") {
+        if !arguments.iter().any(|argument| argument == "--ignored") {
+            println!("diagnostic_memory: test");
+        }
+        return;
+    }
     let snapshot =
         SnapshotInputs::new(Vec::new(), None, None, None).build(&mut WorkCounts::default());
     // The first round sets up whatever the process keeps once, whatever the names.

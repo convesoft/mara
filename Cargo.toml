@@ -12,6 +12,10 @@ repository = "https://github.com/convesoft/mara"
 inherits = "release"
 debug = "line-tables-only"
 
+# Every `test` task runs its crate's tests with cargo-nextest, then the doctests (ADR-NX-RUST-TASKS).
+[workspace.metadata.nx]
+testRunner = "nextest"
+
 # Nx targets of the workspace project `cargo-workspace` (ADR-NX-RUST-TASKS). `souffle` builds or
 # checks the pinned Soufflé that the tests and `project validate` run; it is not cached, because
 # what it builds depends on the host's C++ toolchain and a download, and its check of an existing

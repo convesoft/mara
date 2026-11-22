@@ -69,6 +69,7 @@ The local checks are `pnpm run checks`; while working, `pnpm run checks:fast` le
 - Once in a fresh worktree: `pnpm install --frozen-lockfile`. The checks build Soufflé when it is missing.
 - Once on each machine: `cargo run --quiet --bin mara -- --no-daemon code add rust`, because `mara:validate` needs this repository's pinned grammar in the per-user cache ([DES-GRAMMAR-ASSETS](docs/code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
 - `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins.
+- `test` runs cargo-nextest, which each machine installs itself; CI pins 0.9.152 ([DES-CI-WORKFLOW](docs/distribution.mara.md#01M82C8WTKYXH8S92ZJQ4FX73R)).
 - `mara-engine:build:wasm32` is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9); `mara:test:performance` times a release build for [VER-SCALING](docs/verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW).
 - On this machine run Nx with `NX_DAEMON=false NX_USE_LOCAL=true` (no daemon, the worktree's own Nx) under `berth --`, and `pnpm run checks` under `berth --exclusive --`, because the performance test needs the machine to itself.
 
