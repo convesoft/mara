@@ -21,9 +21,9 @@ Until this issue starts:
 
 Tasks:
 
-- [ ] Workflows for format, lint, tests, the `wasm32` build of the engine crate and `mara project validate` on `docs/` (moved from mara-0ztabc, mara-csmk0c and mara-37qtf2)
+Moved to mara-1avrq4 (rc.1 epic): the workflows for format, lint, tests, the `wasm32` build of the engine crate and `mara project validate` on `docs/`, and the native Linux builds of Soufflé.
 - [ ] Counter and scaling tests on every pull request, 64× nightly (VER-WORK-COUNTERS, VER-SCALING, DES-PERFORMANCE-HARNESS)
-- [ ] The pinned Soufflé built in CI for Linux x64 and arm64, natively and with Emscripten (DES-SOUFFLE-BUILD; moved from mara-vt2ktq and mara-xsm8w6)
+- [ ] The pinned Soufflé built in CI with Emscripten (DES-SOUFFLE-BUILD; moved from mara-vt2ktq and mara-xsm8w6)
 - [ ] Nightly `hyperfine` run on a reference machine, which the maintainer names, including a read during a long validation (VER-TIME-BUDGETS; moved from mara-p27z9t)
 - [ ] Budgets set from the first measurements; REQ-TIME-BUDGETS and VER-TIME-BUDGETS moved to Accepted
-- [ ] Changelog and publishing through the maintainer's release tooling
+Moved: changelog and publishing are in mara-a3aq0n for prereleases (rc.1 epic) and in mara-chjvk9 for 0.4.0.
