@@ -2029,4 +2029,76 @@ mod tests {
             "answered from the old one"
         );
     }
+
+    /// Temporary probe for mara-efyg6p: each change right after a request's check, with a clock
+    /// an hour ahead and with the real clock, counting changes in the same timestamp tick.
+    #[test]
+    fn probe_efyg6p() {
+        let mtime = |path: &Path| fs::symlink_metadata(path).unwrap().modified().unwrap();
+        let scenarios = ["rewrite-same-size", "add", "rename", "gitignore", "get-after-rename"];
+        for late in [true, false] {
+            for scenario in scenarios {
+                let (mut same_tick, mut missed, mut missed_same_tick) = (0, 0, 0);
+                let runs = 200;
+                for _ in 0..runs {
+                    let dir = tempfile::tempdir().unwrap();
+                    let root = dir.path();
+                    let lib = ("src/lib.rs", "// @mara implements REQ-A\n");
+                    let other = ("src/other.rs", "// @mara implements REQ-B\n");
+                    let session = code_project(root, &[lib, other]);
+                    let late_now = SystemTime::now() + Duration::from_secs(3600);
+                    let clock = || if late { late_now } else { SystemTime::now() };
+                    let mut work = WorkCounts::default();
+                    view(&session).generation(clock(), &mut work, CodeReads::Scan);
+                    let watched = if scenario == "rewrite-same-size" {
+                        root.join(lib.0)
+                    } else {
+                        root.join("src")
+                    };
+                    let before = mtime(&watched);
+                    let noticed = match scenario {
+                        "rewrite-same-size" => {
+                            let hash = lock(&session).state.code[lib.0].hash;
+                            fs::write(root.join(lib.0), "// @mara implements REQ-C\n").unwrap();
+                            view(&session).generation(clock(), &mut work, CodeReads::Scan);
+                            lock(&session).state.code[lib.0].hash != hash
+                        }
+                        "add" => {
+                            fs::write(root.join("src/added.rs"), "// x\n").unwrap();
+                            view(&session).generation(clock(), &mut work, CodeReads::Scan);
+                            kept(&session)[0].contains(&"src/added.rs".to_string())
+                        }
+                        "rename" => {
+                            fs::rename(root.join(lib.0), root.join("src/renamed.rs")).unwrap();
+                            view(&session).generation(clock(), &mut work, CodeReads::Scan);
+                            kept(&session)[0] == ["src/other.rs", "src/renamed.rs"]
+                        }
+                        "gitignore" => {
+                            fs::write(root.join("src/.gitignore"), "other.rs\n").unwrap();
+                            view(&session).generation(clock(), &mut work, CodeReads::Scan);
+                            kept(&session)[0] == ["src/lib.rs"]
+                        }
+                        _ => {
+                            fs::rename(root.join(lib.0), root.join("src/renamed.rs")).unwrap();
+                            let (language, _) =
+                                view(&session).code_file("src/renamed.rs", clock(), &mut work);
+                            language == Some(0)
+                        }
+                    };
+                    let tick = mtime(&watched) == before;
+                    same_tick += usize::from(tick);
+                    missed += usize::from(!noticed);
+                    missed_same_tick += usize::from(!noticed && tick);
+                }
+                eprintln!(
+                    "PROBE clock={} scenario={scenario}: runs={runs} same_tick={same_tick} \
+                     missed={missed} missed_in_same_tick={missed_same_tick}",
+                    if late { "late" } else { "real" }
+                );
+                if !late {
+                    assert_eq!(missed, 0, "the real clock missed a change: {scenario}");
+                }
+            }
+        }
+    }
 }

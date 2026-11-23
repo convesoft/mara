@@ -1,0 +1,77 @@
+# Temporary probe for mara-efyg6p; never merged.
+name: probe-efyg6p
+on:
+  push:
+    branches: [probe/mara-efyg6p]
+permissions:
+  contents: read
+jobs:
+  probe:
+    name: Probe (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Kernel, file system and timestamp granularity
+        run: |
+          uname -a
+          grep -E '^CONFIG_HZ=|MULTIGRAIN' /boot/config-$(uname -r) || true
+          df -T "$GITHUB_WORKSPACE" /tmp "$RUNNER_TEMP"
+          cat > "$RUNNER_TEMP/gran.py" <<'PY'
+          import os, sys, time
+          d = sys.argv[1]
+          f = os.path.join(d, "gran-file")
+          sub = os.path.join(d, "gran-dir")
+          os.makedirs(sub, exist_ok=True)
+          files, dirs = set(), set()
+          end = time.time() + 0.3
+          i = 0
+          while time.time() < end:
+              with open(f, "w") as out:
+                  out.write("x")
+              files.add(os.stat(f).st_mtime_ns)
+              open(os.path.join(sub, str(i)), "w").close()
+              dirs.add(os.stat(sub).st_mtime_ns)
+              i += 1
+          for name, vals in (("file", files), ("dir", dirs)):
+              v = sorted(vals)
+              deltas = sorted(b - a for a, b in zip(v, v[1:]))
+              print(d, name, "writes", i, "distinct mtimes", len(v),
+                    "median delta ms", deltas[len(deltas) // 2] / 1e6 if deltas else None)
+          PY
+          for d in /tmp "$GITHUB_WORKSPACE" "$RUNNER_TEMP"; do python3 "$RUNNER_TEMP/gran.py" "$d"; done
+      - run: rustup toolchain install
+      - name: Install cargo-nextest
+        env:
+          VERSION: 0.9.152
+          SHA256_X64: d039b43c3e0958441b6ad0a39c8884d018b3d2e8fb9928f209074b1100b5e17a
+          SHA256_ARM64: ca1f81a5b86533eb45ab97e0064aa88e925e53aab9a698ca6331a7cad1f85f07
+        run: |
+          case "$RUNNER_ARCH" in
+            X64) triple=x86_64-unknown-linux-gnu sha256=$SHA256_X64 ;;
+            ARM64) triple=aarch64-unknown-linux-gnu sha256=$SHA256_ARM64 ;;
+          esac
+          archive="$RUNNER_TEMP/cargo-nextest.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$VERSION/cargo-nextest-$VERSION-$triple.tar.gz"
+          echo "$sha256  $archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/nextest"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/nextest" cargo-nextest
+          echo "$RUNNER_TEMP/nextest" >> "$GITHUB_PATH"
+      - name: Build the lib tests
+        run: cargo nextest run -p mara --lib inputs:: --locked --no-run
+      - name: Probe with the late and the real clock
+        run: cargo nextest run -p mara --lib probe_efyg6p --locked --no-capture 2>&1 | grep -E 'PROBE|PASS|FAIL|panicked'
+      - name: The inputs tests, 30 times
+        run: |
+          fails=0
+          for i in $(seq 30); do
+            cargo nextest run -p mara --lib inputs::tests --locked --no-fail-fast -E 'not test(probe_efyg6p)' > "$RUNNER_TEMP/run.txt" 2>&1 || fails=$((fails + 1))
+            grep -E '^ +FAIL ' "$RUNNER_TEMP/run.txt" | sed 's/.*mara //' >> "$RUNNER_TEMP/fails.txt" || true
+          done
+          echo "runs with a failure: $fails of 30"
+          sort "$RUNNER_TEMP/fails.txt" 2>/dev/null | uniq -c || true
