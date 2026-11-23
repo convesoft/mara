@@ -1,7 +1,7 @@
 # Builds, packs, verifies and publishes the npm packages of one commit (DES-RELEASE-WORKFLOW in
-# docs/distribution.mara.md, ADR-DISPATCHED-RELEASE in docs/decisions.mara.md). Every run but a
-# dispatch without the dry run is a dry run. The Trusted Publisher entries of the packages name
-# this file, release.yml, and the environment `release`.
+# docs/distribution.mara.md, ADR-DISPATCHED-RELEASE in docs/decisions.mara.md). It starts only by a
+# manual dispatch, and a dispatch is a dry run unless its input says otherwise. The Trusted
+# Publisher entries of the packages name this file, release.yml.
 name: Release
 
 on:
@@ -17,36 +17,15 @@ on:
         required: false
         default: true
         type: boolean
-  # Without a path filter, so that every tip of either branch has passed a dry run.
-  push:
-    branches: [main, chore/clear-worktree-for-rewrite]
-  pull_request:
-    paths:
-      - .github/workflows/release.yml
-      - .github/actions/**
-      - .github/scripts/**
-      - packages/mara-npm/**
-      - README.md
-      - LICENSE-MIT
-      - LICENSE-APACHE
-      - Cargo.toml
-      - crates/*/Cargo.toml
-      - Cargo.lock
-      - rust-toolchain.toml
-      - package.json
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
-      - nx.json
-      - scripts/build-souffle.sh
 
 permissions:
   contents: read
 
-# Runs of one ref wait for each other in order; a newer run of a pull request cancels the older.
+# Runs of one ref wait for each other in order.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-  queue: ${{ github.event_name == 'pull_request' && 'single' || 'max' }}
+  cancel-in-progress: false
+  queue: max
 
 defaults:
   run:
@@ -85,13 +64,8 @@ jobs:
           INPUT_DIST_TAG: ${{ inputs.dist_tag }}
           DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run }}
         run: |
-          # A dispatch's input is validated as given, an empty one included; the automatic runs
-          # use `next`.
-          if [ "$EVENT" = workflow_dispatch ]; then
-            dist_tag=$INPUT_DIST_TAG
-          else
-            dist_tag=next
-          fi
+          # The input is validated as given, an empty one included.
+          dist_tag=$INPUT_DIST_TAG
           sha=$(git rev-parse HEAD)
           version=$(cargo metadata --no-deps --format-version 1 --offline --locked |
             jq -r '.packages[] | select(.name == "mara") | .version')

@@ -148,7 +148,9 @@
 - Rejected: publishing from the integration branch, or making it the default branch. 0.3.0's provenance and the environment's branch policy name `main`.
 - Chosen by the worker of mara-a57pzn on 2026-11-22: the path `.github/workflows/release.yml`.
 - Rejected: a new workflow file name. The Trusted Publisher entries of the 0.3.0 packages and their provenance name `release.yml`.
-- Chosen by the maintainer on 2026-11-22: both workflows in the form they keep for 0.4.0 and after; `dist_tag` is the maintainer's input, and a push or pull-request dry run uses `next`.
+- Chosen by the maintainer on 2026-11-22: both workflows in the form they keep for 0.4.0 and after; `dist_tag` is the maintainer's input.
+- Chosen by the maintainer on 2026-11-23: the workflow starts only by a manual dispatch, as nx-rust's; the dry run before a release is one dispatch.
+- Rejected by the maintainer: a dry run on each push to `main` and on each pull request that changes a release input. Runs of a ref queue, about 30 minutes each on four runners: ten merges in three hours are five hours of runs, and a dispatched release waits behind them. A break of the release then shows at the dry dispatch, not at the merge.
 - Rejected by the maintainer: gates that hold only for a slice, such as `next` only or no version without a prerelease part.
 - Chosen by the worker: GitHub's generated release notes.
 - Rejected: `nx release changelog`, as zban and nx-rust use it. It needs a release configuration in `nx.json`, which nothing else here uses. Rejected: 0.3.0's `CHANGELOG.md` with git-cliff, which the maintainer's tooling replaces (mara-4dr2p2).
@@ -163,10 +165,10 @@
 - Rejected: a reusable workflow, which is a job of its own and cannot run before the steps of the calling job. Rejected: a copy of the steps in each job, which drift.
 - Chosen by the worker of mara-a3aq0n: the registry is read with `curl` from its abbreviated package document.
 - Rejected: `npm view`, which exits 1 both for a missing version and for a failed request (npm 12.2.1), to be told apart only by its message.
-- Chosen by the worker of mara-a3aq0n: a push or pull-request dry run leaves out `npm publish --dry-run` for a version that npm has, with a warning.
-- Rejected: running it anyway. npm 11.5.1 and later refuse a dry run of a published version (`lib/commands/publish.js`), so every push between a release and the next version commit would fail.
+- Chosen by the worker of mara-a3aq0n: a dry run leaves out `npm publish --dry-run` for a version that npm has by then, with a warning.
+- Rejected: running it anyway. npm 11.5.1 and later refuse a dry run of a published version (`lib/commands/publish.js`), so a dry run that meets a version published after Prepare's check would fail.
 - Chosen by the worker of mara-a3aq0n: runs of a ref wait in order with `queue: max`.
-- Rejected: GitHub's default queue, which cancels a waiting run when a newer one of the ref arrives: a push to `main` would cancel a dispatched publication that waits for a dry run.
+- Rejected: GitHub's default queue, which cancels a waiting run when a newer one of the ref arrives: a second dispatch would cancel a dispatched publication that waits.
 - Chosen by the worker of mara-a3aq0n on 2026-11-23, after review: the registry helper is a command, not a file the steps source, so that it changes no shell option of the step.
 - Chosen by the worker of mara-a3aq0n: the dist-tag baseline is an artifact uploaded before the first publication, kept across re-runs.
 - Rejected: a job output, which a re-run of Publish replaces with a snapshot taken after the earlier attempt published.
