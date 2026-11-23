@@ -23,3 +23,5 @@ Context: Found by the architecture audit after 0.4.0-alpha.4 (Gemini, at `2fa2c1
 - [ ] The three modules exist; no behaviour, result or work count changes
 
 Note from the orchestrator, 2026-11-21 (architecture audit after alpha.5): `inputs.rs` grew to 2,032 lines in alpha.5 (`ancestors`, `only`, `kept`, `held`, `keep_ancestors`, `refresh_ancestors`, `forget_code_file`). Split it after mara-456kj9, which removes most of that; splitting first would spread it over files. The workers' suggested modules: `inputs/walk.rs` (`Walk`, `Code`, `Directory`, `above`), `inputs/code.rs` (the code-file functions, `scan`, `give_back`), `inputs/gitignore.rs` (`ignored`, `compile_gitignore`, `UNSUPPORTED_GITIGNORE`).
+
+Note from the audit after rc.1 (2026-11-23): the file is 2055 lines after mara-efyg6p; also move its test module (about 360 lines) to `inputs/tests.rs`.

@@ -68,4 +68,124 @@ One line per decision made on the maintainer's behalf: what was decided, what it
 - 2026-11-23 (mara-a3aq0n re-check, not fixed): `DES-RELEASE-WORKFLOW` and a comment in the workflow say that only push and pull-request dry runs can meet an already published version in the Dry run job; a manual dry dispatch warns and skips in that case too. The behaviour is right; the sentence is incomplete.
 - 2026-11-23: a CI run on the integration branch failed once on a DNS error in the grammar download (filed as backlog; the step has no retry and no cache, by `ADR-CI-CHECKS`).
 
+- 2026-11-23: the architecture audit after rc.1 (Gemini, at `ed7b0b9`) returned 11 findings. Filed: mara-23j2h9 under the next slice (the release workflow's publication, registry-check and tag steps as scripts with tests; a wait in Publish that hides a registry error for 30 minutes), and eight backlog issues tagged `audit` (mara-dwytrs, mara-qwj7c1, mara-b86nfg, mara-sn3qvr, mara-s25f1s, mara-09wgx8, mara-9dw13c, mara-2hz18f); notes on mara-pqhtf6, mara-kg912v and mara-j6vpbt. The wait in Publish was left as it is for rc.1: it delays a failure, it cannot publish anything wrong.
+
+## Decisions made by the workers of the rc.1 epic
+
+Copied from the `## Decisions made` lists of the closed issues, with the lists of their fix rounds.
+
+### mara-a57pzn: Specify the rc.1 slice: prerelease versions on npm, CI, Linux packages and the release workflow
+
+- The published Linux binaries are built on `ubuntu-22.04` and `ubuntu-22.04-arm`, so the minimum glibc is 2.35, as in 0.3.0 (`ADR-LINUX-BUILD-IMAGE`). The dispatcher refuses an older or missing glibc with a message.
+- CI runs on `ubuntu-24.04` and `ubuntu-24.04-arm`, uses `pnpm run checks` itself, keeps no Nx cache between runs, caches Soufflé (its own entry only) and Cargo's build directory without `target/souffle-*`, fetches the grammar with `code add rust` on each run, and runs the performance test on shared runners (`ADR-CI-CHECKS`).
+- `zban` becomes an exact devDependency, so that CI and local runs use the same `zban`.
+- The version is set by hand in `Cargo.toml` (`ADR-DISPATCHED-RELEASE`).
+- The release has the jobs Prepare, Checks, Pack dispatcher, Build, Dry run, Publish, Registry check and Tag; no package is packed before the checks pass on both platforms. Only Publish (`id-token: write`) and Tag (`contents: write`, through the job's `GITHUB_TOKEN`) can write; both run in the environment `release`, which needs the maintainer's approval, and a dry run never starts them.
+- The release restores no cache. Publication runs only from `main`; every push to `main` and to the integration branch runs a dry run without a path filter. Re-running the failed jobs of the same run continues a partial publication, the GitHub release and its assets included.
+- The maintainer's (2026-11-22, correcting fix round 1): both workflows have the form they keep for 0.4.0 and after, with no gate that holds only for a slice. `dist_tag` is the maintainer's input; push and pull-request dry runs use `next`. The only version–tag rule is permanent: a version with a prerelease part is never published under `latest`. The Registry check verifies every package's dist-tags after a publication. Recorded in `ADR-DISPATCHED-RELEASE`.
+- The release adds three Nx targets, `pack-dispatcher`, `pack-native` and `verify-install`, none cached, and uses a `release` configuration of `mara:build`.
+- The workflow file keeps 0.3.0's path, `.github/workflows/release.yml`, which its npm provenance names. GitHub generates the release notes. The package names (the 0.3.0 names) and the environment `release` were settled by the maintainer.
+- The install verification also covers a daemon round trip and the dispatcher's failures, because the epic's goal names the daemon.
+
+### mara-8mxw9c: The checks that guard this repository's docs are a project of their own, and mara:test no longer reads docs/
+
+- `docs-checks` reads the pages, `.mara/` and the templates at run time and keys them on its `test` target. It does not use `include_str!` with `fileInputs`, which would also run its `build`, `check` and `lint` again after every page edit (recorded in ADR-NX-RUST-TASKS).
+- The `test` target of `docs-checks` keys `TMPDIR`, under which its project checks write. It does not key `CI`, `MARA_NO_DAEMON`, the `MARA_TEST_*` hooks or Soufflé, because nothing in it reads them.
+- The test count rises by one (856): the vocabulary check of `init.rs` is split into a product half, which keeps VER-PROJECT-INIT's real-CLI case in `mara`, and the comparison with the page, which moved.
+- The crate is named `docs-checks` (Nx project `docs-checks`), at `crates/docs-checks`.
+
+### mara-e8921x: CLI: mara --version prints the version
+
+- DES-PERFORMANCE-HARNESS: `mara --version` adds no case without an operation. It takes no other argument, so it never prints a stats line, and `mara --version --debug-stats` is rejected on the path of the existing `mara --debug-stats --no-such-option` case. Written into the item.
+- Until the parser has read a complete operation name, `--version` in option position is the top-level flag, outside the document operation set; written into DES-OPERATIONS. With other arguments, or with an inline value, it is rejected with "`mara --version` takes no value and no other argument". After an operation's words it is that operation's option (or an unknown one).
+- No `@mara implements` marker: `--version` is no document operation, so it carries out no distinct obligation of REQ-CLI-MCP-PARITY, the requirement DES-OPERATIONS satisfies; the rejection runs in `parse`, which already carries that marker.
+
+### mara-397g3g: Guidance for rc.1: README installation with the next dist-tag and the migration steps from 0.3.0
+
+- The README installs project-locally with `--save-exact`, since a caret range on `0.4.0-rc.1` would accept later prereleases and 0.4.0 (README only; no item, it is npm behaviour).
+- MCP servers for converted projects are pinned to the exact prerelease version, not `next`, as 0.3.0 pinned its version (docs/agents.mara.md).
+- The migration tells users to delete `.mara/project.toml`, `.mara/schema.yaml`, the YAML rule files and `.mara/code/` after the conversion commit, in a commit of their own (step 8): the converter keeps them (DES-CONVERSION-MAPPING), no 0.4.0 operation reads them once `.mara/config.toml` exists (DES-PROJECT-CONFIGURATION), and while `project.toml` stays, a 0.3.0 tool reads the converted project as one without items instead of failing with "no project found" (verified in the v0.3.0 source, `src/lib.rs` discovery).
+- The 0.3.0 skill is to be installed per 0.3.0 project, not per user (docs/agents.mara.md).
+- The agent setup change (step 6) goes into the conversion commit (step 7), so one revert undoes both (docs/migration.mara.md).
+- Legacy files under `.mara/` that Git does not hold are committed in step 1, ignored ones with `git add -f`, or copied out of the repository (docs/migration.mara.md).
+
+### mara-7wysb0: Tests run with nextest and affected selection, and a full run only where it is needed: measure, then switch
+
+- `affectedTests` stays off and each uncached `test` task runs its full suite everywhere, in `ADR-NX-RUST-TASKS`, with the measurements as the rejected alternative. The issue ends here, as its second item says; mara-azya4r, which depended on "switch", is cancelled.
+- The runner switch is a follow-up (mara-rw6rhp), not part of this branch: the issue ends at a recommendation other than "switch".
+- Peak memory came from a cgroup's `memory.peak`, because GNU `time` is not installed.
+
+### mara-svq540: npm packages for rc.1: the dispatcher and the Linux native packages with the CLI and souffle
+
+- The project is `packages/mara-npm` (Nx name `mara-npm`), defined by `project.json`, so no pnpm workspace member and no lockfile change. DES-RELEASE-WORKFLOW names it, also in the pull-request paths.
+- `pack-native` runs as `nx run mara-npm:pack-native:release`. Nx 24's `dependsOn` cannot select a dependency's configuration: a dependency gets the configuration of the command (`create-task-graph.js`), not the target's default. Without the configuration the target fails before packing, so it never packs a binary that Nx did not just build. Rejected: `defaultConfiguration` (does not propagate), forwarding options (would forward `command` to nx-rust). DES-RELEASE-WORKFLOW.
+- `THIRD-PARTY-LICENSES` comes from `cargo metadata`, not cargo-about, which is not installed here (installing a cargo tool is the maintainer's call). It covers normal and build dependencies, a superset of what is compiled in. A crate without a licence file needs an explicit table entry; matching by repository URL was rejected because three Wasmtime crates declare none. DES-PACKAGES.
+- The dispatcher accepts the native package only at exactly its own version; another version is the "not installed" case. DES-PACKAGES.
+- The dispatcher's platform table is the one list of native packages; the packaging script reads it. DES-PACKAGES.
+- `latest` wording: "every package that 0.3.0 published". DES-PACKAGES.
+- The install verification and the pack targets are not part of `pnpm run checks`: they need a release build and write tarballs. DES-RELEASE-WORKFLOW.
+- The GLIBC check is a case of the install verification, not a separate Build step. DES-RELEASE-WORKFLOW and VER-INSTALL-WITHOUT-TOOLCHAIN.
+- Tarballs install with npm's `--offline` and an empty private cache, so npm fetches nothing; the arm64 optional dependency is skipped. VER-INSTALL-WITHOUT-TOOLCHAIN.
+- A final case fails when a process of the verification outlives it. VER-INSTALL-WITHOUT-TOOLCHAIN.
+- The packaging and verification scripts read the version with `cargo metadata --no-deps`, so the Pack dispatcher job installs the pinned Rust toolchain, although nothing is compiled; nx-rust needs cargo for the project graph too (DES-RELEASE-WORKFLOW; corrected in fix round 1).
+
+Rejected approaches: the repository-URL heuristic for licence files; reading `npm pack --json`, whose shape npm 12 changed from npm 11.
+
+Follow-ups: mara-s6dn0x (JS formatting is not a local check), mara-6y6hnn (the dispatcher re-raises a core-dumping signal on Node).
+
+- The dispatcher's installation boundary and the signal behaviour are written into DES-PACKAGES; the version comes from `cargo metadata --no-deps`, with "no build metadata" as the only rule (DES-PACKAGES).
+- The Pack dispatcher job installs the pinned Rust toolchain; the project is defined by `project.json`, outside the pnpm workspace; packing is offline, with atomic replacement (DES-RELEASE-WORKFLOW).
+- `pack-native` follows Cargo's artifact directory and refuses `CARGO_BUILD_TARGET`. A `build.target` set in a Cargo configuration file is not detected (DES-RELEASE-WORKFLOW).
+- Per-case process tracking as above (VER-INSTALL-WITHOUT-TOOLCHAIN); `mara-npm:lint` row in ADR-NX-RUST-TASKS.
+
+### mara-1avrq4: CI: GitHub Actions runs the local checks on Linux x64 and arm64
+
+- No step installs build tools: both images have curl, tar, sha256sum, cmake, c++, flex, bison, readelf and ninja (checked in the first run). Recorded in `DES-CI-WORKFLOW`.
+- Soufflé's entry is saved by `actions/cache/restore` + `actions/cache/save` after the checks, also when a check failed. The cache action's own post-job save would skip a failed job, so the next run would build Soufflé again. Recorded in `ADR-CI-CHECKS` and `DES-CI-WORKFLOW`.
+- Each push run gets its own concurrency group (`github.run_id`); a pull request's runs share `github.ref` and cancel older runs. With one group per ref, a newer push run would cancel an older one that is still pending. Recorded in `ADR-CI-CHECKS`.
+- Actions are pinned by major version, as zban's and nx-rust's workflows are; neither pins by SHA. Recorded in `ADR-CI-CHECKS`.
+- Job timeout 60 minutes, over three times a cold run. Recorded in `ADR-CI-CHECKS`.
+- The `zban-check` key runs `zban --version` and hashes the file `zban` starts from, looked up with `node_modules/.bin` first. Recorded in the root `Cargo.toml` comment, `DES-CI-WORKFLOW` and `ADR-NX-RUST-TASKS`.
+- The pnpm store is not cached: `DES-CI-WORKFLOW` names only the Soufflé and Cargo caches, and the install takes seconds.
+
+### mara-jbkcxe: Set the workspace version to 0.4.0-rc.1
+
+- None.
+
+### mara-ezzbnc: The rewrite integrates by pull requests after the fast-forward of main: AGENTS.md, the template and the required checks
+
+- The flow after the fast-forward is a section of its own, and the flow before it is a separate section that only defers to it, so that removing the "before" part later is a deletion and nothing else.
+- Each paragraph of the pull request description goes on one line, because GitHub wraps the squash commit body (zban's and nx-rust's rule).
+- The template has no checklist and no HTML comments, because the description becomes the commit body verbatim. The zban issue goes in a `Refs:` footer, as zban and nx-rust do it.
+- The CI bullet in "Local checks" links DES-CI-WORKFLOW for the events instead of listing branches, so it stays true after the fast-forward.
+- The fast-forward is the maintainer's push (mara-bkqvgd).
+
+### mara-rw6rhp: Tests run with nextest
+
+- `testRunner` is set in `[workspace.metadata.nx]` of the root `Cargo.toml`, not in the plugin's options in `nx.json` (`ADR-NX-RUST-TASKS`).
+- CI installs nextest from its prebuilt release with a pinned SHA-256 per architecture, as nx-rust's CI does, not with `cargo install` or a third-party action (`ADR-CI-CHECKS`, `DES-CI-WORKFLOW`).
+- `diagnostic_memory` follows the issue's rule for its arguments: `--list` lists, `--list --ignored` lists nothing, everything else runs.
+- No `.config/nextest.toml`: the defaults ran the suite. The key holds a tracked or unignored one, but neither an ignored one nor nextest's user configuration: mara-dt2aez (backlog), for nx-rust's input declaration.
+
+### mara-efyg6p: Session input tests with a clock an hour ahead fail on ubuntu-22.04 x64
+
+- Tests that check with a clock an hour ahead make each change visible to a stat by setting the changed path's mtime explicitly (`visibly`, documented on the helper). No Mara item covers how unit tests fake time, so nothing else records it. Rejected alternatives:
+  - sleeping past a tick, which guesses the tick;
+  - another size, which does not exist for a directory;
+  - the real clock in these tests, which would make their read counts depend on timing.
+- No debug re-run of the release dry run's failed job: the probe on the same image answered the question.
+
+### mara-4xsamc: The memory-limit test reaches the time limit first on slow runners
+
+- The memory-limit case of VER-PROGRAM-FAULTS uses a program that reaches the limit by copying memory (a doubled symbol and a `cat` of 128 copies) instead of a `count` over all pairs of a `range`, so that it reaches the memory limit well before the time limit on the tested runners; recorded in the case row of VER-PROGRAM-FAULTS.
+
+### mara-a3aq0n: Release workflow: build, pack, smoke-test and publish a prerelease from one commit
+
+- DES-RELEASE-WORKFLOW changed: a push or pull-request dry run leaves out `npm publish --dry-run` for a version that npm has, with a warning, because npm 11.5.1 and later refuse even a dry run of a published version (`lib/commands/publish.js`; seen with npm 12.2.1); otherwise every push between a release and the next version commit would fail. A dispatch still refuses that version.
+- Runs of a ref queue with `concurrency.queue: max`, so that a push to `main` cannot cancel a dispatched publication waiting behind it (GitHub's default cancels a waiting run); pull-request runs keep `single` and cancel the older one.
+- The shared setup is a composite action, not a reusable workflow (a job of its own) or copied steps (drift).
+- The registry is read with `curl` from its abbreviated package document, not with `npm view`, which exits 1 both for a missing version and for a failed request.
+- The tarballs travel as artifacts, each Build job's install verification recorded by SHA-256; Soufflé travels as a tar archive, which keeps its mode; Publish records the dist-tags before its first publication as an artifact of the run (review round below).
+- The pull-request paths also name `.github/actions/**` and `.github/scripts/**`, which the workflow runs.
+
 - [ ] The maintainer has read the list

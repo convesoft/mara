@@ -21,3 +21,5 @@ Context: Found by the architecture audit after 0.4.0-alpha.4 (Gemini, at `2fa2c1
 - [ ] Both moves made; no behaviour changes
 
 Note from the orchestrator, 2026-11-21 (architecture audit after alpha.5): move `Evaluated` and its tests (about 510 lines) to `session/evaluated.rs`; `Deriving` stays with `Session::derive_in_background`.
+
+Note from the audit after rc.1 (2026-11-23): mara-e8921x grew `crates/mara/src/cli.rs` to 890 lines; its `--version` parsing and tests move with `parse` and `usage`. `cli::run` reads the caller and scans for the JSON format before it handles the standalone `--version` and the bare usage, which use neither: return early for both.
