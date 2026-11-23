@@ -155,7 +155,7 @@
 - Rejected by the maintainer: gates that hold only for a slice, such as `next` only or no version without a prerelease part.
 - Chosen by the maintainer on 2026-11-23: the tag, the GitHub release and its notes come from `nx release changelog`, as in zban and nx-rust, with a `release` block in `nx.json` after theirs (mara-n918j4). His words: "I want the same nx generated release notes like on zban and nx release come on why you thing I sent them as examples?"
 - Rejected by the maintainer: GitHub's generated release notes, which the rc.1 slice had chosen. Rejected: 0.3.0's `CHANGELOG.md` with git-cliff, which the maintainer's tooling replaces (mara-4dr2p2).
-- Chosen by the worker of mara-n918j4 on 2026-11-23: on a re-run, Tag runs `nx release changelog` only for what is missing: without the tag in full, without the tag and push when only the release is missing, and not at all when the release exists.
+- Chosen by the worker of mara-n918j4 on 2026-11-23: on a re-run, Tag runs `nx release changelog` only for what is missing: without the tag in full, without the tag and push when only the release is missing, and not at all when the release exists; a release whose tag is missing on `origin` fails the job.
 - Rejected: running it as it is on a re-run, as zban's release does. `git tag` refuses the existing tag, and with the tag present Nx's notes start at that tag and hold no commit. Rejected: letting Nx update an existing release, which would replace notes edited since.
 - Chosen by the worker of mara-n918j4 on 2026-11-23: Nx's defaults for the tag's message and the release's title, both `v<version>`, and for `strictPreid`.
 - Rejected: `Mara <version>`, as rc.1's tag and release had it, which needs a setting the references do not have.

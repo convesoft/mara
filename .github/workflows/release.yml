@@ -267,15 +267,18 @@ jobs:
             fi
             echo "::warning::npm has $name@$VERSION, so its dry run is left out"
           done
-      # Prints the notes that Tag would publish, and the tag, push and release it would make. A dry
-      # run only reads the tag's release from the API, with the job's read-only token.
+      # Prints the notes that Tag would publish, and the tag, push and release it would make, with the
+      # push arguments of Tag. The release lookup uses the read-only job token. Nx also looks up
+      # authors' GitHub usernames while rendering the notes.
       - name: nx release changelog --dry-run
         env:
           GH_TOKEN: ${{ github.token }}
           NX_DAEMON: "false"
           VERSION: ${{ needs.prepare.outputs.version }}
           TAG: ${{ needs.prepare.outputs.tag }}
-        run: pnpm nx release changelog "$VERSION" --dry-run --git-push-args="refs/tags/$TAG" </dev/null
+        run: |
+          pnpm nx release changelog "$VERSION" --dry-run --verbose \
+            --git-push-args="--no-follow-tags refs/tags/$TAG" </dev/null
 
   publish:
     name: Publish
@@ -500,20 +503,35 @@ jobs:
         uses: ./.github/actions/release-tarballs
         with:
           packages: ${{ needs.prepare.outputs.packages }}
-      # `nx release changelog` tags HEAD, the recorded commit, pushes the tag, and creates the GitHub
-      # release of the tag with its notes, a prerelease for a version with a prerelease part. It
-      # fails on a tag that exists, so a re-run makes only what is missing: an existing tag must
-      # name the recorded commit; without its release, Nx creates the release alone, after the
-      # local copy of the tag is deleted, so that the notes start at the release before, as they
-      # would have; an existing release and its notes are kept. Standard input is empty, so that a
-      # prompt of Nx after a failed API call fails the step.
+      # `nx release changelog` tags HEAD, the recorded commit, pushes that tag alone (Nx puts
+      # `--follow-tags` before the given arguments, which `--no-follow-tags` overrides), and creates
+      # the GitHub release of the tag with its notes, a prerelease for a version with a prerelease
+      # part. It fails on a tag that exists and updates a release that exists, so a re-run makes
+      # only what is missing, after looking both up: an existing release and its notes are kept, and
+      # one without its tag on origin fails the job; an existing tag must name the recorded commit;
+      # without its release, Nx creates the release alone, after the local copy of the tag is
+      # deleted, so that the notes start at the release before, as they would have. Standard input
+      # is empty, so that a prompt of Nx after a failed API call fails the step.
       - name: Tag and create the GitHub release with nx release changelog
         run: |
           remote=$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}")
+          status=$(curl -sS --connect-timeout 10 --max-time 60 -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "$GITHUB_API_URL/repos/$GH_REPO/releases/tags/$TAG")
+          if [ "$status" != 200 ] && [ "$status" != 404 ]; then
+            echo "::error::GitHub answered $status for the release of $TAG"
+            exit 1
+          fi
           if [ -z "$remote" ]; then
+            if [ "$status" = 200 ]; then
+              echo "::error::the release of $TAG exists, but origin has no tag $TAG; restore the tag on $SHA or delete the release, then re-run"
+              exit 1
+            fi
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            pnpm nx release changelog "$VERSION" --git-push-args="refs/tags/$TAG" </dev/null
+            pnpm nx release changelog "$VERSION" --verbose \
+              --git-push-args="--no-follow-tags refs/tags/$TAG" </dev/null
             exit 0
           fi
           # The commit is the peeled line of an annotated tag, else the only line.
@@ -524,25 +542,14 @@ jobs:
             exit 1
           fi
           echo "the tag $TAG names $SHA"
-          status=$(curl -sS --connect-timeout 10 --max-time 60 -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "$GITHUB_API_URL/repos/$GH_REPO/releases/tags/$TAG")
-          case "$status" in
-            200)
-              echo "the release of $TAG exists; it and its notes are kept"
-              ;;
-            404)
-              if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-                git tag -d "$TAG"
-              fi
-              pnpm nx release changelog "$VERSION" --git-tag=false --git-push=false </dev/null
-              ;;
-            *)
-              echo "::error::GitHub answered $status for the release of $TAG"
-              exit 1
-              ;;
-          esac
+          if [ "$status" = 200 ]; then
+            echo "the release of $TAG exists; it and its notes are kept"
+            exit 0
+          fi
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            git tag -d "$TAG"
+          fi
+          pnpm nx release changelog "$VERSION" --verbose --git-tag=false --git-push=false </dev/null
       # The release is looked up by the API's status: 404 is no release of the tag. Each file is
       # attached unless the release holds an asset of its name in the state `uploaded`, whose
       # SHA-256 must equal this run's; an asset in another state is an interrupted upload, which
