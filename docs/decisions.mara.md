@@ -162,7 +162,7 @@
 - Rejected: one job that publishes or, in a dry run, runs `npm publish --dry-run`, as zban's. A dry run would hold `id-token: write` and `contents: write`.
 - Chosen by the worker: the release restores no cache.
 - Rejected: restoring CI's Cargo and Soufflé caches. A published binary would come from another run's build.
-- Chosen by the maintainer on 2026-11-23: the release runs no checks, as nx-rust's and zban's; CI runs them on every pull request and push to `main`, on the build images ([ADR-CI-CHECKS](#01M82C8WTKTJW5PRD24K1XRBES)). Each Build job builds Soufflé from source, which the check jobs built before.
+- Chosen by the maintainer on 2026-11-23: the release runs no checks, as nx-rust's and zban's; CI runs them on every pull request and push to `main`, on the build images ([ADR-CI-CHECKS](#01M82C8WTKTJW5PRD24K1XRBES)). Each Build job builds Soufflé from source, which the check jobs built before; a dry run took 11 minutes on 2026-11-23, against about 30 with the check jobs.
 - Rejected by the maintainer: check jobs of the release on the build images, about 30 minutes before any build. They ran the suite CI had run on the commit.
 - Chosen by the worker of mara-mknkec on 2026-11-23: Prepare does not read CI's result for the recorded commit; `main`'s ruleset, which requires CI's checks before a merge and forbids direct pushes, holds it, as nx-rust's release relies on its protection. A publication runs only from `main`.
 - Known limit: the ruleset does not require a branch to be up to date before a merge, so CI's push run on `main` is the first run on the merged commit itself; dispatch a publication after it passed.
