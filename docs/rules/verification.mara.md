@@ -134,7 +134,7 @@ In the setup of [VER-PROGRAM-CONSUMERS](#01M7HZYK9DYQDY8XFKWZES1ZB6), each fault
 | `substr` that splits a two-byte character of a title, in a consumed relation | A fault: the output is not valid UTF-8 |
 | `to_number("7junk")`; `substr("abcdef", 2, -1)` | `7`; `cdef`: no fault |
 | A consumed relation whose output would be at least twice the output-size limit that DES-RULE-EXECUTION records | A fault that names that limit; no row returned |
-| A program that holds at least twice the memory limit that DES-RULE-EXECUTION records, with one output row per item: a `count` over a relation of all pairs of a `range` | A fault that names that limit, reported before the time limit |
+| A program that holds at least twice the memory limit that DES-RULE-EXECUTION records, with one output row per item: a `count` over a relation that holds one symbol, the `cat` of 128 copies of a symbol doubled to 16 MiB, so that memory copies rather than tuple inserts reach the limit, in a small fraction of the time limit on a slow or busy machine | A fault that names that limit, reported before the time limit |
 | From 0.4.0-alpha.6 (mara-xsm8w6), each runtime-fault case in the browser | Unavailable; a fault without a line is reported at the line of the configuration that declares the program |
 
 ---

@@ -1,0 +1,65 @@
+# Temporary evidence for mara-4xsamc; removed before the branch is handed over.
+name: Probe mara-4xsamc
+
+on:
+  push:
+    branches: [test/memory-limit-before-time-limit]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - name: Install cargo-nextest
+        env:
+          VERSION: 0.9.152
+          SHA256_X64: d039b43c3e0958441b6ad0a39c8884d018b3d2e8fb9928f209074b1100b5e17a
+        run: |
+          archive="$RUNNER_TEMP/cargo-nextest.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$VERSION/cargo-nextest-$VERSION-x86_64-unknown-linux-gnu.tar.gz"
+          echo "$SHA256_X64  $archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/nextest"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/nextest" cargo-nextest
+          echo "$RUNNER_TEMP/nextest" >> "$GITHUB_PATH"
+      - name: Restore Soufflé
+        id: souffle
+        uses: actions/cache/restore@v6
+        with:
+          path: target/souffle-2.5
+          key: souffle-ubuntu-22.04-${{ runner.arch }}-${{ hashFiles('scripts/build-souffle.sh') }}
+      - run: scripts/build-souffle.sh
+      - name: Save Soufflé
+        if: steps.souffle.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: target/souffle-2.5
+          key: ${{ steps.souffle.outputs.cache-primary-key }}
+      - run: cargo nextest run --locked -p mara --test programs --no-run
+      - name: The test alone, 20 times
+        run: |
+          for i in $(seq 20); do
+            cargo nextest run --locked -p mara --test programs -E 'test(a_program_past_the_memory_limit)' 2>&1 \
+              | grep -E '^ +(PASS|FAIL|SIGSEGV|SIGABRT|TIMEOUT)' || exit 1
+          done
+      - name: The test beside the whole programs suite, 10 times
+        run: |
+          for i in $(seq 10); do
+            cargo nextest run --locked -p mara --test programs --no-fail-fast 2>&1 \
+              | grep -E 'memory_limit|Summary|^ +FAIL'
+          done
+      - name: The test while the whole suite runs, 10 times
+        run: |
+          for i in $(seq 10); do
+            cargo nextest run --locked -p mara --test programs --no-fail-fast >/dev/null 2>&1 &
+            load=$!
+            sleep 5
+            cargo nextest run --locked -p mara --test programs -E 'test(a_program_past_the_memory_limit)' 2>&1 \
+              | grep -E '^ +(PASS|FAIL|SIGSEGV|SIGABRT|TIMEOUT)'
+            wait $load
+          done
