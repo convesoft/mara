@@ -5,6 +5,9 @@
 
 #![cfg(unix)]
 
+#[path = "support/stat.rs"]
+mod stat;
+
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::os::unix::fs::{PermissionsExt, symlink};
@@ -23,6 +26,7 @@ use mara_engine::work::WorkCounts;
 use mara_engine::write::{
     ReadBack, cell, insert, item, label, line_ending, link, remove, row, set_value,
 };
+use stat::visibly;
 
 const CONFIG: &str = "format_version = 1\nschema = \".mara/schema.toml\"\n\n[documents]\nformat_version = 1\ninclude = [\"docs/**/*.mara.md\"]\n";
 
@@ -425,7 +429,9 @@ fn a_written_item_loads_and_the_project_stays_valid() {
         basis: Basis::Absent,
         contents: written.contents.into_vec(),
     }];
-    write::apply(&lock, &files, &mut WorkCounts::default()).unwrap();
+    visibly(&project.path("docs"), || {
+        write::apply(&lock, &files, &mut WorkCounts::default()).unwrap();
+    });
     drop(lock);
 
     let generation = inputs.snapshot(

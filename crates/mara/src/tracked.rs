@@ -377,4 +377,32 @@ mod tests {
         assert!(matches!(kept, Check::Kept(_)));
         assert_eq!(work, WorkCounts::default());
     }
+
+    /// The same for a directory, as each request lists one: an entry added, removed or renamed
+    /// within the timestamp tick of the check that listed the directory, which leaves its stat
+    /// unchanged, is found by the next listing, however late it comes. Here the empty listing
+    /// stands for what that check found before the file was added.
+    #[test]
+    fn an_entry_added_in_the_tick_of_the_listing_check_is_found_later() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("added.mara.md"), "").unwrap();
+        let metadata = fs::symlink_metadata(dir.path()).unwrap();
+        let stat = Stat::of(&metadata);
+        let changed = stat.modified.unwrap().max(stat.changed.unwrap());
+        let previous = |checked| Listing {
+            stat,
+            checked,
+            entries: Arc::from(Vec::new()),
+        };
+        let later = changed + Duration::from_secs(3600);
+        let names = |checked| {
+            let listing = list(dir.path(), &metadata, Some(previous(checked)), later).unwrap();
+            let names = listing.entries.iter().map(|entry| entry.name.clone());
+            names.collect::<Vec<_>>()
+        };
+
+        assert_eq!(names(changed + Duration::from_millis(1)), ["added.mara.md"]);
+        // A listing made 2 s or more after the last change is kept while the stat stays.
+        assert_eq!(names(changed + SETTLE), [] as [String; 0]);
+    }
 }
