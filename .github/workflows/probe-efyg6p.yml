@@ -63,9 +63,10 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP/nextest" cargo-nextest
           echo "$RUNNER_TEMP/nextest" >> "$GITHUB_PATH"
       - name: Build the lib tests
-        run: cargo nextest run -p mara --lib inputs:: --locked --no-run
+        run: cargo nextest run -p mara --lib 'inputs::tests' --locked --no-run
       - name: Probe with the late and the real clock
-        run: cargo nextest run -p mara --lib probe_efyg6p --locked --no-capture 2>&1 | grep -E 'PROBE|PASS|FAIL|panicked'
+        run: |
+          cargo nextest run -p mara --lib probe_efyg6p --locked --no-capture 2>&1 | grep -E 'PROBE|PASS|FAIL|panicked'
       - name: The inputs tests, 30 times
         run: |
           fails=0
