@@ -1,5 +1,6 @@
-# The local checks on every supported Linux image (DES-CI-WORKFLOW in docs/distribution.mara.md,
-# ADR-CI-CHECKS in docs/decisions.mara.md). A failure here reproduces with `pnpm run checks`.
+# The local checks on the release's build images, one per supported Linux platform (DES-CI-WORKFLOW
+# in docs/distribution.mara.md, ADR-CI-CHECKS in docs/decisions.mara.md). A failure here reproduces
+# with `pnpm run checks`.
 name: CI
 
 on:
@@ -22,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        os: [ubuntu-22.04, ubuntu-22.04-arm]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
