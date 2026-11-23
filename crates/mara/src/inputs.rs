@@ -1760,6 +1760,50 @@ mod tests {
         Inputs::shared(Arc::clone(session), Arc::default(), Arc::default())
     }
 
+    /// Probe for mara-efyg6p: the stat the session kept of `path` (a directory when `dir`), when
+    /// it was checked, the stat on disk now, and the `now` the next check compares with.
+    fn probe_stat(
+        session: &Mutex<Inputs>,
+        root: &Path,
+        path: &str,
+        dir: bool,
+        now: SystemTime,
+        label: &str,
+    ) {
+        let s = lock(session);
+        let kept = if dir {
+            s.state
+                .inventory
+                .directories
+                .get(path)
+                .map(|l| (l.stat, l.checked))
+        } else {
+            s.state.code.get(path).map(|t| (t.stat, t.checked))
+        };
+        let disk = Stat::of(&fs::symlink_metadata(root.join(path)).unwrap());
+        let unchanged = kept.is_some_and(|k| k.0 == disk);
+        let after = kept.map(|k| now.duration_since(k.1).ok());
+        eprintln!(
+            "PROBE {label}: {path} unchanged={unchanged} kept={kept:?} disk={disk:?} now={now:?} now-checked={after:?}"
+        );
+    }
+
+    #[test]
+    fn probe_two_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f");
+        for _ in 0..10 {
+            fs::write(&path, "a").unwrap();
+            let one = fs::symlink_metadata(&path).unwrap().modified().unwrap();
+            fs::write(&path, "b").unwrap();
+            let two = fs::symlink_metadata(&path).unwrap().modified().unwrap();
+            eprintln!(
+                "PROBE two writes: {one:?} {two:?} difference={:?}",
+                two.duration_since(one)
+            );
+        }
+    }
+
     /// `get` of a code location answers from the record of the file that a check keeps, never
     /// from the one checked last by the clock: here the clock stepped back between an earlier
     /// `get`, which kept the old contents, and a scan of the new ones (DES-DAEMON-SESSIONS).
@@ -1895,6 +1939,14 @@ mod tests {
         fs::rename(root.join("src/a.rs"), root.join("src/c.rs")).unwrap();
         fs::remove_file(root.join("src/b.rs")).unwrap();
         fs::write(root.join("src/.gitignore"), "d.rs\n").unwrap();
+        probe_stat(
+            &session,
+            root,
+            "src",
+            true,
+            now,
+            "forgotten step 1 (rename, delete, ignore)",
+        );
         let mut request = view(&session);
         let listed = request.generation(now, &mut work, CodeReads::List);
         let notes = paths(&["src/notes.mara.md"]);
@@ -1910,6 +1962,14 @@ mod tests {
         // checks only that path and forgets what `get` kept of it when it is no code file.
         as_get(&session);
         fs::rename(root.join("src/c.rs"), root.join("src/e.rs")).unwrap();
+        probe_stat(
+            &session,
+            root,
+            "src",
+            true,
+            now,
+            "forgotten step 2 (rename c to e)",
+        );
         let config = fs::read_to_string(root.join(".mara/config.toml")).unwrap();
         let documents = r#"include = ["docs/**/*.mara.md", "src/**/*.mara.md"]"#;
         let config = config.replacen(r#"include = ["docs/**/*.mara.md"]"#, documents, 1);
@@ -1954,6 +2014,14 @@ mod tests {
         let (older, _, _) = scan(&root, &listed, previous, now, &mut work);
         assert!(older.read.is_empty(), "{:?}", older.read);
         fs::write(root.join("src/.gitignore"), "other.rs\n").unwrap();
+        probe_stat(
+            &session,
+            &root,
+            "src",
+            true,
+            now,
+            "dropped (new .gitignore)",
+        );
         view(&session).generation(now, &mut work, CodeReads::Scan);
         give_back(&session, &root, &older);
         let kept = kept(&session);
@@ -1976,11 +2044,20 @@ mod tests {
         // The older request lists and scans after `lib` changed, so it has a result to give
         // back; then `added` is added, and a newer request scans it and gives it back.
         fs::write(root.join(lib.0), "// @mara implements REQ-B\n").unwrap();
+        probe_stat(
+            &session,
+            &root,
+            lib.0,
+            false,
+            now,
+            "added (same-size rewrite)",
+        );
         let listed = view(&session).generation(now, &mut work, CodeReads::List);
         let previous = Arc::clone(&lock(&session).state.code);
         let (older, _, _) = scan(&root, &listed, previous, now, &mut work);
         assert_eq!(older.read, ["src/lib.rs"]);
         fs::write(root.join("src/added.rs"), "// @mara implements REQ-C\n").unwrap();
+        probe_stat(&session, &root, "src", true, now, "added (added.rs)");
         view(&session).generation(now, &mut work, CodeReads::Scan);
         give_back(&session, &root, &older);
         let kept = kept(&session);
@@ -2035,7 +2112,13 @@ mod tests {
     #[test]
     fn probe_efyg6p() {
         let mtime = |path: &Path| fs::symlink_metadata(path).unwrap().modified().unwrap();
-        let scenarios = ["rewrite-same-size", "add", "rename", "gitignore", "get-after-rename"];
+        let scenarios = [
+            "rewrite-same-size",
+            "add",
+            "rename",
+            "gitignore",
+            "get-after-rename",
+        ];
         for late in [true, false] {
             for scenario in scenarios {
                 let (mut same_tick, mut missed, mut missed_same_tick) = (0, 0, 0);
