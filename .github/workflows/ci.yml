@@ -43,6 +43,27 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      # cargo-nextest, which runs every `test` task (ADR-NX-RUST-TASKS): the prebuilt release for the
+      # runner's architecture, checked against its pinned SHA-256. Moving the pin changes all three.
+      - name: Install cargo-nextest
+        env:
+          VERSION: 0.9.152
+          SHA256_X64: d039b43c3e0958441b6ad0a39c8884d018b3d2e8fb9928f209074b1100b5e17a
+          SHA256_ARM64: ca1f81a5b86533eb45ab97e0064aa88e925e53aab9a698ca6331a7cad1f85f07
+        run: |
+          case "$RUNNER_ARCH" in
+            X64) triple=x86_64-unknown-linux-gnu sha256=$SHA256_X64 ;;
+            ARM64) triple=aarch64-unknown-linux-gnu sha256=$SHA256_ARM64 ;;
+            *) echo "no pinned cargo-nextest for $RUNNER_ARCH" >&2; exit 1 ;;
+          esac
+          archive="$RUNNER_TEMP/cargo-nextest.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$VERSION/cargo-nextest-$VERSION-$triple.tar.gz"
+          echo "$sha256  $archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/nextest"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/nextest" cargo-nextest
+          echo "$RUNNER_TEMP/nextest" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/nextest/cargo-nextest" nextest --version
 
       - run: pnpm install --frozen-lockfile
 
