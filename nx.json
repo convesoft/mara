@@ -41,5 +41,27 @@
     "@convesoft/nx-rust:lockfile": {},
     "@convesoft/nx-rust:release-publish": {}
   },
-  "analytics": false
+  "analytics": false,
+  "release": {
+    "projects": ["mara"],
+    "conventionalCommits": {
+      "useCommitScope": false
+    },
+    "releaseTag": {
+      "pattern": "v{version}"
+    },
+    "changelog": {
+      "automaticFromRef": true,
+      "workspaceChangelog": {
+        "createRelease": "github",
+        "file": false
+      },
+      "projectChangelogs": false,
+      "git": {
+        "commit": false,
+        "tag": true,
+        "push": true
+      }
+    }
+  }
 }
