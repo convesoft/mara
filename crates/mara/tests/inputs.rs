@@ -3,6 +3,9 @@
 //! REQ-WORK-FOLLOWS-CHANGE in `docs/performance.mara.md`). Each request is a call with its own
 //! `now`; later requests pass a later `now`, as time passing would.
 
+#[path = "support/stat.rs"]
+mod stat;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -11,6 +14,7 @@ use std::time::{Duration, SystemTime};
 
 use mara::inputs::{Generation, Inputs};
 use mara_engine::work::WorkCounts;
+use stat::visibly;
 
 const CONFIG: &str = "format_version = 1\nschema = \".mara/schema.toml\"\n\n[documents]\nformat_version = 1\ninclude = [\"**/*.mara.md\"]\n";
 
@@ -333,7 +337,11 @@ fn a_moved_document_is_read_but_not_parsed_again() {
     let mut clock = Clock::new();
     let mut inputs = Inputs::new(project.root.clone());
     request(&mut inputs, clock.next());
-    project.rename("docs/a.mara.md", "docs/sub/moved.mara.md");
+    visibly(&project.path("docs"), || {
+        visibly(&project.path("docs/sub"), || {
+            project.rename("docs/a.mara.md", "docs/sub/moved.mara.md");
+        });
+    });
     let (generation, work) = request(&mut inputs, clock.next());
     assert_eq!(work, counts(1, 1, 0, 1));
     assert_eq!(
@@ -353,11 +361,15 @@ fn an_added_document_is_parsed_and_a_removed_one_dropped() {
     let mut clock = Clock::new();
     let mut inputs = Inputs::new(project.root.clone());
     request(&mut inputs, clock.next());
-    project.write("docs/new/c.mara.md", &document(11, ""));
+    visibly(&project.path("docs"), || {
+        project.write("docs/new/c.mara.md", &document(11, ""));
+    });
     let (generation, work) = request(&mut inputs, clock.next());
     assert_eq!(work, counts(1, 1, 1, 1));
     assert_eq!(generation.snapshot.items_with_mid(&mid(11)).len(), 1);
-    project.remove("docs/local.mara.md");
+    visibly(&project.path("docs"), || {
+        project.remove("docs/local.mara.md")
+    });
     let (generation, work) = request(&mut inputs, clock.next());
     assert_eq!(work, counts(0, 0, 0, 1));
     assert_eq!(generation.snapshot.items_with_mid(&mid(4)).len(), 0);
