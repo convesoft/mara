@@ -55,4 +55,7 @@ One line per decision made on the maintainer's behalf: what was decided, what it
 
 - 2026-11-23 (mara-ezzbnc): the check names for branch protection are `Checks (ubuntu-24.04)` and `Checks (ubuntu-24.04-arm)`; no job of the release workflow is recommended as a required check, because its dry run on pull requests starts only when release inputs change and a required check that never runs blocks the merge. The maintainer sets branch protection.
 
+- 2026-11-23 (mara-rw6rhp): the tests run with cargo-nextest 0.9.152, which CI installs from the prebuilt release archive with a pinned SHA-256 per architecture (`ADR-NX-RUST-TASKS`, `ADR-CI-CHECKS`). The full `checks` now counts 861 passed and 16 skipped (cargo: 860 and 16; the extra one is the `harness = false` binary `diagnostic_memory`). Undo: remove `testRunner` from the root `Cargo.toml` and the install step.
+- 2026-11-23 (mara-rw6rhp review): two gaps in the key of `test` under nextest are accepted and stated in `ADR-NX-RUST-TASKS`, because this repository has no `.config/nextest.toml` and ignores none: an ignored `.config/nextest.toml` and the contents of nextest's user configuration are not hashed (the plugin's input declaration; backlog mara-dt2aez; reported to the maintainer as a finding about nx-rust).
+
 - [ ] The maintainer has read the list

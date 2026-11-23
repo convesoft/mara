@@ -1,6 +1,6 @@
 ---
 title: "Release workflow: build, pack, smoke-test and publish a prerelease from one commit"
-status: todo
+status: in-progress
 type: task
 parent: mara-c8scn7
 blocked_by:
