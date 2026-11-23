@@ -159,6 +159,14 @@
 - Rejected: one job that publishes or, in a dry run, runs `npm publish --dry-run`, as zban's. A dry run would hold `id-token: write` and `contents: write`.
 - Chosen by the worker: the release restores no cache.
 - Rejected: restoring CI's Cargo and Soufflé caches. A published binary would come from another run's build.
+- Chosen by the worker of mara-a3aq0n on 2026-11-23: the setup steps that CI and the release share are the composite action `.github/actions/setup`.
+- Rejected: a reusable workflow, which is a job of its own and cannot run before the steps of the calling job. Rejected: a copy of the steps in each job, which drift.
+- Chosen by the worker of mara-a3aq0n: the registry is read with `curl` from its abbreviated package document.
+- Rejected: `npm view`, which exits 1 both for a missing version and for a failed request (npm 12.2.1), to be told apart only by its message.
+- Chosen by the worker of mara-a3aq0n: a push or pull-request dry run leaves out `npm publish --dry-run` for a version that npm has, with a warning.
+- Rejected: running it anyway. npm 11.5.1 and later refuse a dry run of a published version (`lib/commands/publish.js`), so every push between a release and the next version commit would fail.
+- Chosen by the worker of mara-a3aq0n: runs of a ref wait in order with `queue: max`.
+- Rejected: GitHub's default queue, which cancels a waiting run when a newer one of the ref arrives: a push to `main` would cancel a dispatched publication that waits for a dry run.
 
 ---
 

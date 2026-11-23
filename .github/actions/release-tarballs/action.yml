@@ -1,0 +1,64 @@
+# The packed tarballs of a release run (DES-RELEASE-WORKFLOW in docs/distribution.mara.md), for
+# the Dry run, Publish and Tag jobs of release.yml: downloads every `npm-*` artifact of the run and
+# fails unless the directory holds exactly one tarball per package, each with the SHA-256 that the
+# install verification of a Build job recorded for it. Writes their SHA256SUMS beside them.
+name: Collect the verified tarballs
+description: >-
+  Downloads the tarballs that the Pack dispatcher and Build jobs uploaded and checks them against
+  the checksums that each Build job recorded after its install verification.
+inputs:
+  packages:
+    description: The JSON list of {name, tarball} that the Prepare job wrote, native packages first.
+    required: true
+outputs:
+  directory:
+    description: The directory that holds the tarballs and SHA256SUMS, and nothing else.
+    value: ${{ steps.check.outputs.directory }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v8
+      with:
+        pattern: npm-*
+        path: ${{ runner.temp }}/npm
+        merge-multiple: true
+    - id: check
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        DIRECTORY: ${{ runner.temp }}/npm
+      run: |
+        cd "$DIRECTORY"
+        shopt -s nullglob
+        records=(verified-*.sha256)
+        if [ "${#records[@]}" -eq 0 ]; then
+          echo "::error::no Build job recorded the tarballs that its install verification ran on"
+          exit 1
+        fi
+        # Each Build job recorded its native tarball and the dispatcher's. Two checksums for one
+        # name would mean that the jobs verified different files under it.
+        sort -u "${records[@]}" > "$RUNNER_TEMP/verified.sha256"
+        recorded=$(cut -d ' ' -f 3- "$RUNNER_TEMP/verified.sha256" | sort)
+        repeated=$(uniq -d <<<"$recorded")
+        if [ -n "$repeated" ]; then
+          echo "::error::the Build jobs verified different tarballs named $repeated"
+          exit 1
+        fi
+        expected=$(jq -r '.[].tarball' <<<"$PACKAGES" | sort)
+        present=$(printf '%s\n' *.tgz | sort)
+        if [ "$recorded" != "$expected" ] || [ "$present" != "$expected" ]; then
+          echo "::error::expected exactly the tarballs of every package, each verified by a Build job"
+          echo "expected:"; echo "$expected"
+          echo "verified:"; echo "$recorded"
+          echo "downloaded:"; echo "$present"
+          exit 1
+        fi
+        sha256sum --check --strict "$RUNNER_TEMP/verified.sha256"
+        # SHA256SUMS in the order of the packages, which the release attaches.
+        # A line of sha256sum is 64 hexadecimal digits, two spaces and the name.
+        jq -r '.[].tarball' <<<"$PACKAGES" | while read -r tarball; do
+          awk -v name="$tarball" 'substr($0, 67) == name' "$RUNNER_TEMP/verified.sha256"
+        done > SHA256SUMS
+        rm -- "${records[@]}"
+        ls -l
+        echo "directory=$DIRECTORY" >> "$GITHUB_OUTPUT"

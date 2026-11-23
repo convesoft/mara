@@ -22,7 +22,7 @@ Context: the Design item for the release workflow that the spec issue of this ep
 - [ ] A pull request or push that changes a release input (the workflow, the packaging script, the dispatcher, the manifests) runs everything but the publication
 - [ ] Without the dry run it publishes the native packages, waits until npm shows them, publishes the dispatcher, runs `npx @convesoft/mara@<version> --version` against the registry, and then creates the annotated tag `v<version>` and the GitHub release. A rerun after a partial publication continues: an already published package with the same checksum is accepted, another checksum fails
 - [ ] It refuses the dist-tag `latest` for a prerelease version, and a version whose tag or npm version exists
-- [ ] The workspace version is `0.4.0-rc.1` in this change, set the way the Design item says
+- [x] The workspace version is `0.4.0-rc.1` in this change, set the way the Design item says
 - [ ] A dry run on the pushed integration branch passes on both platforms; its link is in the closing summary
 - [ ] The closing summary lists what only the maintainer can do, in order: create the native package names on npm and set their Trusted Publishers, create the GitHub environment, fast-forward `main` if the workflow must run from it, start the workflow without the dry run
 
