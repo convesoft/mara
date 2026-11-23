@@ -247,12 +247,18 @@ fn an_output_past_the_size_limit_is_a_fault_without_rows() {
 #[test]
 fn a_program_past_the_memory_limit_is_stopped_before_the_time_limit() {
     let sandbox = Sandbox::new();
-    // 10^10 pairs: far more than twice the limit of 1 GiB.
-    let program = ".include \"mara.dl\"\n.decl n(x: number)\nn(x) :- x = range(0, 100000).\n\
-                   .decl p(x: number, y: number)\np(x, y) :- n(x), n(y).\n\
-                   .decl bad(m: Mid, c: number)\n\
-                   bad(m, c) :- item(m, _, _, _, _, _), c = count : p(_, _).\n";
-    sandbox.program("p.dl", program, &both_severities("p.dl", "bad"));
+    // A symbol doubled 24 times to 16 MiB, then 128 copies of it: 2 GiB, twice the limit of
+    // 1 GiB, reached by copying memory rather than by inserting tuples, so that a slow or busy
+    // machine still gets there in a small fraction of the time limit.
+    let copies = vec!["t"; 128].join(", ");
+    let program = format!(
+        ".include \"mara.dl\"\n.decl s(i: number, t: symbol)\ns(0, \"x\").\n\
+         s(i + 1, cat(t, t)) :- s(i, t), i < 24.\n\
+         .decl big(t: symbol)\nbig(cat({copies})) :- s(24, t).\n\
+         .decl bad(m: Mid, c: number)\n\
+         bad(m, c) :- item(m, _, _, _, _, _), c = count : big(_).\n"
+    );
+    sandbox.program("p.dl", &program, &both_severities("p.dl", "bad"));
     let run = sandbox.validate();
     assert_fault(
         &run,
