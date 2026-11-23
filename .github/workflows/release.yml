@@ -19,7 +19,7 @@ on:
         type: boolean
   # Without a path filter, so that every tip of either branch has passed a dry run.
   push:
-    branches: [main, chore/clear-worktree-for-rewrite, ci/release-prerelease-workflow]
+    branches: [main, chore/clear-worktree-for-rewrite]
   pull_request:
     paths:
       - .github/workflows/release.yml
