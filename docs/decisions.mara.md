@@ -125,10 +125,11 @@
 | Justifies | [DES-PACKAGES](distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8) |
 
 - Chosen by the worker of mara-a57pzn on 2026-11-22: the GitHub images `ubuntu-22.04` and `ubuntu-22.04-arm`, whose glibc is 2.35, the images of 0.3.0's release. This preserves 0.3.0's Linux glibc floor.
-- Rejected: `ubuntu-24.04`, CI's image. Its glibc 2.39 refuses Debian 12 (2.36) and Ubuntu 22.04 (2.35).
+- Rejected: `ubuntu-24.04`. Its glibc 2.39 refuses Debian 12 (2.36) and Ubuntu 22.04 (2.35).
+- CI runs on these images too ([ADR-CI-CHECKS](#01M82C8WTKTJW5PRD24K1XRBES)).
 - Rejected: static musl binaries, as zban ships. Soufflé was never built against musl, and the platforms are glibc ([ADR-KEEP-PLATFORMS-AND-NODE](#01M7CMW6YNXSQAS7H0ATKG4GH0)).
 - Rejected: a build in an older container, such as a manylinux image. Soufflé needs CMake, Bison, Flex and a C++17 compiler inside it, a second build environment beside CI's.
-- Known limit: GitHub keeps at most two generally available Ubuntu images and listed 26.04, 24.04 and 22.04 on 2026-11-22. When it retires `ubuntu-22.04`, the minimum glibc changes by a new decision.
+- Known limit: GitHub keeps at most two generally available Ubuntu images and listed 26.04, 24.04 and 22.04 on 2026-11-22. When it retires `ubuntu-22.04`, the minimum glibc and CI's images change by a new decision.
 
 ---
 
@@ -161,6 +162,11 @@
 - Rejected: one job that publishes or, in a dry run, runs `npm publish --dry-run`, as zban's. A dry run would hold `id-token: write` and `contents: write`.
 - Chosen by the worker: the release restores no cache.
 - Rejected: restoring CI's Cargo and Soufflé caches. A published binary would come from another run's build.
+- Chosen by the maintainer on 2026-11-23: the release runs no checks, as nx-rust's and zban's; CI runs them on every pull request and push to `main`, on the build images ([ADR-CI-CHECKS](#01M82C8WTKTJW5PRD24K1XRBES)). Each Build job builds Soufflé from source, which the check jobs built before; a dry run took 11 minutes on 2026-11-23, against about 30 with the check jobs.
+- Rejected by the maintainer: check jobs of the release on the build images, about 30 minutes before any build. They ran the suite CI had run on the commit.
+- Chosen by the worker of mara-mknkec on 2026-11-23: Prepare does not read CI's result for the recorded commit; `main`'s ruleset, which requires CI's checks before a merge and forbids direct pushes, holds it, as nx-rust's release relies on its protection. A publication runs only from `main`.
+- Known limit: the ruleset does not require a branch to be up to date before a merge, so CI's push run on `main` is the first run on the merged commit itself; dispatch a publication after it passed.
+- Rejected: Prepare reading the commit's check runs (`checks: read`). It needs the names of the required checks in a second place beside the ruleset, and a dispatch right after a merge would fail while the push run of `main` is still running.
 - Chosen by the worker of mara-a3aq0n on 2026-11-23: the setup steps that CI and the release share are the composite action `.github/actions/setup`.
 - Rejected: a reusable workflow, which is a job of its own and cannot run before the steps of the calling job. Rejected: a copy of the steps in each job, which drift.
 - Chosen by the worker of mara-a3aq0n: the registry is read with `curl` from its abbreviated package document.
@@ -191,10 +197,11 @@
 - Rejected: a copy of the script's `nx` commands in the workflow. The two would drift.
 - Chosen by the worker: no Nx cache between CI runs.
 - Rejected: saving `.nx/cache` in the CI cache. Its keys hold no Cargo or Rustfmt configuration outside the repository ([ADR-NX-RUST-TASKS](#01M8094G2DV9JZ35C8VRMFPWYV)), and a restored result checks nothing on the pushed commit.
-- Chosen by the worker: the images `ubuntu-24.04` and `ubuntu-24.04-arm`.
+- Chosen by the maintainer on 2026-11-23: the images `ubuntu-22.04` and `ubuntu-22.04-arm`, the release's build images ([ADR-LINUX-BUILD-IMAGE](#01M82C8WTKAM5575JF0MN21ZA4)), so that a green `main` means the checks passed where the binaries are built, and the release runs none ([ADR-DISPATCHED-RELEASE](#01M82C8WTKPTQCXJQT024J3GP5)).
+- Rejected by the maintainer: CI on `ubuntu-24.04` and `ubuntu-24.04-arm` with check jobs of the release on the build images. The suite ran twice, and failures of the build images only (kernel 6.8, 1 ms file timestamps, slower runners: mara-efyg6p, mara-4xsamc) showed only at a release.
 - Chosen by the worker: the toolchain that `rust-toolchain.toml` pins, and no other.
 - Rejected: a job on the oldest supported Rust, as zban's CI runs. The workspace declares no `rust-version`; it pins one toolchain (AGENTS.md).
-- Rejected: `ubuntu-latest`, which moves to a new release without a change in the repository. Rejected: the release's `ubuntu-22.04`, the image GitHub retires first; the release runs the checks there anyway.
+- Rejected: `ubuntu-latest`, which moves to a new release without a change in the repository.
 - Chosen by the worker: the performance test in every run, on shared runners.
 - Rejected: leaving it to the nightly job. [VER-SCALING](verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW) runs it on every pull request, and [ADR-SCALING-CPU-TIME](#01M7DTPFQMCA1VN75741RKEDR6) measured it beside other loads.
 - Chosen by the worker of mara-1avrq4 on 2026-11-22: Soufflé's CI cache entry is saved by a step of its own after the checks, also when one failed.
@@ -400,7 +407,7 @@
 - Rejected by the maintainer: keeping the cargo commands in AGENTS.md as a second way to run the local checks. They duplicate what the targets run.
 - The scripts pass `--output-style=static`, so that every task prints its log, the test counts included, also when the output is no terminal.
 - Rejected: Nx's default output style, which prints no task logs when the output is no terminal.
-- CI and the release workflow run the local checks as `pnpm run checks`, with the steps around it that [DES-CI-WORKFLOW](distribution.mara.md#01M82C8WTKYXH8S92ZJQ4FX73R) and [DES-RELEASE-WORKFLOW](distribution.mara.md#01M82C8WTK3M2A69XWRGNNQ0SF) give; the targets that the release adds are named there.
+- CI runs the local checks as `pnpm run checks`, with the steps around it that [DES-CI-WORKFLOW](distribution.mara.md#01M82C8WTKYXH8S92ZJQ4FX73R) gives; the targets that the release runs are named in [DES-RELEASE-WORKFLOW](distribution.mara.md#01M82C8WTK3M2A69XWRGNNQ0SF).
 - Chosen by the maintainer on 2026-11-22: every `test` task runs its crate's tests with cargo-nextest and then its doctests with `cargo test --doc` (`testRunner = "nextest"`). A task that names one test target runs only that target. The full suite took 84 s against 159 s with the plugin's default, `cargo test`, results equal (mara-7wysb0).
 - Chosen by the worker of mara-rw6rhp on 2026-11-22: the setting is in `[workspace.metadata.nx]` of the root `Cargo.toml`, beside the workspace's other Nx metadata.
 - Rejected: the plugin's options in `nx.json`. They apply to every Cargo workspace of the repository, and this one has one.
@@ -408,7 +415,7 @@
 - Chosen by the worker of mara-rw6rhp on 2026-11-22: adding `--ignored` to the listing command prints nothing. Other invocations run the allocation check.
 - Chosen by the worker of mara-rw6rhp on 2026-11-22: the suite passes with nextest's defaults, so the workspace has no `.config/nextest.toml`.
 - With nextest, the key of `test` holds the output of `cargo nextest --version`, a tracked or unignored `.config/nextest.toml` and every `NEXTEST_*` variable. It does not hold an ignored `.config/nextest.toml` or the contents of nextest's user configuration, the file that `NEXTEST_USER_CONFIG_FILE` names or the per-user default; a change to either can restore a result it would change (mara-dt2aez).
-- Chosen by the worker of mara-7wysb0 on 2026-11-22: `affectedTests` stays off. Each uncached `test` task, in `checks`, CI and the release, runs its full suite.
+- Chosen by the worker of mara-7wysb0 on 2026-11-22: `affectedTests` stays off. Each uncached `test` task, in `checks` and CI, runs its full suite.
 - Rejected: `affectedTests`. A change to `mara` or `mara-engine` runs every integration test of `mara`, because those tests can start its binary, the 60 s `cold_counts` among them: 83.6 s against 84.0 s full, and 83.8 s against 83.3 s. A docs-only edit reruns only `docs-checks:test` (about 2 s) when the Rust test results are cached. The coverage baseline does not collect on this repository: 494 of 825 tests fail under instrumentation, and with their causes worked around a limit test and a daemon test still did; one collection took 156 s and 10 GiB (mara-vxeweg).
 - The table lists what `checks` runs with the default Cargo configuration. The plugin infers `fmt-check`, `lint` and `test` for each crate and batches their work across crates. The manifests define the extra targets and the configurations `wasm32` and `performance`:
 

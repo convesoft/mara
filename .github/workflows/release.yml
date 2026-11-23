@@ -1,7 +1,8 @@
 # Builds, packs, verifies and publishes the npm packages of one commit (DES-RELEASE-WORKFLOW in
 # docs/distribution.mara.md, ADR-DISPATCHED-RELEASE in docs/decisions.mara.md). It starts only by a
-# manual dispatch, and a dispatch is a dry run unless its input says otherwise. The Trusted
-# Publisher entries of the packages name this file, release.yml.
+# manual dispatch, and a dispatch is a dry run unless its input says otherwise. It runs no checks:
+# CI runs them on every commit of `main`, on the same build images. The Trusted Publisher entries of
+# the packages name this file, release.yml.
 name: Release
 
 on:
@@ -137,44 +138,9 @@ jobs:
             echo "dispatcher_tarball=$(jq -r 'last.tarball' <<<"$packages")"
           } >> "$GITHUB_OUTPUT"
 
-  # The local checks on the build images, on the recorded commit, without any cache.
-  checks:
-    name: Checks (${{ matrix.os }})
-    needs: prepare
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm]
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-    timeout-minutes: 60
-    steps:
-      # Full history and tags: the conversion tests and the key of `mara:test` read `v0.3.0`.
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      # The grammar that .mara/config.toml pins, which `mara:validate` needs (DES-GRAMMAR-ASSETS).
-      - run: cargo run --locked --quiet --bin mara -- --no-daemon code add rust
-      - run: pnpm run checks
-        env:
-          NX_DAEMON: "false"
-      # As a tar archive, which keeps the binary's mode.
-      - name: Keep the Soufflé that the checks built
-        run: tar -czf "$RUNNER_TEMP/souffle.tar.gz" -C target souffle-2.5/souffle souffle-2.5/LICENSE
-      - uses: actions/upload-artifact@v7
-        with:
-          name: souffle-${{ matrix.os }}
-          path: ${{ runner.temp }}/souffle.tar.gz
-          if-no-files-found: error
-
   pack-dispatcher:
     name: Pack dispatcher
-    needs: [prepare, checks]
+    needs: prepare
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -215,14 +181,10 @@ jobs:
       - uses: ./.github/actions/setup
       - uses: actions/download-artifact@v8
         with:
-          name: souffle-${{ matrix.os }}
-          path: ${{ runner.temp }}/souffle
-      # scripts/build-souffle.sh, which `pack-native` runs, only checks this binary.
-      - run: mkdir -p target && tar -xzf "$RUNNER_TEMP/souffle/souffle.tar.gz" -C target
-      - uses: actions/download-artifact@v8
-        with:
           name: npm-dispatcher
           path: dist/npm
+      # Builds `mara` and, through `cargo-workspace:souffle`, Soufflé from source, since no cache is
+      # restored, then packs the native package.
       - run: pnpm nx run mara-npm:pack-native:release --output-style=static
         env:
           NX_DAEMON: "false"
