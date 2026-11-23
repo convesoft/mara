@@ -1760,6 +1760,18 @@ mod tests {
         Inputs::shared(Arc::clone(session), Arc::default(), Arc::default())
     }
 
+    /// Runs `change`, which changes the file or directory `path`, then sets the mtime of `path`
+    /// a second past the one it had before. A test whose checks come an hour late settles every
+    /// stat it reads, so without this a change in the timestamp tick of the stat that a check
+    /// saw would leave that stat as it was where timestamps are coarse, as on Linux before
+    /// 6.13. A request's real check finds such a change by the 2 s rule (DES-INPUTS-AND-KEYS).
+    fn visibly(path: &Path, change: impl FnOnce()) {
+        let before = fs::symlink_metadata(path).unwrap().modified().unwrap();
+        change();
+        let after = before + Duration::from_secs(1);
+        fs::File::open(path).unwrap().set_modified(after).unwrap();
+    }
+
     /// `get` of a code location answers from the record of the file that a check keeps, never
     /// from the one checked last by the clock: here the clock stepped back between an earlier
     /// `get`, which kept the old contents, and a scan of the new ones (DES-DAEMON-SESSIONS).
@@ -1892,9 +1904,11 @@ mod tests {
             |paths: &[&str]| -> Vec<String> { paths.iter().map(|path| path.to_string()).collect() };
 
         // Renamed, deleted, and ignored.
-        fs::rename(root.join("src/a.rs"), root.join("src/c.rs")).unwrap();
-        fs::remove_file(root.join("src/b.rs")).unwrap();
-        fs::write(root.join("src/.gitignore"), "d.rs\n").unwrap();
+        visibly(&root.join("src"), || {
+            fs::rename(root.join("src/a.rs"), root.join("src/c.rs")).unwrap();
+            fs::remove_file(root.join("src/b.rs")).unwrap();
+            fs::write(root.join("src/.gitignore"), "d.rs\n").unwrap();
+        });
         let mut request = view(&session);
         let listed = request.generation(now, &mut work, CodeReads::List);
         let notes = paths(&["src/notes.mara.md"]);
@@ -1909,7 +1923,9 @@ mod tests {
         // Renamed again, and the other file now a document; then `get` of each path, which
         // checks only that path and forgets what `get` kept of it when it is no code file.
         as_get(&session);
-        fs::rename(root.join("src/c.rs"), root.join("src/e.rs")).unwrap();
+        visibly(&root.join("src"), || {
+            fs::rename(root.join("src/c.rs"), root.join("src/e.rs")).unwrap();
+        });
         let config = fs::read_to_string(root.join(".mara/config.toml")).unwrap();
         let documents = r#"include = ["docs/**/*.mara.md", "src/**/*.mara.md"]"#;
         let config = config.replacen(r#"include = ["docs/**/*.mara.md"]"#, documents, 1);
@@ -1953,7 +1969,9 @@ mod tests {
         let previous = Arc::clone(&lock(&session).state.code);
         let (older, _, _) = scan(&root, &listed, previous, now, &mut work);
         assert!(older.read.is_empty(), "{:?}", older.read);
-        fs::write(root.join("src/.gitignore"), "other.rs\n").unwrap();
+        visibly(&root.join("src"), || {
+            fs::write(root.join("src/.gitignore"), "other.rs\n").unwrap();
+        });
         view(&session).generation(now, &mut work, CodeReads::Scan);
         give_back(&session, &root, &older);
         let kept = kept(&session);
@@ -1975,12 +1993,16 @@ mod tests {
         view(&session).generation(now, &mut work, CodeReads::Scan);
         // The older request lists and scans after `lib` changed, so it has a result to give
         // back; then `added` is added, and a newer request scans it and gives it back.
-        fs::write(root.join(lib.0), "// @mara implements REQ-B\n").unwrap();
+        visibly(&root.join(lib.0), || {
+            fs::write(root.join(lib.0), "// @mara implements REQ-B\n").unwrap();
+        });
         let listed = view(&session).generation(now, &mut work, CodeReads::List);
         let previous = Arc::clone(&lock(&session).state.code);
         let (older, _, _) = scan(&root, &listed, previous, now, &mut work);
         assert_eq!(older.read, ["src/lib.rs"]);
-        fs::write(root.join("src/added.rs"), "// @mara implements REQ-C\n").unwrap();
+        visibly(&root.join("src"), || {
+            fs::write(root.join("src/added.rs"), "// @mara implements REQ-C\n").unwrap();
+        });
         view(&session).generation(now, &mut work, CodeReads::Scan);
         give_back(&session, &root, &older);
         let kept = kept(&session);
