@@ -167,6 +167,11 @@
 - Rejected: running it anyway. npm 11.5.1 and later refuse a dry run of a published version (`lib/commands/publish.js`), so every push between a release and the next version commit would fail.
 - Chosen by the worker of mara-a3aq0n: runs of a ref wait in order with `queue: max`.
 - Rejected: GitHub's default queue, which cancels a waiting run when a newer one of the ref arrives: a push to `main` would cancel a dispatched publication that waits for a dry run.
+- Chosen by the worker of mara-a3aq0n on 2026-11-23, after review: the registry helper is a command, not a file the steps source, so that it changes no shell option of the step.
+- Chosen by the worker of mara-a3aq0n: the dist-tag baseline is an artifact uploaded before the first publication, kept across re-runs.
+- Rejected: a job output, which a re-run of Publish replaces with a snapshot taken after the earlier attempt published.
+- Chosen by the worker of mara-a3aq0n: Tag reads the release's assets through the REST API and attaches again an asset not in the state `uploaded`. GitHub's upload API "may leave an empty asset with a state of starter" after a 502 (https://docs.github.com/en/rest/releases/assets#upload-a-release-asset).
+- Rejected: telling a missing release by the text of `gh release view`, which is not a stable interface.
 
 ---
 

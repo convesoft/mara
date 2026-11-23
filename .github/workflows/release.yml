@@ -19,7 +19,7 @@ on:
         type: boolean
   # Without a path filter, so that every tip of either branch has passed a dry run.
   push:
-    branches: [main, chore/clear-worktree-for-rewrite]
+    branches: [main, chore/clear-worktree-for-rewrite, ci/release-prerelease-workflow]
   pull_request:
     paths:
       - .github/workflows/release.yml
@@ -67,7 +67,6 @@ jobs:
       dist_tag: ${{ steps.prepare.outputs.dist_tag }}
       packages: ${{ steps.prepare.outputs.packages }}
       dispatcher_tarball: ${{ steps.prepare.outputs.dispatcher_tarball }}
-      published: ${{ steps.prepare.outputs.published }}
     steps:
       # The commit of the event: the pushed or dispatched commit, or a pull request's merge commit.
       - uses: actions/checkout@v7
@@ -83,29 +82,35 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
-          DIST_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.dist_tag || 'next' }}
+          INPUT_DIST_TAG: ${{ inputs.dist_tag }}
           DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run }}
         run: |
-          source .github/scripts/npm-registry.sh
+          # A dispatch's input is validated as given, an empty one included; the automatic runs
+          # use `next`.
+          if [ "$EVENT" = workflow_dispatch ]; then
+            dist_tag=$INPUT_DIST_TAG
+          else
+            dist_tag=next
+          fi
           sha=$(git rev-parse HEAD)
           version=$(cargo metadata --no-deps --format-version 1 --offline --locked |
             jq -r '.packages[] | select(.name == "mara") | .version')
-          echo "commit $sha, version $version, dist-tag $DIST_TAG, dry run $DRY_RUN"
+          echo "commit $sha, version $version, dist-tag \"$dist_tag\", dry run $DRY_RUN"
 
           semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$'
           if ! [[ $version =~ $semver ]]; then
             echo "::error::the version \"$version\" is not SemVer without build metadata"
             exit 1
           fi
-          if ! [[ $DIST_TAG =~ ^[a-z][a-z0-9._-]*$ ]]; then
-            echo "::error::the dist-tag \"$DIST_TAG\" does not match ^[a-z][a-z0-9._-]*\$"
+          if ! [[ $dist_tag =~ ^[a-z][a-z0-9._-]*$ ]]; then
+            echo "::error::the dist-tag \"$dist_tag\" does not match ^[a-z][a-z0-9._-]*\$"
             exit 1
           fi
           prerelease=false
           if [[ $version == *-* ]]; then
             prerelease=true
           fi
-          if [ "$prerelease" = true ] && [ "$DIST_TAG" = latest ]; then
+          if [ "$prerelease" = true ] && [ "$dist_tag" = latest ]; then
             echo "::error::$version is a prerelease, which is never published under latest"
             exit 1
           fi
@@ -130,7 +135,7 @@ jobs:
           published=()
           mapfile -t names < <(jq -r '.[].name' <<<"$packages")
           for name in "${names[@]}"; do
-            shasum=$(registry_shasum "$name" "$version")
+            shasum=$(.github/scripts/npm-registry.sh shasum "$name" "$version")
             if [ -n "$shasum" ]; then
               published+=("$name")
             fi
@@ -153,10 +158,9 @@ jobs:
             echo "version=$version"
             echo "tag=$tag"
             echo "prerelease=$prerelease"
-            echo "dist_tag=$DIST_TAG"
+            echo "dist_tag=$dist_tag"
             echo "packages=$(jq -c . <<<"$packages")"
             echo "dispatcher_tarball=$(jq -r 'last.tarball' <<<"$packages")"
-            echo "published=$(printf '%s\n' "${published[@]}" | jq -R . | jq -cs 'map(select(. != ""))')"
           } >> "$GITHUB_OUTPUT"
 
   # The local checks on the build images, on the recorded commit, without any cache.
@@ -300,21 +304,32 @@ jobs:
         with:
           packages: ${{ needs.prepare.outputs.packages }}
       # npm refuses even a dry run of a version it has, which only a push or pull-request run
-      # reaches: Prepare refuses it on a dispatch.
+      # reaches: Prepare refuses it on a dispatch. The registry is read right before each
+      # package's dry run, and again when npm refuses it, since a publication can land meanwhile.
       - name: npm publish --dry-run, native packages first
         working-directory: ${{ steps.tarballs.outputs.directory }}
         env:
           PACKAGES: ${{ needs.prepare.outputs.packages }}
-          PUBLISHED: ${{ needs.prepare.outputs.published }}
+          VERSION: ${{ needs.prepare.outputs.version }}
           DIST_TAG: ${{ needs.prepare.outputs.dist_tag }}
         run: |
+          registry="$GITHUB_WORKSPACE/.github/scripts/npm-registry.sh"
           npm --version
-          jq -r '.[] | "\(.name) \(.tarball)"' <<<"$PACKAGES" | while read -r name tarball; do
-            if jq -e --arg name "$name" 'index($name) != null' <<<"$PUBLISHED" >/dev/null; then
-              echo "::warning::npm has this version of $name, so its dry run is left out"
-              continue
+          mapfile -t entries < <(jq -r '.[] | "\(.name) \(.tarball)"' <<<"$PACKAGES")
+          for entry in "${entries[@]}"; do
+            read -r name tarball <<<"$entry"
+            published=$("$registry" shasum "$name" "$VERSION")
+            if [ -z "$published" ]; then
+              if npm publish "./$tarball" --dry-run --access public --tag "$DIST_TAG" </dev/null; then
+                continue
+              fi
+              published=$("$registry" shasum "$name" "$VERSION")
+              if [ -z "$published" ]; then
+                echo "::error::npm publish --dry-run of $name failed, and npm has no $VERSION of it"
+                exit 1
+              fi
             fi
-            npm publish "./$tarball" --dry-run --access public --tag "$DIST_TAG" </dev/null
+            echo "::warning::npm has $name@$VERSION, so its dry run is left out"
           done
 
   publish:
@@ -329,8 +344,6 @@ jobs:
       contents: read
       id-token: write
     timeout-minutes: 60
-    outputs:
-      dist_tags: ${{ steps.dist-tags.outputs.dist_tags }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -354,19 +367,43 @@ jobs:
             exit 1
           fi
           echo "npm $version"
-      - name: Record the dist-tags of every package
+      # The dist-tags before the run's first publication attempt, which Registry check compares.
+      # An earlier attempt of this run uploaded them before it published anything; a re-run finds
+      # that artifact and keeps it. Without one, no attempt has published, and the tags are read
+      # now. Should the download have failed although the artifact exists, the upload below fails,
+      # because an artifact's name is taken once per run.
+      - name: Find the dist-tags that an earlier attempt recorded
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: dist-tags-before
+          path: ${{ runner.temp }}/dist-tags
+      - name: Record the dist-tags of every package before the first publication
         id: dist-tags
         env:
           PACKAGES: ${{ needs.prepare.outputs.packages }}
         run: |
-          source .github/scripts/npm-registry.sh
+          file="$RUNNER_TEMP/dist-tags/dist-tags-before.json"
+          if [ -f "$file" ]; then
+            echo "an earlier attempt of this run recorded:"
+            jq . "$file"
+            exit 0
+          fi
           tags='{}'
-          while read -r name; do
-            tags=$(jq -c --arg name "$name" --argjson value "$(registry_dist_tags "$name")" \
-              '.[$name] = $value' <<<"$tags")
-          done < <(jq -r '.[].name' <<<"$PACKAGES")
-          jq . <<<"$tags"
-          echo "dist_tags=$tags" >> "$GITHUB_OUTPUT"
+          mapfile -t names < <(jq -r '.[].name' <<<"$PACKAGES")
+          for name in "${names[@]}"; do
+            value=$(.github/scripts/npm-registry.sh dist-tags "$name")
+            tags=$(jq -c --arg name "$name" --argjson value "$value" '.[$name] = $value' <<<"$tags")
+          done
+          mkdir -p "$(dirname "$file")"
+          jq . <<<"$tags" | tee "$file"
+          echo "recorded=true" >> "$GITHUB_OUTPUT"
+      - if: steps.dist-tags.outputs.recorded == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-tags-before
+          path: ${{ runner.temp }}/dist-tags/dist-tags-before.json
+          if-no-files-found: error
       # A re-run continues a partial publication: a version that npm has with the tarball's SHA-1
       # is skipped, one with another fails, and only a version that npm reports absent is
       # published. The dispatcher follows once npm shows every native package.
@@ -377,11 +414,11 @@ jobs:
           DIST_TAG: ${{ needs.prepare.outputs.dist_tag }}
           DIRECTORY: ${{ steps.tarballs.outputs.directory }}
         run: |
-          source .github/scripts/npm-registry.sh
+          registry=.github/scripts/npm-registry.sh
           publish() {
             local name=$1 tarball="$DIRECTORY/$2" expected published
             expected=$(sha1sum "$tarball" | cut -d ' ' -f 1)
-            published=$(registry_shasum "$name" "$VERSION")
+            published=$("$registry" shasum "$name" "$VERSION")
             if [ -z "$published" ]; then
               (cd "$RUNNER_TEMP" && npm publish "$tarball" --provenance --access public --tag "$DIST_TAG")
             elif [ "$published" = "$expected" ]; then
@@ -400,7 +437,7 @@ jobs:
           for native in "${natives[@]}"; do
             read -r name tarball <<<"$native"
             expected=$(sha1sum "$DIRECTORY/$tarball" | cut -d ' ' -f 1)
-            until [ "$(registry_shasum "$name" "$VERSION")" = "$expected" ]; do
+            until [ "$("$registry" shasum "$name" "$VERSION")" = "$expected" ]; do
               if [ "$SECONDS" -ge "$deadline" ]; then
                 echo "::error::npm did not show $name@$VERSION within 30 minutes"
                 exit 1
@@ -430,7 +467,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       # Each try has an empty directory and npm cache, so that an installation that missed a native
-      # package which npm did not serve yet is not reused.
+      # package which npm did not serve yet is not reused, and stops after 5 minutes.
       - name: npx @convesoft/mara@<version> --version
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -439,7 +476,7 @@ jobs:
           while :; do
             try=$(mktemp -d "$RUNNER_TEMP/npx.XXXXXX")
             if printed=$(cd "$try" && npm_config_cache="$try/.npm" \
-              npx --yes --ignore-scripts "@convesoft/mara@$VERSION" --version) &&
+              timeout 300 npx --yes --ignore-scripts "@convesoft/mara@$VERSION" --version) &&
               [ "$printed" = "mara $VERSION" ]; then
               echo "$printed"
               break
@@ -455,17 +492,22 @@ jobs:
         env:
           NX_DAEMON: "false"
           VERSION: ${{ needs.prepare.outputs.version }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist-tags-before
+          path: ${{ runner.temp }}/dist-tags
+      # The other dist-tags are compared as JSON values, so that their order does not matter.
       - name: Check every package's dist-tags
         env:
           PACKAGES: ${{ needs.prepare.outputs.packages }}
           VERSION: ${{ needs.prepare.outputs.version }}
           DIST_TAG: ${{ needs.prepare.outputs.dist_tag }}
-          BEFORE: ${{ needs.publish.outputs.dist_tags }}
         run: |
-          source .github/scripts/npm-registry.sh
+          before_all=$(cat "$RUNNER_TEMP/dist-tags/dist-tags-before.json")
           deadline=$((SECONDS + 1800))
-          while read -r name; do
-            until tags=$(registry_dist_tags "$name") &&
+          mapfile -t names < <(jq -r '.[].name' <<<"$PACKAGES")
+          for name in "${names[@]}"; do
+            until tags=$(.github/scripts/npm-registry.sh dist-tags "$name") &&
               [ "$(jq -r --arg tag "$DIST_TAG" '.[$tag] // ""' <<<"$tags")" = "$VERSION" ]; do
               if [ "$SECONDS" -ge "$deadline" ]; then
                 echo "::error::$DIST_TAG of $name does not name $VERSION within 30 minutes: $tags"
@@ -473,14 +515,14 @@ jobs:
               fi
               sleep 30
             done
-            before=$(jq -c --arg name "$name" --arg tag "$DIST_TAG" '.[$name] | del(.[$tag])' <<<"$BEFORE")
+            before=$(jq -c --arg name "$name" --arg tag "$DIST_TAG" '.[$name] | del(.[$tag])' <<<"$before_all")
             after=$(jq -c --arg tag "$DIST_TAG" 'del(.[$tag])' <<<"$tags")
-            if [ "$before" != "$after" ]; then
+            if ! jq -e -n --argjson before "$before" --argjson after "$after" '$before == $after' >/dev/null; then
               echo "::error::the other dist-tags of $name changed: $before before, $after after"
               exit 1
             fi
             echo "$name: $tags"
-          done < <(jq -r '.[].name' <<<"$PACKAGES")
+          done
 
   tag:
     name: Tag
@@ -527,35 +569,58 @@ jobs:
             fi
             echo "the tag $TAG names $SHA"
           fi
-      # An existing release is reused; each file it lacks is attached, and an attached one must
-      # have the SHA-256 of this run's.
+      # An existing release is reused. The release is looked up by the API's status: 404 is no
+      # release of the tag. Each file is attached unless the release holds an asset of its name in
+      # the state `uploaded`, whose SHA-256 must equal this run's; an asset in another state is
+      # an interrupted upload, which is deleted and attached again.
       - name: Create the GitHub release and attach the tarballs and SHA256SUMS
         env:
           DIRECTORY: ${{ steps.tarballs.outputs.directory }}
         run: |
-          if ! found=$(gh release view "$TAG" --json tagName 2>&1); then
-            if [ "$found" != "release not found" ]; then
-              echo "::error::cannot read the release of $TAG: $found"
-              exit 1
-            fi
+          release="$RUNNER_TEMP/release.json"
+          # Prints the HTTP status of the release of the tag and writes its body to $release.
+          lookup() {
+            curl -sS --connect-timeout 10 --max-time 60 -o "$release" -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "$GITHUB_API_URL/repos/$GH_REPO/releases/tags/$TAG"
+          }
+          status=$(lookup)
+          if [ "$status" = 404 ]; then
             flags=()
             if [ "$PRERELEASE" = true ]; then
               flags=(--prerelease --latest=false)
             fi
             gh release create "$TAG" --verify-tag --title "Mara $VERSION" --generate-notes "${flags[@]}"
+            status=$(lookup)
           fi
-          attached=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          if [ "$status" != 200 ]; then
+            echo "::error::GitHub answered $status for the release of $TAG"
+            exit 1
+          fi
           download=$(mktemp -d "$RUNNER_TEMP/attached.XXXXXX")
           cd "$DIRECTORY"
           for file in *; do
-            if grep -Fxq -- "$file" <<<"$attached"; then
-              gh release download "$TAG" --pattern "$file" --dir "$download"
-              if [ "$(sha256sum < "$download/$file")" != "$(sha256sum < "$file")" ]; then
-                echo "::error::the release's $file differs from this run's"
-                exit 1
-              fi
-              echo "the release has this run's $file"
-            else
-              gh release upload "$TAG" "$file"
+            asset=$(jq -c --arg name "$file" '[.assets[] | select(.name == $name)] | first // empty' "$release")
+            state=$(jq -r '.state // ""' <<<"${asset:-null}")
+            if [ -n "$asset" ] && [ "$state" != uploaded ]; then
+              echo "the release's $file is in the state $state; deleting it"
+              gh api -X DELETE "repos/$GH_REPO/releases/assets/$(jq -r .id <<<"$asset")"
+              asset=
             fi
+            if [ -z "$asset" ]; then
+              gh release upload "$TAG" "$file"
+              continue
+            fi
+            expected="sha256:$(sha256sum "$file" | cut -d ' ' -f 1)"
+            digest=$(jq -r '.digest // ""' <<<"$asset")
+            if [ -z "$digest" ]; then
+              gh release download "$TAG" --pattern "$file" --dir "$download"
+              digest="sha256:$(sha256sum "$download/$file" | cut -d ' ' -f 1)"
+            fi
+            if [ "$digest" != "$expected" ]; then
+              echo "::error::the release's $file has $digest, not this run's $expected"
+              exit 1
+            fi
+            echo "the release has this run's $file"
           done
