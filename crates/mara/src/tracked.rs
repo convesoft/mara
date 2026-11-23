@@ -70,9 +70,9 @@ fn kept_by(metadata: &Metadata, stat: Stat, checked: SystemTime) -> bool {
 /// A file's contents as of a check, with the value derived from them.
 #[derive(Clone, Debug)]
 pub(crate) struct Tracked<T> {
-    pub(crate) stat: Stat,
+    stat: Stat,
     /// When the check that read the contents began.
-    pub(crate) checked: SystemTime,
+    checked: SystemTime,
     pub(crate) hash: Hash,
     pub(crate) value: T,
 }
@@ -250,8 +250,8 @@ pub(crate) fn check<T>(
 /// A directory's entries as of a check.
 #[derive(Clone, Debug)]
 pub(crate) struct Listing {
-    pub(crate) stat: Stat,
-    pub(crate) checked: SystemTime,
+    stat: Stat,
+    checked: SystemTime,
     /// By name.
     pub(crate) entries: Arc<[Entry]>,
 }

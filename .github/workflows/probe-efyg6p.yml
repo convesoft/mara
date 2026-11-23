@@ -11,44 +11,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, ubuntu-24.04]
+        os: [ubuntu-22.04, ubuntu-22.04-arm]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
-      - name: Kernel, file system and timestamp granularity
-        run: |
-          uname -a
+      - run: |
           uname -r
-          stat -f -c %T .
           findmnt -T .
-          findmnt -T /tmp
-          echo a > w1; echo b > w2; stat -c '%n %y %z' w1 w2; rm w1 w2
-          grep -E '^CONFIG_HZ=|MULTIGRAIN' /boot/config-$(uname -r) || true
-          df -T "$GITHUB_WORKSPACE" /tmp "$RUNNER_TEMP"
-          cat > "$RUNNER_TEMP/gran.py" <<'PY'
-          import os, sys, time
-          d = sys.argv[1]
-          f = os.path.join(d, "gran-file")
-          sub = os.path.join(d, "gran-dir")
-          os.makedirs(sub, exist_ok=True)
-          files, dirs = set(), set()
-          end = time.time() + 0.3
-          i = 0
-          while time.time() < end:
-              with open(f, "w") as out:
-                  out.write("x")
-              files.add(os.stat(f).st_mtime_ns)
-              open(os.path.join(sub, str(i)), "w").close()
-              dirs.add(os.stat(sub).st_mtime_ns)
-              i += 1
-          for name, vals in (("file", files), ("dir", dirs)):
-              v = sorted(vals)
-              deltas = sorted(b - a for a, b in zip(v, v[1:]))
-              print(d, name, "writes", i, "distinct mtimes", len(v),
-                    "median delta ms", deltas[len(deltas) // 2] / 1e6 if deltas else None)
-          PY
-          for d in /tmp "$GITHUB_WORKSPACE" "$RUNNER_TEMP"; do python3 "$RUNNER_TEMP/gran.py" "$d"; done
       - run: rustup toolchain install
       - name: Install cargo-nextest
         env:
@@ -67,22 +37,17 @@ jobs:
           mkdir -p "$RUNNER_TEMP/nextest"
           tar -xzf "$archive" -C "$RUNNER_TEMP/nextest" cargo-nextest
           echo "$RUNNER_TEMP/nextest" >> "$GITHUB_PATH"
-      - name: Build the lib tests
-        run: cargo nextest run -p mara --lib 'inputs::tests' --locked --no-run
-      - name: Two writes, from Rust
-        run: |
-          cargo nextest run -p mara --lib probe_two_writes --locked --no-capture 2>&1 | grep PROBE
-      - name: The three failing tests, 30 times, with what each stat'ed at its failing step
+      - name: Build the tests
+        run: cargo nextest run -p mara --locked --lib --test inputs --test write --no-run
+      - name: The three integration tests and the tick tests, 40 times
         run: |
           fails=0
-          for i in $(seq 30); do
-            if ! cargo nextest run -p mara --lib --locked --no-fail-fast --no-capture -E 'test(a_code_file_that_left_is_forgotten) | test(an_older_scan_)' > "$RUNNER_TEMP/run.txt" 2>&1; then
+          for i in $(seq 40); do
+            if ! cargo nextest run -p mara --locked --lib --test inputs --test write --no-fail-fast -E 'test(a_moved_document_is_read_but_not_parsed_again) | test(an_added_document_is_parsed_and_a_removed_one_dropped) | test(a_written_item_loads_and_the_project_stays_valid) | test(_in_the_tick_of_the_)' > "$RUNNER_TEMP/run.txt" 2>&1; then
               fails=$((fails + 1))
               echo "=== run $i failed"
-              grep -E 'PROBE|panicked|left:|right:' "$RUNNER_TEMP/run.txt"
-            elif [ "$i" -le 2 ]; then
-              echo "=== run $i passed"
-              grep -E 'PROBE' "$RUNNER_TEMP/run.txt"
+              grep -E '^ +FAIL \[|panicked|left:|right:' "$RUNNER_TEMP/run.txt" | sort -u
             fi
           done
-          echo "runs with a failure: $fails of 30"
+          grep -E 'Summary' "$RUNNER_TEMP/run.txt"
+          echo "runs with a failure: $fails of 40"

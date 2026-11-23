@@ -1760,48 +1760,17 @@ mod tests {
         Inputs::shared(Arc::clone(session), Arc::default(), Arc::default())
     }
 
-    /// Probe for mara-efyg6p: the stat the session kept of `path` (a directory when `dir`), when
-    /// it was checked, the stat on disk now, and the `now` the next check compares with.
-    fn probe_stat(
-        session: &Mutex<Inputs>,
-        root: &Path,
-        path: &str,
-        dir: bool,
-        now: SystemTime,
-        label: &str,
-    ) {
-        let s = lock(session);
-        let kept = if dir {
-            s.state
-                .inventory
-                .directories
-                .get(path)
-                .map(|l| (l.stat, l.checked))
-        } else {
-            s.state.code.get(path).map(|t| (t.stat, t.checked))
-        };
-        let disk = Stat::of(&fs::symlink_metadata(root.join(path)).unwrap());
-        let unchanged = kept.is_some_and(|k| k.0 == disk);
-        let after = kept.map(|k| now.duration_since(k.1).ok());
-        eprintln!(
-            "PROBE {label}: {path} unchanged={unchanged} kept={kept:?} disk={disk:?} now={now:?} now-checked={after:?}"
-        );
-    }
-
-    #[test]
-    fn probe_two_writes() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("f");
-        for _ in 0..10 {
-            fs::write(&path, "a").unwrap();
-            let one = fs::symlink_metadata(&path).unwrap().modified().unwrap();
-            fs::write(&path, "b").unwrap();
-            let two = fs::symlink_metadata(&path).unwrap().modified().unwrap();
-            eprintln!(
-                "PROBE two writes: {one:?} {two:?} difference={:?}",
-                two.duration_since(one)
-            );
-        }
+    /// Runs `change`, which changes the file or directory `path`, then sets the mtime of `path`
+    /// a second past the one it had before. A test whose checks come an hour late settles every
+    /// stat it reads, so without this a change in the timestamp tick of the stat that a check
+    /// saw would leave that stat as it was where timestamps are coarse, as with Linux 6.8 on
+    /// GitHub's `ubuntu-22.04` images (1 ms). A request's real check finds such a change by
+    /// the 2 s rule (DES-INPUTS-AND-KEYS).
+    fn visibly(path: &Path, change: impl FnOnce()) {
+        let before = fs::symlink_metadata(path).unwrap().modified().unwrap();
+        change();
+        let after = before + Duration::from_secs(1);
+        fs::File::open(path).unwrap().set_modified(after).unwrap();
     }
 
     /// `get` of a code location answers from the record of the file that a check keeps, never
@@ -1936,17 +1905,11 @@ mod tests {
             |paths: &[&str]| -> Vec<String> { paths.iter().map(|path| path.to_string()).collect() };
 
         // Renamed, deleted, and ignored.
-        fs::rename(root.join("src/a.rs"), root.join("src/c.rs")).unwrap();
-        fs::remove_file(root.join("src/b.rs")).unwrap();
-        fs::write(root.join("src/.gitignore"), "d.rs\n").unwrap();
-        probe_stat(
-            &session,
-            root,
-            "src",
-            true,
-            now,
-            "forgotten step 1 (rename, delete, ignore)",
-        );
+        visibly(&root.join("src"), || {
+            fs::rename(root.join("src/a.rs"), root.join("src/c.rs")).unwrap();
+            fs::remove_file(root.join("src/b.rs")).unwrap();
+            fs::write(root.join("src/.gitignore"), "d.rs\n").unwrap();
+        });
         let mut request = view(&session);
         let listed = request.generation(now, &mut work, CodeReads::List);
         let notes = paths(&["src/notes.mara.md"]);
@@ -1961,15 +1924,9 @@ mod tests {
         // Renamed again, and the other file now a document; then `get` of each path, which
         // checks only that path and forgets what `get` kept of it when it is no code file.
         as_get(&session);
-        fs::rename(root.join("src/c.rs"), root.join("src/e.rs")).unwrap();
-        probe_stat(
-            &session,
-            root,
-            "src",
-            true,
-            now,
-            "forgotten step 2 (rename c to e)",
-        );
+        visibly(&root.join("src"), || {
+            fs::rename(root.join("src/c.rs"), root.join("src/e.rs")).unwrap();
+        });
         let config = fs::read_to_string(root.join(".mara/config.toml")).unwrap();
         let documents = r#"include = ["docs/**/*.mara.md", "src/**/*.mara.md"]"#;
         let config = config.replacen(r#"include = ["docs/**/*.mara.md"]"#, documents, 1);
@@ -2013,15 +1970,9 @@ mod tests {
         let previous = Arc::clone(&lock(&session).state.code);
         let (older, _, _) = scan(&root, &listed, previous, now, &mut work);
         assert!(older.read.is_empty(), "{:?}", older.read);
-        fs::write(root.join("src/.gitignore"), "other.rs\n").unwrap();
-        probe_stat(
-            &session,
-            &root,
-            "src",
-            true,
-            now,
-            "dropped (new .gitignore)",
-        );
+        visibly(&root.join("src"), || {
+            fs::write(root.join("src/.gitignore"), "other.rs\n").unwrap();
+        });
         view(&session).generation(now, &mut work, CodeReads::Scan);
         give_back(&session, &root, &older);
         let kept = kept(&session);
@@ -2043,21 +1994,16 @@ mod tests {
         view(&session).generation(now, &mut work, CodeReads::Scan);
         // The older request lists and scans after `lib` changed, so it has a result to give
         // back; then `added` is added, and a newer request scans it and gives it back.
-        fs::write(root.join(lib.0), "// @mara implements REQ-B\n").unwrap();
-        probe_stat(
-            &session,
-            &root,
-            lib.0,
-            false,
-            now,
-            "added (same-size rewrite)",
-        );
+        visibly(&root.join(lib.0), || {
+            fs::write(root.join(lib.0), "// @mara implements REQ-B\n").unwrap();
+        });
         let listed = view(&session).generation(now, &mut work, CodeReads::List);
         let previous = Arc::clone(&lock(&session).state.code);
         let (older, _, _) = scan(&root, &listed, previous, now, &mut work);
         assert_eq!(older.read, ["src/lib.rs"]);
-        fs::write(root.join("src/added.rs"), "// @mara implements REQ-C\n").unwrap();
-        probe_stat(&session, &root, "src", true, now, "added (added.rs)");
+        visibly(&root.join("src"), || {
+            fs::write(root.join("src/added.rs"), "// @mara implements REQ-C\n").unwrap();
+        });
         view(&session).generation(now, &mut work, CodeReads::Scan);
         give_back(&session, &root, &older);
         let kept = kept(&session);
@@ -2105,83 +2051,5 @@ mod tests {
             0,
             "answered from the old one"
         );
-    }
-
-    /// Temporary probe for mara-efyg6p: each change right after a request's check, with a clock
-    /// an hour ahead and with the real clock, counting changes in the same timestamp tick.
-    #[test]
-    fn probe_efyg6p() {
-        let mtime = |path: &Path| fs::symlink_metadata(path).unwrap().modified().unwrap();
-        let scenarios = [
-            "rewrite-same-size",
-            "add",
-            "rename",
-            "gitignore",
-            "get-after-rename",
-        ];
-        for late in [true, false] {
-            for scenario in scenarios {
-                let (mut same_tick, mut missed, mut missed_same_tick) = (0, 0, 0);
-                let runs = 200;
-                for _ in 0..runs {
-                    let dir = tempfile::tempdir().unwrap();
-                    let root = dir.path();
-                    let lib = ("src/lib.rs", "// @mara implements REQ-A\n");
-                    let other = ("src/other.rs", "// @mara implements REQ-B\n");
-                    let session = code_project(root, &[lib, other]);
-                    let late_now = SystemTime::now() + Duration::from_secs(3600);
-                    let clock = || if late { late_now } else { SystemTime::now() };
-                    let mut work = WorkCounts::default();
-                    view(&session).generation(clock(), &mut work, CodeReads::Scan);
-                    let watched = if scenario == "rewrite-same-size" {
-                        root.join(lib.0)
-                    } else {
-                        root.join("src")
-                    };
-                    let before = mtime(&watched);
-                    let noticed = match scenario {
-                        "rewrite-same-size" => {
-                            let hash = lock(&session).state.code[lib.0].hash;
-                            fs::write(root.join(lib.0), "// @mara implements REQ-C\n").unwrap();
-                            view(&session).generation(clock(), &mut work, CodeReads::Scan);
-                            lock(&session).state.code[lib.0].hash != hash
-                        }
-                        "add" => {
-                            fs::write(root.join("src/added.rs"), "// x\n").unwrap();
-                            view(&session).generation(clock(), &mut work, CodeReads::Scan);
-                            kept(&session)[0].contains(&"src/added.rs".to_string())
-                        }
-                        "rename" => {
-                            fs::rename(root.join(lib.0), root.join("src/renamed.rs")).unwrap();
-                            view(&session).generation(clock(), &mut work, CodeReads::Scan);
-                            kept(&session)[0] == ["src/other.rs", "src/renamed.rs"]
-                        }
-                        "gitignore" => {
-                            fs::write(root.join("src/.gitignore"), "other.rs\n").unwrap();
-                            view(&session).generation(clock(), &mut work, CodeReads::Scan);
-                            kept(&session)[0] == ["src/lib.rs"]
-                        }
-                        _ => {
-                            fs::rename(root.join(lib.0), root.join("src/renamed.rs")).unwrap();
-                            let (language, _) =
-                                view(&session).code_file("src/renamed.rs", clock(), &mut work);
-                            language == Some(0)
-                        }
-                    };
-                    let tick = mtime(&watched) == before;
-                    same_tick += usize::from(tick);
-                    missed += usize::from(!noticed);
-                    missed_same_tick += usize::from(!noticed && tick);
-                }
-                eprintln!(
-                    "PROBE clock={} scenario={scenario}: runs={runs} same_tick={same_tick} \
-                     missed={missed} missed_in_same_tick={missed_same_tick}",
-                    if late { "late" } else { "real" }
-                );
-                if !late {
-                    assert_eq!(missed, 0, "the real clock missed a change: {scenario}");
-                }
-            }
-        }
     }
 }
