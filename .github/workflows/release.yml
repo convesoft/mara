@@ -1,8 +1,9 @@
 # Builds, packs, verifies and publishes the npm packages of one commit (DES-RELEASE-WORKFLOW in
 # docs/distribution.mara.md, ADR-DISPATCHED-RELEASE in docs/decisions.mara.md). It starts only by a
 # manual dispatch, and a dispatch is a dry run unless its input says otherwise. It runs no checks:
-# CI runs them on every commit of `main`, on the same build images. The Trusted Publisher entries of
-# the packages name this file, release.yml.
+# CI runs them on every commit of `main`, on the same build images. The tag, the GitHub release and
+# its notes come from `nx release changelog` with the `release` block of nx.json. The Trusted
+# Publisher entries of the packages name this file, release.yml.
 name: Release
 
 on:
@@ -43,7 +44,6 @@ jobs:
       sha: ${{ steps.prepare.outputs.sha }}
       version: ${{ steps.prepare.outputs.version }}
       tag: ${{ steps.prepare.outputs.tag }}
-      prerelease: ${{ steps.prepare.outputs.prerelease }}
       dist_tag: ${{ steps.prepare.outputs.dist_tag }}
       packages: ${{ steps.prepare.outputs.packages }}
       dispatcher_tarball: ${{ steps.prepare.outputs.dispatcher_tarball }}
@@ -132,7 +132,6 @@ jobs:
             echo "sha=$sha"
             echo "version=$version"
             echo "tag=$tag"
-            echo "prerelease=$prerelease"
             echo "dist_tag=$dist_tag"
             echo "packages=$(jq -c . <<<"$packages")"
             echo "dispatcher_tarball=$(jq -r 'last.tarball' <<<"$packages")"
@@ -225,16 +224,17 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
+      # With every tag, from which `nx release changelog` takes the previous release.
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          package-manager-cache: false
+      # nx-rust builds the project graph with cargo when `nx release changelog` runs.
+      - uses: ./.github/actions/setup
       - id: tarballs
         uses: ./.github/actions/release-tarballs
         with:
@@ -267,6 +267,15 @@ jobs:
             fi
             echo "::warning::npm has $name@$VERSION, so its dry run is left out"
           done
+      # Prints the notes that Tag would publish, and the tag, push and release it would make. A dry
+      # run only reads the tag's release from the API, with the job's read-only token.
+      - name: nx release changelog --dry-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NX_DAEMON: "false"
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: pnpm nx release changelog "$VERSION" --dry-run --git-push-args="refs/tags/$TAG" </dev/null
 
   publish:
     name: Publish
@@ -469,67 +478,84 @@ jobs:
       name: release
     permissions:
       contents: write
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       SHA: ${{ needs.prepare.outputs.sha }}
       VERSION: ${{ needs.prepare.outputs.version }}
       TAG: ${{ needs.prepare.outputs.tag }}
-      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+      NX_DAEMON: "false"
     steps:
-      # With the job's token in Git's configuration, which pushes the tag.
+      # With the job's token in Git's configuration, which pushes the tag, and with every tag, from
+      # which `nx release changelog` takes the previous release.
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      # nx-rust builds the project graph with cargo when `nx release changelog` runs.
+      - uses: ./.github/actions/setup
       - id: tarballs
         uses: ./.github/actions/release-tarballs
         with:
           packages: ${{ needs.prepare.outputs.packages }}
-      # An existing tag is accepted only when it names the recorded commit.
-      - name: Push the annotated tag on the recorded commit
+      # `nx release changelog` tags HEAD, the recorded commit, pushes the tag, and creates the GitHub
+      # release of the tag with its notes, a prerelease for a version with a prerelease part. It
+      # fails on a tag that exists, so a re-run makes only what is missing: an existing tag must
+      # name the recorded commit; without its release, Nx creates the release alone, after the
+      # local copy of the tag is deleted, so that the notes start at the release before, as they
+      # would have; an existing release and its notes are kept. Standard input is empty, so that a
+      # prompt of Nx after a failed API call fails the step.
+      - name: Tag and create the GitHub release with nx release changelog
         run: |
           remote=$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}")
           if [ -z "$remote" ]; then
-            git -c user.name="github-actions[bot]" \
-              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              tag -a "$TAG" -m "Mara $VERSION" "$SHA"
-            git push origin "refs/tags/$TAG"
-          else
-            # The commit is the peeled line of an annotated tag, else the only line.
-            commit=$(awk -v peeled="refs/tags/$TAG^{}" '$2 == peeled { print $1 }' <<<"$remote")
-            commit=${commit:-$(awk '{ print $1; exit }' <<<"$remote")}
-            if [ "$commit" != "$SHA" ]; then
-              echo "::error::the tag $TAG names $commit, not the recorded commit $SHA"
-              exit 1
-            fi
-            echo "the tag $TAG names $SHA"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            pnpm nx release changelog "$VERSION" --git-push-args="refs/tags/$TAG" </dev/null
+            exit 0
           fi
-      # An existing release is reused. The release is looked up by the API's status: 404 is no
-      # release of the tag. Each file is attached unless the release holds an asset of its name in
-      # the state `uploaded`, whose SHA-256 must equal this run's; an asset in another state is
-      # an interrupted upload, which is deleted and attached again.
-      - name: Create the GitHub release and attach the tarballs and SHA256SUMS
+          # The commit is the peeled line of an annotated tag, else the only line.
+          commit=$(awk -v peeled="refs/tags/$TAG^{}" '$2 == peeled { print $1 }' <<<"$remote")
+          commit=${commit:-$(awk '{ print $1; exit }' <<<"$remote")}
+          if [ "$commit" != "$SHA" ]; then
+            echo "::error::the tag $TAG names $commit, not the recorded commit $SHA"
+            exit 1
+          fi
+          echo "the tag $TAG names $SHA"
+          status=$(curl -sS --connect-timeout 10 --max-time 60 -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "$GITHUB_API_URL/repos/$GH_REPO/releases/tags/$TAG")
+          case "$status" in
+            200)
+              echo "the release of $TAG exists; it and its notes are kept"
+              ;;
+            404)
+              if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+                git tag -d "$TAG"
+              fi
+              pnpm nx release changelog "$VERSION" --git-tag=false --git-push=false </dev/null
+              ;;
+            *)
+              echo "::error::GitHub answered $status for the release of $TAG"
+              exit 1
+              ;;
+          esac
+      # The release is looked up by the API's status: 404 is no release of the tag. Each file is
+      # attached unless the release holds an asset of its name in the state `uploaded`, whose
+      # SHA-256 must equal this run's; an asset in another state is an interrupted upload, which
+      # is deleted and attached again.
+      - name: Attach the tarballs and SHA256SUMS to the GitHub release
         env:
           DIRECTORY: ${{ steps.tarballs.outputs.directory }}
         run: |
           release="$RUNNER_TEMP/release.json"
-          # Prints the HTTP status of the release of the tag and writes its body to $release.
-          lookup() {
-            curl -sS --connect-timeout 10 --max-time 60 -o "$release" -w '%{http_code}' \
-              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "$GITHUB_API_URL/repos/$GH_REPO/releases/tags/$TAG"
-          }
-          status=$(lookup)
-          if [ "$status" = 404 ]; then
-            flags=()
-            if [ "$PRERELEASE" = true ]; then
-              flags=(--prerelease --latest=false)
-            fi
-            gh release create "$TAG" --verify-tag --title "Mara $VERSION" --generate-notes "${flags[@]}"
-            status=$(lookup)
-          fi
+          status=$(curl -sS --connect-timeout 10 --max-time 60 -o "$release" -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "$GITHUB_API_URL/repos/$GH_REPO/releases/tags/$TAG")
           if [ "$status" != 200 ]; then
             echo "::error::GitHub answered $status for the release of $TAG"
             exit 1

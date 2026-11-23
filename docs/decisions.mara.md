@@ -153,10 +153,15 @@
 - Chosen by the maintainer on 2026-11-23: the workflow starts only by a manual dispatch, as nx-rust's; the dry run before a release is one dispatch.
 - Rejected by the maintainer: a dry run on each push to `main` and on each pull request that changes a release input. Runs of a ref queue, about 30 minutes each on four runners: ten merges in three hours are five hours of runs, and a dispatched release waits behind them. A break of the release then shows at the dry dispatch, not at the merge.
 - Rejected by the maintainer: gates that hold only for a slice, such as `next` only or no version without a prerelease part.
-- Chosen by the worker: GitHub's generated release notes.
-- Rejected: `nx release changelog`, as zban and nx-rust use it. It needs a release configuration in `nx.json`, which nothing else here uses. Rejected: 0.3.0's `CHANGELOG.md` with git-cliff, which the maintainer's tooling replaces (mara-4dr2p2).
+- Chosen by the maintainer on 2026-11-23: the tag, the GitHub release and its notes come from `nx release changelog`, as in zban and nx-rust, with a `release` block in `nx.json` after theirs (mara-n918j4). His words: "I want the same nx generated release notes like on zban and nx release come on why you thing I sent them as examples?"
+- Rejected by the maintainer: GitHub's generated release notes, which the rc.1 slice had chosen. Rejected: 0.3.0's `CHANGELOG.md` with git-cliff, which the maintainer's tooling replaces (mara-4dr2p2).
+- Chosen by the worker of mara-n918j4 on 2026-11-23: on a re-run, Tag runs `nx release changelog` only for what is missing: without the tag in full, without the tag and push when only the release is missing, and not at all when the release exists.
+- Rejected: running it as it is on a re-run, as zban's release does. `git tag` refuses the existing tag, and with the tag present Nx's notes start at that tag and hold no commit. Rejected: letting Nx update an existing release, which would replace notes edited since.
+- Chosen by the worker of mara-n918j4 on 2026-11-23: Nx's defaults for the tag's message and the release's title, both `v<version>`, and for `strictPreid`.
+- Rejected: `Mara <version>`, as rc.1's tag and release had it, which needs a setting the references do not have.
 - Chosen by the worker: the version set by hand in `Cargo.toml`.
-- Rejected: `nx release version`. It needs a release group in `nx.json` for one string, and runs `cargo update --workspace` online (nx-rust's `docs/release.mara.md`).
+- Rejected: `nx release version`. It would write the version and `Cargo.lock` in the run and commit them, for one string set by hand, and runs `cargo update --workspace` online (nx-rust's `docs/release.mara.md`).
+- Rejected: `nx release publish`. Its Rust task publishes crates with `cargo publish`; the packages are npm tarballs that Publish publishes after their install verification.
 - Rejected: the version as an input of the dispatch, as nx-rust's release takes it. `mara --version` and the MCP `serverInfo` come from `Cargo.toml` and would disagree with the package.
 - Chosen by the worker: write permissions only in the Publish and Tag jobs, which a dry run never starts.
 - Rejected: one job that publishes or, in a dry run, runs `npm publish --dry-run`, as zban's. A dry run would hold `id-token: write` and `contents: write`.
