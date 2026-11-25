@@ -1,6 +1,6 @@
 ---
 title: Node library and shared typed client
-status: todo
+status: in-progress
 type: feature
 parent: mara-xzfeyj
 blocked_by:
