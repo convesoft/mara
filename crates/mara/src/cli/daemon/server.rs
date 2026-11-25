@@ -9,8 +9,11 @@
 //! while the connection's thread tells the client every [`daemon::HEARTBEAT`] that it still runs.
 //! A watcher re-derives a session in the background after its inputs changed ([`Watcher`]).
 //!
+//! Started with `--http`, it also answers browsers on a loopback port ([`http`]).
+//!
 //! A session is dropped after the idle period without a request ([`idle_period`]), and the
-//! daemon exits with its last session, or after the idle period when it opened none. It also
+//! daemon exits with its last session, or after the idle period when it opened none, unless it
+//! listens for browsers. It also
 //! ends on a `stop` request and on SIGTERM, SIGINT or SIGHUP: it takes no new request, removes
 //! its socket, ends its rule evaluations, lets its writes finish and exits, which ends its
 //! other requests.
@@ -35,6 +38,10 @@ use serde_json::{Value, json};
 
 use crate::cli::client;
 
+mod http;
+
+pub(super) use http::{Listener, bind};
+
 /// How long a session lasts without a request, and the daemon without a request while it opened
 /// no session (DES-IDLE-SESSIONS).
 const IDLE_PERIOD: Duration = Duration::from_secs(30 * 60);
@@ -47,14 +54,16 @@ fn idle_period() -> Duration {
     hooks::number(Hook::IdleSeconds).map_or(IDLE_PERIOD, Duration::from_secs)
 }
 
-/// Forks the daemon, which inherits `lock`, already taken, and opens the session of the project
-/// at the canonical root `project`, if any. Returns its process ID once it listens, or why it
-/// could not start. The calling process must run no other thread.
+/// Forks the daemon, which inherits `lock`, already taken, and `browsers`, the listener for
+/// browsers if it has one, and opens the session of the project at the canonical root `project`,
+/// if any. Returns its process ID once it listens, or why it could not start. The calling process
+/// must run no other thread.
 pub(super) fn launch(
     runtime: &Runtime,
     build: &Build,
     lock: File,
     project: Option<PathBuf>,
+    browsers: Option<Listener>,
 ) -> Result<u32, String> {
     let idle = idle_period();
     let (mut reader, writer) =
@@ -67,11 +76,12 @@ pub(super) fn launch(
         )),
         0 => {
             drop(reader);
-            child(runtime, build, &lock, writer, idle, project)
+            child(runtime, build, &lock, writer, idle, project, browsers)
         }
         pid => {
             drop(writer);
             drop(lock);
+            drop(browsers);
             let mut report = String::new();
             let _ = reader.read_to_string(&mut report);
             match report.strip_prefix("error: ") {
@@ -91,12 +101,19 @@ fn child(
     mut ready: PipeWriter,
     idle: Duration,
     project: Option<PathBuf>,
+    browsers: Option<Listener>,
 ) -> ! {
-    match listen(runtime, lock, ready.as_raw_fd()) {
+    let mut keep = vec![ready.as_raw_fd()];
+    keep.extend(
+        browsers
+            .as_ref()
+            .map(|browsers| browsers.socket.as_raw_fd()),
+    );
+    match listen(runtime, lock, &keep) {
         Ok((listener, signals)) => {
             let _ = ready.write_all(b"ready");
             drop(ready);
-            serve(listener, runtime, build, signals, idle, project)
+            serve(listener, runtime, build, signals, idle, project, browsers)
         }
         Err(message) => {
             let _ = ready.write_all(format!("error: {message}").as_bytes());
@@ -106,10 +123,17 @@ fn child(
     }
 }
 
-/// Leaves the caller's session and streams, blocks the signals that stop the daemon so that
-/// one thread waits for them, replaces a stale socket and records this process in the lock.
-fn listen(runtime: &Runtime, lock: &File, ready: RawFd) -> Result<(UnixListener, Signals), String> {
-    detach(&[lock.as_raw_fd(), ready]).map_err(|error| format!("cannot detach: {error}"))?;
+/// Leaves the caller's session and streams, keeping only the descriptors `keep` and the lock,
+/// blocks the signals that stop the daemon so that one thread waits for them, replaces a stale
+/// socket and records this process in the lock.
+fn listen(
+    runtime: &Runtime,
+    lock: &File,
+    keep: &[RawFd],
+) -> Result<(UnixListener, Signals), String> {
+    let mut kept = vec![lock.as_raw_fd()];
+    kept.extend_from_slice(keep);
+    detach(&kept).map_err(|error| format!("cannot detach: {error}"))?;
     let signals = Signals::block().map_err(|error| format!("cannot block signals: {error}"))?;
     runtime.check().map_err(|error| error.to_string())?;
     // The lock is ours, so a socket left here belongs to a daemon that ended.
@@ -218,6 +242,8 @@ struct Daemon {
     sessions: Sessions,
     /// `None` where the system offers no watching: requests check the inputs all the same.
     watcher: Option<Watcher>,
+    /// What the listener for browsers checks, when the daemon has one.
+    browsers: Option<http::Access>,
 }
 
 struct State {
@@ -242,6 +268,27 @@ impl Daemon {
 
     fn stop(&self) {
         self.state().stopping = true;
+        self.changed.notify_all();
+    }
+
+    /// Counts a request as being answered, and as a write when `write`, unless the daemon
+    /// stops: then it takes no new request.
+    fn admit(&self, write: bool) -> bool {
+        let mut state = self.state();
+        if !state.stopping {
+            state.active += 1;
+            state.writes += usize::from(write);
+        }
+        !state.stopping
+    }
+
+    /// Counts a request that [`Daemon::admit`] took as answered.
+    fn release(&self, write: bool) {
+        {
+            let mut state = self.state();
+            state.active -= 1;
+            state.writes -= usize::from(write);
+        }
         self.changed.notify_all();
     }
 
@@ -274,6 +321,7 @@ impl Daemon {
                     "pid": self.pid,
                     "sessions": sessions,
                     "served": self.state().served,
+                    "http": self.browsers.as_ref().map(http::Access::json),
                 })
             }
             // The daemon stops once this answer is sent ([`connection`]), so the client gets it
@@ -317,10 +365,15 @@ fn serve(
     signals: Signals,
     idle: Duration,
     project: Option<PathBuf>,
+    browsers: Option<Listener>,
 ) -> ! {
     let socket = fs::symlink_metadata(&runtime.socket)
         .map(|metadata| (metadata.dev(), metadata.ino()))
         .ok();
+    let (browsers, access) = match browsers {
+        Some(Listener { socket, access }) => (Some(socket), Some(access)),
+        None => (None, None),
+    };
     let daemon = Arc::new(Daemon {
         pid: std::process::id(),
         build: build.key(),
@@ -335,6 +388,7 @@ fn serve(
         changed: Condvar::new(),
         sessions: Sessions::default(),
         watcher: Watcher::start(),
+        browsers: access,
     });
     // The project the daemon was started for is warm before its first request.
     if let Some(root) = project {
@@ -357,8 +411,24 @@ fn serve(
             .name("mara-accept".to_owned())
             .spawn(move || accept(&on_connection, &listener))
     });
-    if spawned.is_ok() {
+    // The listener for browsers closes its socket once the daemon stops.
+    let browsers = spawned.and_then(|_| match browsers {
+        Some(browsers) => {
+            let on_browser = Arc::clone(&daemon);
+            let spawned = thread::Builder::new()
+                .name("mara-http-accept".to_owned())
+                .spawn(move || http::accept(&on_browser, browsers));
+            spawned.map(Some)
+        }
+        None => Ok(None),
+    });
+    if let Ok(browsers) = browsers {
         wait_until_stopping(&daemon);
+        // Closed before the process exits, so that a connection after `stop` returned is
+        // refused.
+        if let Some(browsers) = browsers {
+            let _ = browsers.join();
+        }
     }
     // Reads end with the process; rule evaluations end first, each killing its child and
     // removing its directory; writes run to their end. Cancelled before the socket goes, so
@@ -384,8 +454,10 @@ fn serve(
 }
 
 /// Returns once the daemon stops: by request, by signal, when its last session is dropped, or
-/// after the idle period when it opened none. Drops each session idle for the idle period.
+/// after the idle period when it opened none, unless it listens for browsers, which cannot start
+/// a daemon. Drops each session idle for the idle period.
 fn wait_until_stopping(daemon: &Daemon) {
+    let listening = daemon.browsers.is_some();
     let mut state = daemon.state();
     loop {
         if state.stopping {
@@ -401,7 +473,7 @@ fn wait_until_stopping(daemon: &Daemon) {
         let deadline = if daemon.sessions.opened() {
             match next {
                 Some(next) => next,
-                None if state.active == 0 => {
+                None if state.active == 0 && !listening => {
                     state.stopping = true;
                     return;
                 }
@@ -411,7 +483,7 @@ fn wait_until_stopping(daemon: &Daemon) {
         } else {
             let deadline = state.last_request + daemon.idle;
             match deadline <= now {
-                true if state.active == 0 => {
+                true if state.active == 0 && !listening => {
                     state.stopping = true;
                     return;
                 }
@@ -465,15 +537,7 @@ fn connection(daemon: &Daemon, mut stream: UnixStream) {
             .as_ref()
             .is_ok_and(|request| request["request"] == "operation");
         let write = operation && request.as_ref().is_ok_and(client::writes);
-        let taken = {
-            let mut state = daemon.state();
-            if !state.stopping {
-                state.active += 1;
-                state.writes += usize::from(write);
-            }
-            !state.stopping
-        };
-        if !taken {
+        if !daemon.admit(write) {
             let refusal = daemon.refuse("stopping", "the daemon is stopping");
             if daemon::send_frame(&stream, refusal.to_string().as_bytes()).is_err() {
                 return;
@@ -495,12 +559,7 @@ fn connection(daemon: &Daemon, mut stream: UnixStream) {
             Ok(answer) => daemon::send_frame(&stream, answer.to_string().as_bytes()),
             Err(_) => Err(io::ErrorKind::Other.into()),
         };
-        {
-            let mut state = daemon.state();
-            state.active -= 1;
-            state.writes -= usize::from(write);
-        }
-        daemon.changed.notify_all();
+        daemon.release(write);
         let Ok(answer) = answer else {
             return;
         };

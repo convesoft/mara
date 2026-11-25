@@ -32,3 +32,4 @@ Tasks:
 - [ ] Native package for macOS arm64 with the CLI, the Node addon and `souffle`
 - [ ] Install smoke test for CLI and MCP on macOS arm64, without lifecycle scripts
 - [ ] The settled bullet removed from docs/distribution.mara.md
+- [ ] The macOS check of VER-BROWSER-ACCESS (docs/daemon/verification.mara.md): `lsof -a -p <pid> -iTCP -sTCP:LISTEN` lists no listening socket of a daemon started on demand or by plain `mara daemon start`, beside the Linux check in `crates/mara/tests/daemon/browser.rs` (mara-fkkcad)
