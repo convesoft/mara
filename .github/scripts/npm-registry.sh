@@ -9,10 +9,12 @@
 # A package is absent only when the registry answers 404 with its "Not found" document, and a
 # version only when the package's document lacks it. Any other answer, a present version without
 # a SHA-1 included, is retried 5 times 10 s apart and then fails with exit status 1, never read
-# as absent. Each request stops after 30 s. NPM_REGISTRY names another registry, for tests.
+# as absent. Each request stops after 30 s. For tests, NPM_REGISTRY names another registry and
+# NPM_REGISTRY_RETRY_SECONDS another pause between tries.
 set -euo pipefail
 
 registry=${NPM_REGISTRY:-https://registry.npmjs.org}
+pause=${NPM_REGISTRY_RETRY_SECONDS:-10}
 
 # Fetches the package's abbreviated document once and prints the answer for the command, or fails
 # with a reason on stderr.
@@ -79,7 +81,7 @@ for try in 1 2 3 4 5; do
   fi
   echo "npm's registry gave no usable answer for $2 (try $try of 5)" >&2
   if [ "$try" -lt 5 ]; then
-    sleep 10
+    sleep "$pause"
   fi
 done
 exit 1

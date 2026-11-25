@@ -25,6 +25,10 @@
     "verify-install": {
       "command": "node packages/mara-npm/scripts/verify-install.mjs",
       "cache": false
+    },
+    "test": {
+      "command": "node --test \"packages/mara-npm/tests/*.test.mjs\"",
+      "cache": false
     }
   }
 }
