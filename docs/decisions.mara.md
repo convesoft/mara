@@ -82,6 +82,30 @@
 
 ---
 
+<a id="01M89A4Q1NR70THACM99Z09Z3W"></a>
+
+### Carry the docs folder in the dispatcher package
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-BUNDLED-DOCS |
+| Status | Accepted |
+| Justifies | [DES-PACKAGES](distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8) |
+
+- Chosen by the maintainer on 2026-11-25: from `0.4.0-rc.2`, `@convesoft/mara` carries the files of this repository's `docs/` as they are, so that a developer or coding agent reads the documentation of the installed version at `node_modules/@convesoft/mara/docs/`. The pattern is nx-rust's `ADR-BUNDLED-DOCS` (nx-rust commit `773c382`).
+- Rejected: only the link to `docs/` on GitHub, which describes `main`, not the installed version.
+- Chosen by the worker of mara-gn76br on 2026-11-25: the packed pages are the files that Git tracks under `docs/` at the packed commit, read from Git's objects. Packaging fails when Git reports the working tree's `docs/` as different from that commit by a modified, staged, deleted, untracked or ignored file, when a tracked entry there is not a regular file, such as a symbolic link, and when a tracked name is not UTF-8 or holds a line break, since the checks list one name per line. The working tree is compared where it holds the files, not where a sparse checkout leaves them out; the packed contents always come from the commit.
+- Rejected: copying the working tree's folder, as nx-rust's build asset does. A local `pack-dispatcher` would ship an edited or untracked file, and a copy follows symbolic links.
+- Chosen by the worker of mara-gn76br: the file check before publication compares the dispatcher's `docs/` with the commit's tree as a set: no file missing, none extra, each with its blob's contents and mode 0644.
+- Rejected: a check that each page is present, as nx-rust's release has. It lets an extra or a changed file through.
+- Chosen by the worker of mara-gn76br after review: the manifest's `files` names the folder `docs`, as nx-rust's package takes its docs folder whole; the comparison above proves that npm's ignore rules dropped and added nothing, and a page that npm never packs, such as `*.orig`, fails the packing.
+- Rejected: one `files` entry per page. npm reads each as a pattern and left out `docs/[id].md`.
+- Known limit: a link that leaves `docs/` resolves against the package root. `../README.md` in the migration page reaches the package's `README.md`; `../scripts/build-souffle.sh` in the distribution page resolves to no file of the package.
+- Known limit: `.mara/` is not packed, so the packed `docs/` is read as files, not as a Mara project.
+- Known limit: on 2026-11-25 the dispatcher grows from 5 files, 8.1 kB packed and 22.3 kB unpacked, to 36 files, about 174 kB packed and 549 kB unpacked.
+
+---
+
 <a id="01M7CMW6YNXSQAS7H0ATKG4GH0"></a>
 
 ### Keep the 0.3.0 platforms and Node version
