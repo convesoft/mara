@@ -1,5 +1,5 @@
 ---
-title: The Node addon and the browser package are packed, verified and in the release
+title: The Node addon, Node library and browser assets are packed, verified and in the release
 status: todo
 type: feature
 parent: mara-xzfeyj
@@ -9,20 +9,19 @@ blocked_by:
   - mara-23j2h9
   - mara-gn76br
   - mara-c199tz
-  - mara-2c6hfk
 created_at: 2026-11-25T10:18:52Z
 ---
 
-Goal: `0.4.0-rc.2` publishes what the slice built: each Linux native package holds the Node addon, the library is importable from the installed packages, and the browser package with the engine and Soufflé WASM modules is a package of the release.
+Goal: `0.4.0-rc.2` publishes what the slice built in the existing three packages (maintainer decision on mara-2c6hfk, 2026-11-25: single main package): each Linux native package holds the Node addon (`bin/mara.node`), and `@convesoft/mara` holds all platform-independent parts — the CLI dispatcher, the Node library at `.`, the browser workspace + `connectDaemon` + engine and Soufflé WASM modules at `./browser`, `docs/`, and licences.
 
 Context: `DES-PACKAGES`, `DES-RELEASE-WORKFLOW`, `ADR-SCRIPT-FREE-NPM-PACKAGES` (docs/distribution.mara.md, docs/decisions.mara.md), `VER-INSTALL-WITHOUT-TOOLCHAIN` (docs/verification.mara.md), `ADR-NODE-NATIVE-ADDON`, `REQ-NODE-LIBRARY` (docs/hosts/index.mara.md). The three items come from mara-a4m588, which keeps what 0.4.0 adds after them. `packages/mara-npm/` holds the packer, the file checks and the install verification; mara-23j2h9 made the release's package table the one place a new package is added, and mara-gn76br put `docs/` into the dispatcher. The names are the maintainer's: mara-2c6hfk. What a package contains is a high-risk area: binaries, WASM modules and licences.
 
 - [ ] Each Linux native package holds the Node addon built in the release's Build job on the same commit as `bin/mara`; `DES-PACKAGES` names the file, and the `GLIBC_` 2.35 floor of the install verification covers it
-- [ ] The typed ESM client is importable as mara-2c6hfk decides, with no lifecycle script and no dependency fetched at install
-- [ ] The browser package holds the engine's and Soufflé's WASM modules, the worker and the client, its manifest and licences (Soufflé's included), under the name that mara-2c6hfk decides; `DES-PACKAGES` lists its files, and the packed file list is checked by name and mode as the others are
-- [ ] The Emscripten build of Soufflé runs where the release packs the browser package, pinned as `DES-SOUFFLE-BUILD` says; nothing published comes from a cache or from another commit
-- [ ] The install verification installs the packed files with `--ignore-scripts` in an empty directory, loads the Node addon through the library and runs one operation embedded, and loads the browser package in Chromium and runs one operation in a workspace
-- [ ] The browser package is one row of the release's package table: Dry run, Publish, Registry check and Tag take it with no step of its own
+- [ ] `@convesoft/mara` exports the typed ESM Node library at `.` (`import … from "@convesoft/mara"`) and the browser workspace + `connectDaemon` at `./browser` (`import … from "@convesoft/mara/browser"`), with no lifecycle script and no runtime dependency fetched at install
+- [ ] `@convesoft/mara` holds the engine's and Soufflé's WASM modules, the browser client and workers, the Node library, `docs/`, `LICENSE-SOUFFLE`, and `THIRD-PARTY-LICENSES` for `mara.wasm` (licence `(MIT OR Apache-2.0) AND UPL-1.0`); `DES-PACKAGES` drops the separate browser-package row and lists the exact files of `@convesoft/mara`, and the packed file list is checked by name and mode as the others are
+- [ ] The Emscripten build of Soufflé and the `wasm32` build of `mara-wasm` run where the release packs `@convesoft/mara` (`Pack dispatcher`), pinned as `DES-SOUFFLE-BUILD` says; nothing published comes from a cache or from another commit
+- [ ] The install verification installs the packed files with `--ignore-scripts` in an empty directory, imports `@convesoft/mara` and runs one operation embedded through the addon, and imports `@convesoft/mara/browser` in Chromium and runs one operation in a browser workspace
+- [ ] No separate browser package is added to the release's package table: Dry run, Publish, Registry check and Tag run with the same three packages as `0.4.0-rc.1`
 - [ ] One dry dispatch of the release workflow on the pushed branch passes with every package of rc.2
 
 Limits:
