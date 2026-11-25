@@ -16,6 +16,10 @@ pulldown-cmark = { version = "0.13.6", default-features = false }
 serde_json = "1.0.154"
 # The pin that `code add` writes is encoded by `display`, whose values need `serde`.
 toml = { version = "1.1.8", default-features = false, features = ["std", "parse", "display", "serde"] }
+
+# What only the native hosts do, which the browser workspace's WebAssembly build of the library
+# leaves out (DES-BROWSER-WORKSPACE).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `mara mcp` (ADR-RMCP-SERVER): the protocol, and the single-threaded runtime that only that
 # command starts.
 rmcp = { version = "3.10.0", default-features = false, features = ["server", "transport-io"] }
@@ -29,6 +33,11 @@ ureq = { version = "3.5.0", default-features = false, features = ["rustls"] }
 # The private directory of an evaluation (DES-RULE-EXECUTION), removed when it ends.
 tempfile = "3.27"
 
+# The host tests hash the files that a browser workspace is given, as its change set's `base` does
+# (VER-BROWSER-WORKSPACE).
+[dev-dependencies]
+blake3 = "1.8"
+
 # The limits of the `souffle` child process (DES-RULE-EXECUTION); the daemon's user ID, peer
 # credentials, `fork`, `setsid` and signals (DES-DAEMON-LIFECYCLE); and the CPU time of the
 # scaling test (DES-PERFORMANCE-HARNESS).
@@ -40,9 +49,16 @@ signal-hook = { version = "0.3.18", default-features = false }
 # Nx keys (nx-rust): what the tests read at run time: the variables that the client and its test
 # hooks read, `TMPDIR`, under which the daemon tests derive socket paths of
 # limited length, the mode and bytes of the pinned Soufflé that `scripts/build-souffle.sh` builds
-# beside the artifact directory, and the tag `v0.3.0` that the conversion tests archive.
+# beside the artifact directory, and the tag `v0.3.0` that the conversion tests archive. The host
+# tests (`tests/hosts`) also read the browser package's files, its WebAssembly module, which
+# `mara-browser:build` copies there, Playwright's library and the browser it runs, found through
+# `PLAYWRIGHT_BROWSERS_PATH` or the per-user cache, and the `node` on `PATH`.
 [package.metadata.nx.targets.test]
 inputs = [
+  "{workspaceRoot}/packages/mara-browser/**/*",
+  { dependentTasksOutputFiles = "**/*.wasm" },
+  { env = "PLAYWRIGHT_BROWSERS_PATH" },
+  { runtime = "node --version 2>&1; node -e \"import('playwright').then(({ chromium }) => console.log(require('playwright/package.json').version, chromium.executablePath()))\" 2>&1; true" },
   "...",
   { env = "CI" },
   { env = "MARA_NO_DAEMON" },
@@ -61,7 +77,11 @@ inputs = [
   { runtime = "s=${CARGO_TARGET_DIR:-target}/souffle-2.5/souffle; ls -Ln \"$s\" 2>&1 | cut -c1-10; sha256sum \"$s\" 2>&1; true" },
   { runtime = "git rev-parse 'v0.3.0^{tree}' 2>&1 || true" },
 ]
-dependsOn = ["...", { projects = ["cargo-workspace"], target = "souffle" }]
+dependsOn = [
+  "...",
+  { projects = ["cargo-workspace"], target = "souffle" },
+  { projects = ["mara-browser"], target = "build" },
+]
 
 # `project validate` of this repository's own project (ADR-NX-RUST-TASKS), with the command of the
 # local check. It reads `docs/`, `.mara/`, the crates' files (their Rust files, `.gitignore` files

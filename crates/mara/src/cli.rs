@@ -10,19 +10,28 @@
 //! (`crates/mara/tests/performance/`).
 
 mod author;
+#[cfg(not(target_arch = "wasm32"))]
 mod client;
+#[cfg(not(target_arch = "wasm32"))]
 mod code;
 mod convert;
+#[cfg(not(target_arch = "wasm32"))]
 mod daemon;
 mod fix;
+#[cfg(not(target_arch = "wasm32"))]
 mod guide;
 mod init;
+#[cfg(not(target_arch = "wasm32"))]
 mod mcp;
 mod query;
 mod read;
 mod relink;
+pub mod tool;
 mod validate;
+#[cfg(target_arch = "wasm32")]
+pub mod workspace;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -46,6 +55,7 @@ use mara::write::WriteError;
 
 // @mara implements REQ-CLI-MCP-PARITY
 /// Every operation, in the order the usage lists them.
+#[cfg(not(target_arch = "wasm32"))]
 const OPERATIONS: &[Operation] = &[
     validate::PROJECT,
     init::PROJECT,
@@ -77,6 +87,36 @@ const OPERATIONS: &[Operation] = &[
     daemon::STOP,
     mcp::MCP,
     guide::PRIME,
+];
+
+/// The operations of a browser workspace: the document operations (DES-BROWSER-WORKSPACE), of
+/// which it refuses `project init` and `project convert` ([`workspace`]).
+#[cfg(target_arch = "wasm32")]
+const OPERATIONS: &[Operation] = &[
+    validate::PROJECT,
+    init::PROJECT,
+    fix::PROJECT,
+    convert::PROJECT_CONVERT,
+    validate::ITEM,
+    validate::SCHEMA,
+    read::SEARCH,
+    read::GET,
+    read::RELATION_LIST,
+    read::ITEM_LIST,
+    read::SCHEMA_LIST,
+    read::SCHEMA_GET,
+    relink::ITEM_MOVE,
+    relink::ITEM_RENAME,
+    author::ITEM_CREATE,
+    author::ITEM_UPDATE,
+    author::ITEM_DELETE,
+    author::RELATION_ADD,
+    author::RELATION_REMOVE,
+    query::LIST,
+    query::EXECUTE,
+    query::VIEW,
+    query::GATE,
+    query::REPORT,
 ];
 
 /// The exit status of a valid result, or of a successful operation.
@@ -161,6 +201,7 @@ const PROJECT: Opt = Opt {
 };
 
 /// `--format human|json`: how results and failures are printed.
+#[cfg(not(target_arch = "wasm32"))]
 const FORMAT: Opt = Opt {
     name: "format",
     value: "human|json",
@@ -175,14 +216,17 @@ const FORMAT: Opt = Opt {
 };
 
 /// The flag that prints the work counts (DES-PERFORMANCE-HARNESS).
+#[cfg(not(target_arch = "wasm32"))]
 const DEBUG_STATS: &str = "debug-stats";
 
 /// The top-level flag that prints `mara <version>`, alone (DES-OPERATIONS). An operation's own
 /// `--version` option is another option.
+#[cfg(not(target_arch = "wasm32"))]
 const VERSION: &str = "version";
 
 /// The direct-mode flag: the request runs in-process, and no daemon is reached or started
 /// (DES-DAEMON-LIFECYCLE).
+#[cfg(not(target_arch = "wasm32"))]
 const NO_DAEMON: &str = "no-daemon";
 
 /// `--limit <n>`: records per page (REQ-PAGE-LIMITS).
@@ -278,6 +322,7 @@ pub struct Args {
     /// option values.
     supplied: Vec<(String, Supplied)>,
     /// Whether the CLI read the direct-mode flag (DES-DAEMON-LIFECYCLE).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     no_daemon: bool,
 }
 
@@ -345,11 +390,16 @@ pub struct Context<'w> {
     /// daemon's own.
     cwd: Result<PathBuf, String>,
     /// Whether the client runs in direct mode ([`client::direct_mode`]).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     direct: bool,
     /// The client's umask and temporary directory, which a request to the daemon carries.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     caller: Caller,
     /// The session of the request's project, when the daemon serves it (DES-DAEMON-SESSIONS).
     session: Option<Arc<Session>>,
+    /// The inputs that a browser workspace keeps between requests (DES-BROWSER-WORKSPACE).
+    #[cfg(target_arch = "wasm32")]
+    kept: Option<&'w workspace::Kept>,
 }
 
 impl Context<'_> {
@@ -362,6 +412,10 @@ impl Context<'_> {
     /// a view of its session's when the daemon serves the request in that session, otherwise
     /// new ones, which read everything once.
     pub fn inputs(&self, root: PathBuf) -> Inputs {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(kept) = self.kept {
+            return kept.inputs();
+        }
         match &self.session {
             Some(session) if session.root() == root => session.inputs(),
             _ => Inputs::new(root),
@@ -380,6 +434,7 @@ impl Context<'_> {
 }
 
 /// The working directory of this process, or why it cannot be read.
+#[cfg(not(target_arch = "wasm32"))]
 fn working_directory() -> Result<PathBuf, String> {
     std::env::current_dir().map_err(|error| error.to_string())
 }
@@ -513,6 +568,7 @@ impl From<SelectError> for Failure {
 
 /// Runs the request that `arguments` make, prints its result or failure and returns the exit
 /// status.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run(arguments: &[OsString], work: &mut WorkCounts) -> u8 {
     // Read while this process runs one thread: where the umask cannot be read from
     // `/proc/self/status`, as on macOS, reading it sets it for a moment.
@@ -559,6 +615,7 @@ pub fn run(arguments: &[OsString], work: &mut WorkCounts) -> u8 {
 }
 
 /// Writes `text`, ignoring a closed stream: the exit status still tells the outcome.
+#[cfg(not(target_arch = "wasm32"))]
 fn print(stream: &mut dyn std::io::Write, text: &str) {
     let _ = stream.write_all(text.as_bytes());
     let _ = stream.flush();
@@ -566,6 +623,7 @@ fn print(stream: &mut dyn std::io::Write, text: &str) {
 
 /// Whether `--format json` is among `arguments`, so that rejected arguments are reported in
 /// that form too.
+#[cfg(not(target_arch = "wasm32"))]
 fn requested_json(arguments: &[OsString]) -> bool {
     let mut json = false;
     let mut iter = arguments.iter().map(|argument| argument.to_str());
@@ -587,6 +645,7 @@ fn requested_json(arguments: &[OsString]) -> bool {
 // @mara implements REQ-CLI-MCP-PARITY
 /// The operation that `arguments` name, if any, and its checked arguments. Global options may
 /// stand anywhere; an operation's options follow its words.
+#[cfg(not(target_arch = "wasm32"))]
 fn parse(arguments: &[OsString]) -> Result<(Option<&'static Operation>, Args), Failure> {
     let mut words: Vec<&str> = Vec::new();
     let mut operation: Option<&'static Operation> = None;
@@ -694,6 +753,7 @@ fn parse(arguments: &[OsString]) -> Result<(Option<&'static Operation>, Args), F
 }
 
 /// The positional arguments of `operation`, for a message.
+#[cfg(not(target_arch = "wasm32"))]
 fn describe_arguments(operation: &Operation) -> String {
     match operation.arguments {
         [] => "no argument".to_owned(),
@@ -708,6 +768,7 @@ fn describe_arguments(operation: &Operation) -> String {
 }
 
 /// What bare `mara` prints.
+#[cfg(not(target_arch = "wasm32"))]
 fn usage() -> String {
     let option = |option: &Opt| {
         let repeat = if option.repeatable { "..." } else { "" };

@@ -22,6 +22,8 @@ mod grammar_server;
 #[cfg(target_os = "linux")]
 mod idle_period;
 mod init;
+#[path = "../support/legacy_project.rs"]
+mod legacy_project;
 mod mcp;
 mod pause_points;
 mod prime;

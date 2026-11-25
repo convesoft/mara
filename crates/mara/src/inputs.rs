@@ -19,7 +19,6 @@
 mod admit;
 
 use std::collections::{BTreeMap, HashMap};
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -41,6 +40,7 @@ use mara_engine::work::WorkCounts;
 use crate::grammar::{self, Grammar, ParseFailure};
 use crate::project::{Project, ProjectFiles, SYMBOLIC_LINK, SelectError, recognize};
 use crate::session::{Deriving, Evaluated};
+use crate::system::fs;
 use crate::tracked::{self, Check, Keep, Kind, Listing, Reads, Stat, Tracked};
 use crate::write::{self, Basis, FileWrite, TEMPORARY_PREFIX, Version, WriteError, WriteLock};
 

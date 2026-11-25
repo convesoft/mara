@@ -1,0 +1,13 @@
+{
+  "name": "mara-browser",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "targets": {
+    "build": {
+      "command": "cp target/wasm32-unknown-unknown/release/mara_wasm.wasm packages/mara-browser/mara.wasm",
+      "cache": true,
+      "dependsOn": [{ "projects": ["mara-wasm"], "target": "build" }],
+      "inputs": [{ "dependentTasksOutputFiles": "**/*.wasm" }],
+      "outputs": ["{projectRoot}/mara.wasm"]
+    }
+  }
+}

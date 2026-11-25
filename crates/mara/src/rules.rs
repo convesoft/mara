@@ -74,6 +74,7 @@ pub fn supplied_input(
 /// `mara` binary, as a package installs them, else `../souffle-2.5/souffle` from it, where
 /// `scripts/build-souffle.sh` puts it for a binary that Cargo built in the same `target/`.
 /// Never a `souffle` on `PATH`, which could be another version.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn souffle() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|error| {
         format!("cannot find the `mara` binary to find Soufflé beside it: {error}")
@@ -95,6 +96,13 @@ pub fn souffle() -> Result<PathBuf, String> {
                 candidates[1].display()
             )
         })
+}
+
+/// Soufflé in a browser workspace, which has no module of it: each evaluation is a fault
+/// without a line (DES-BROWSER-WORKSPACE).
+#[cfg(target_arch = "wasm32")]
+pub fn souffle() -> Result<PathBuf, String> {
+    Err("this browser workspace has no Soufflé module to run programs with".to_owned())
 }
 
 /// The Soufflé release Mara runs.
@@ -205,7 +213,7 @@ fn host(what: &str, error: &dyn std::fmt::Display) -> Fault {
 }
 
 /// A new private directory, prepared for a run of `run.program`.
-fn private_dir(run: &Run) -> Result<tempfile::TempDir, Fault> {
+fn private_dir(run: &Run) -> Result<caller::TempDir, Fault> {
     let dir = caller::tempdir("mara-evaluation-")
         .map_err(|error| host("cannot create the evaluation's private directory", &error))?;
     let read = evaluation::read_relations(run.program, run.relations);
