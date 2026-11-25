@@ -4,6 +4,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use mara_engine::work::WorkCounts;
 use serde_json::{Map, Value, json};
@@ -12,7 +13,7 @@ use crate::cli::Code;
 use crate::corpus::Corpus;
 use crate::grammar_server::{GrammarServer, fixture};
 use crate::restore::Written;
-use crate::{PULL_REQUEST_SIZES, SEED, cli, mcp, scaling};
+use crate::{PULL_REQUEST_SIZES, SEED, cli, mcp, restore, scaling};
 
 /// A server with the fixture Rust grammar, and its `code add` arguments.
 fn repository() -> (GrammarServer, Vec<String>) {
@@ -38,24 +39,62 @@ fn temporary(prefix: &str) -> tempfile::TempDir {
         .expect("create a temporary directory")
 }
 
+/// The configuration at `root`, as the corpus generator wrote it.
+fn configuration(root: &Path) -> PathBuf {
+    root.join(".mara/config.toml")
+}
+
+/// Runs `code add` with `args` in `root` and a new `HOME`, requires that it pinned the grammar
+/// in the configuration, which held `original`, and returns its counts.
+fn pinned_by(root: &Path, args: &[String], original: &[u8]) -> WorkCounts {
+    let home = temporary("mara-home-");
+    let run = cli::run_with(root, args, &[("HOME", home.path())], 0);
+    let config = fs::read(configuration(root)).unwrap();
+    assert_ne!(config, original, "code add wrote no pin");
+    run.work
+}
+
+/// The configuration read and hashed for the edit, then checked at step 2 and again before its
+/// rename (DES-WRITE-PROCEDURE), each check reading it again only when DES-INPUTS-AND-KEYS would.
+/// The test fixes the configuration's state for each count, whatever the runner's speed: last
+/// changed at least 2 s before the run, so neither check reads it; or with a modification time
+/// ahead of the run's clock, which keeps the record unsettled at each check, so both read it. No
+/// document or code file is read, parsed or scanned.
 #[test]
 fn code_add_counts() {
     let (server, args) = repository();
-    for size in PULL_REQUEST_SIZES {
-        let corpus = Corpus::generate(size, SEED);
-        let home = temporary("mara-home-");
-        let run = cli::run_with(corpus.root(), &args, &[("HOME", home.path())], 0);
-        // The configuration: read and hashed for the edit, then checked at step 2 and again
-        // before its rename (DES-WRITE-PROCEDURE). No document or code file is read, parsed or
-        // scanned.
-        let expected = WorkCounts {
-            file_reads: 3,
-            hashes: 3,
-            ..WorkCounts::default()
-        };
-        assert_eq!(run.work, expected, "mara code add at {size}×");
+    let corpora: Vec<(usize, Corpus, Vec<u8>)> = PULL_REQUEST_SIZES
+        .iter()
+        .map(|&size| {
+            let corpus = Corpus::generate(size, SEED);
+            let original = fs::read(configuration(corpus.root())).unwrap();
+            (size, corpus, original)
+        })
+        .collect();
+    let counts = |reads| WorkCounts {
+        file_reads: reads,
+        hashes: reads,
+        ..WorkCounts::default()
+    };
+    // Settled: the write row of VER-WORK-COUNTERS, a cold request's one read and nothing more.
+    restore::settle(SystemTime::now());
+    for (size, corpus, original) in &corpora {
+        let work = pinned_by(corpus.root(), &args, original);
+        assert_eq!(work, counts(1), "mara code add at {size}×, settled");
     }
-    assert_eq!(server.connections(), 2 * PULL_REQUEST_SIZES.len());
+
+    // Unsettled at every check: its last change an hour ahead of the run's clock.
+    for (size, corpus, original) in &corpora {
+        let path = configuration(corpus.root());
+        fs::write(&path, original).unwrap();
+        let ahead = SystemTime::now() + Duration::from_secs(3600);
+        fs::File::open(&path).unwrap().set_modified(ahead).unwrap();
+        let work = pinned_by(corpus.root(), &args, original);
+        assert_eq!(work, counts(3), "mara code add at {size}×, unsettled");
+    }
+
+    // Two connections per run, two runs per size.
+    assert_eq!(server.connections(), 2 * 2 * PULL_REQUEST_SIZES.len());
 }
 
 /// Times `code add` alone: the configuration it pinned is restored before each run, outside the

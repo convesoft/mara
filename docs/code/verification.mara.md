@@ -180,7 +180,7 @@ Cold rows, in CLI direct mode:
 | Every other operation, `search` included, and the `query` operations of a program that does not use code links | As without code |
 | The `query` operations above with the corpus's Rust grammar pinned and cached | The counts at the basic level: grammar files are not counted, and a program that does not use code links loads no grammar |
 | Any operation in a project that declares no code language | 0 code scans |
-| `code add` from the loopback repository of [VER-CODE-ADD](#01M7JKT47QF8VK4K8SZ5GP5EV3) | 0 parses, 0 code scans, 0 snapshot builds |
+| `code add` from the loopback repository of [VER-CODE-ADD](#01M7JKT47QF8VK4K8SZ5GP5EV3), the configuration last changed at least 2 s before the run; and with its modification time ahead of the request's clock, which keeps its record unsettled at each check | The configuration read and hashed once by the edit's read and by neither check of [DES-WRITE-PROCEDURE](../authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17); and three times, each check reading it again ([DES-INPUTS-AND-KEYS](../engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)); 0 parses, 0 code scans, 0 snapshot builds in both. A configuration that becomes settled between the first read and step 2 gives 2, untested because it needs a time between two checks. Decided during the rewrite on 2026-11-25 (mara-6s982p) |
 
 Warm rows, against the daemon, besides the code row of [VER-WORK-COUNTERS](../verification.mara.md#01M7BF6HGG6ET88HS641Y5676G):
 
