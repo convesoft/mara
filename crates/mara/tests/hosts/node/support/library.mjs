@@ -72,12 +72,12 @@ function linkOrCopy(from, to) {
 /**
  * Installs `@convesoft/mara` with the Node library and the native package of this platform into
  * `dir/node_modules`, as npm installs them, at the build's version. The native package holds the
- * addon, Soufflé and, unless `binary` is false, a copy of the build's `mara` of its own, whose
- * mode and place the test may change without touching the build's. Returns the installation's
- * folders and its `mara`.
+ * addon, unless `addon` is false, Soufflé and, unless `binary` is false, a copy of the build's
+ * `mara` of its own, whose mode and place the test may change without touching the build's.
+ * Returns the installation's folders and its `mara`.
  */
-export function install(dir, { binary = true } = {}) {
-  if (addon === undefined || !existsSync(addon)) {
+export function install(dir, { binary = true, addon: withAddon = true } = {}) {
+  if (withAddon && (addon === undefined || !existsSync(addon))) {
     throw new Error(
       `the Node cases need the built addon at ${addon}: build it with \`nx run mara-node:build\``,
     );
@@ -106,7 +106,9 @@ export function install(dir, { binary = true } = {}) {
     copyFileSync(join(dispatcherDir, file), join(dispatcher, file));
   }
   writeFileSync(join(native, "package.json"), JSON.stringify({ name: nativeName, version }));
-  linkOrCopy(addon, join(native, "bin", "mara.node"));
+  if (withAddon) {
+    linkOrCopy(addon, join(native, "bin", "mara.node"));
+  }
   linkOrCopy(souffle, join(native, "bin", "souffle"));
   const mara = join(native, "bin", "mara");
   if (binary) {
@@ -175,6 +177,14 @@ export function startClient(installation, { options = {}, cwd = installation.dir
       return new Promise((resolve) => {
         pending.set(id, resolve);
         child.send({ id, name, args, options, timed });
+      });
+    },
+    /** Changes the process's working directory, after the calls sent before. */
+    chdir(directory) {
+      const id = next++;
+      return new Promise((resolve) => {
+        pending.set(id, resolve);
+        child.send({ id, chdir: directory });
       });
     },
     close: () =>

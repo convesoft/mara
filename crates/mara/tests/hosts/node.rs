@@ -14,6 +14,7 @@
 //! | `MARA_NODE_ADDON` | The Node addon of the build, `libmara_node.so` beside `MARA_BIN`, which `mara-node:build` builds |
 //! | `MARA_SOUFFLE` | The pinned Soufflé that `scripts/build-souffle.sh` builds beside the build's directory |
 //! | `MARA_TSC` | TypeScript's compiler of the workspace's `node_modules` |
+//! | `MARA_HOSTS_DEBUG` | `1` for a debug build, whose test hooks exist ([`mara::hooks`]), else `0` |
 //! | `TMPDIR` | Its `tmp/`, where Playwright puts the browser's new profile |
 
 use std::collections::BTreeMap;
@@ -108,6 +109,10 @@ impl Host {
             .env("MARA_BIN", env!("CARGO_BIN_EXE_mara"))
             .env("MARA_BROWSER_PACKAGE", &package)
             .env("MARA_DISPATCHER", &dispatcher)
+            .env(
+                "MARA_HOSTS_DEBUG",
+                if cfg!(debug_assertions) { "1" } else { "0" },
+            )
             .env("MARA_NODE_ADDON", builds.join("libmara_node.so"))
             .env("MARA_SOUFFLE", builds.join("../souffle-2.5/souffle"))
             .env(

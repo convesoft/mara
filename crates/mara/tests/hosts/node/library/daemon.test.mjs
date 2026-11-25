@@ -9,7 +9,16 @@
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { after, describe, test } from "node:test";
@@ -156,6 +165,72 @@ describe("the Node client is a client of its package's daemon", { timeout: 600_0
     }
   });
 
+  test("MARA_NO_DAEMON=1 and CI in a worker thread's environment serve its calls in-process", async () => {
+    const root = await project();
+    // A worker thread's `env` is its own: the native process never sees it.
+    const read = (variables) => {
+      const script = join(installation.dir, `worker-${Date.now()}-${Math.random()}.mjs`);
+      writeFileSync(
+        script,
+        'import { Worker } from "node:worker_threads";\n' +
+          `const library = new URL("./library.mjs", import.meta.url).href;\n` +
+          "const code = `const { createClient } = await import(${JSON.stringify(library)});\n" +
+          "const { parentPort } = await import('node:worker_threads');\n" +
+          `const answer = await createClient().run(${JSON.stringify(READ[0])}, ${JSON.stringify(READ[1])}, { debugStats: true });\n` +
+          "parentPort.postMessage(answer.stats);`;\n" +
+          `const worker = new Worker(code, { eval: true, env: { ...process.env, ...${JSON.stringify(variables)} } });\n` +
+          'worker.on("message", (stats) => { console.log(JSON.stringify(stats)); worker.terminate(); });\n' +
+          'worker.on("error", (error) => { console.error(error); process.exitCode = 1; });\n',
+      );
+      const ran = spawnSync(process.execPath, [script], { cwd: root, env: clientEnv(), encoding: "utf8" });
+      assert.equal(ran.status, 0, ran.stderr);
+      return JSON.parse(ran.stdout);
+    };
+    const ways = [{ MARA_NO_DAEMON: "1" }, { CI: "true" }];
+    await stopDaemons([installation.mara]);
+    for (const variables of ways) {
+      assert.deepEqual(read(variables), cold(root), JSON.stringify(variables));
+      await noneStarts();
+    }
+    daemon(installation.mara, ["start", "--project", root]);
+    const running = status(installation.mara);
+    for (const variables of ways) {
+      assert.deepEqual(read(variables), cold(root), JSON.stringify(variables));
+      assert.equal(status(installation.mara).served, running.served, JSON.stringify(variables));
+    }
+  });
+
+  test("a loaded addon keeps its build when its mara is replaced at its path", async () => {
+    const root = await project();
+    const running = status(installation.mara);
+    assert.equal(running.running, true);
+    const client = startClient(installation, { cwd: root });
+    // The original, kept aside by a rename, which keeps its metadata to the nanosecond.
+    const original = `${installation.mara}.original`;
+    try {
+      assert.ok((await client.run(...READ)).result);
+      assert.equal(status(installation.mara).served, running.served + 1);
+      // Another build at the same path, as a reinstall of the same version leaves it.
+      renameSync(installation.mara, original);
+      copyFileSync(original, installation.mara);
+      chmodSync(installation.mara, 0o755);
+      assert.notEqual(statSync(installation.mara).mtimeMs, statSync(original).mtimeMs);
+      const second = await client.run(...READ);
+      assert.ok(second.result, JSON.stringify(second));
+      await sleep(500);
+      // The running daemon's image is now named `mara.original`; no other daemon may run.
+      const others = daemonsOfTest().filter((pid) => pid !== running.pid);
+      assert.deepEqual(others, [], "the addon started the new file's daemon");
+      process.kill(running.pid, 0);
+    } finally {
+      renameSync(original, installation.mara);
+      await client.close();
+    }
+    const now = status(installation.mara);
+    assert.equal(now.pid, running.pid);
+    assert.equal(now.served, running.served + 2, "the daemon of the addon's build served both reads");
+  });
+
   test("the client of a package whose binary is a copy at another path starts that copy's daemon", async () => {
     const root = await project();
     const running = status(installation.mara);
@@ -195,7 +270,11 @@ async function pausedAt(paused) {
   });
 }
 
-describe("a Node write whose daemon is killed fails with daemon-lost and is not run again", { timeout: 600_000 }, () => {
+// The writer's pause points exist in debug builds only (ADR-DEBUG-PAUSE-POINT), as for the
+// daemon's own write cases.
+const pauses = process.env.MARA_HOSTS_DEBUG === "1" ? false : "the pause points exist in debug builds only";
+
+describe("a Node write whose daemon is killed fails with daemon-lost and is not run again", { timeout: 600_000, skip: pauses }, () => {
   const installation = install(dirOf("writes"));
 
   after(async () => {

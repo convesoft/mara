@@ -22,12 +22,38 @@ export class MaraError extends Error {
   }
 }
 
-/** A refusal of the caller's arguments: `invalid-argument`, nothing run. */
-function invalidArgument(message) {
-  return new MaraError({
+/** The work of a call that ran nothing, as its stats line would hold it (DES-PERFORMANCE-HARNESS). */
+const NO_WORK = {
+  format_version: 1,
+  file_reads: 0,
+  hashes: 0,
+  parses: 0,
+  snapshot_builds: 0,
+  code_scans: 0,
+  subprocess_spawns: 0,
+  check_steps: 0,
+  program_runs: 0,
+};
+
+/**
+ * A refusal of the caller's arguments: `invalid-argument`, nothing run, with no work when the
+ * call asked for debug stats.
+ */
+function invalidArgument(message, stats) {
+  const reply = {
     format_version: 1,
     error: { code: "invalid-argument", message, diagnostics: [] },
-  });
+  };
+  return new MaraError(reply, stats ? { ...NO_WORK } : undefined);
+}
+
+/**
+ * Whether this thread's environment asks for direct mode, as the CLI reads its own: `CI` set to
+ * a non-empty value or `MARA_NO_DAEMON` set to `1`. A worker thread has an environment of its
+ * own, which the addon cannot see, so the library reads it here.
+ */
+function directByEnvironment() {
+  return Boolean(process.env.CI) || process.env.MARA_NO_DAEMON === "1";
 }
 
 /** The addon, or the error that keeps it from loading, once per process. */
@@ -76,17 +102,21 @@ export class Client {
    */
   async run(name, args = {}, options = {}) {
     const stats = options?.debugStats === true;
+    // Taken when the call is made, before the first `await`: a later change of the working
+    // directory or the environment does not reach a call already made.
+    const cwd = process.cwd();
+    const noDaemon = this.#noDaemon || directByEnvironment();
     if (this.#refused !== undefined) {
-      throw invalidArgument(this.#refused);
+      throw invalidArgument(this.#refused, stats);
     }
     let text;
     try {
       text = JSON.stringify(args ?? null);
     } catch (error) {
-      throw invalidArgument(`the arguments are no JSON: ${error.message}`);
+      throw invalidArgument(`the arguments are no JSON: ${error.message}`, stats);
     }
     const answer = JSON.parse(
-      await addon().call(String(name), text ?? "null", this.#project, this.#noDaemon),
+      await addon().call(String(name), text ?? "null", this.#project, cwd, noDaemon),
     );
     const reply = JSON.parse(answer.text);
     if (answer.failed) {
@@ -98,8 +128,9 @@ export class Client {
 
 /**
  * A client of the project `options.project`, relative to the working directory now, or of the
- * one found from the working directory of each call upward. With `options.noDaemon` every call
- * runs in this process, as with the CLI's `--no-daemon`.
+ * one found upward from the working directory when each call is made. With `options.noDaemon`,
+ * or `CI` or `MARA_NO_DAEMON=1` in `process.env`, every call runs in this process, as with the
+ * CLI's `--no-daemon`.
  */
 export function createClient(options) {
   return new Client(options);

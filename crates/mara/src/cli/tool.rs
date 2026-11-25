@@ -83,23 +83,37 @@ pub fn args(
         let value = value.ok_or_else(|| rejected(format!("`{tool}` needs `{}`", argument.name)))?;
         args.arguments.push(value);
     }
+    // A required option, as the tool's schema lists it, with no value, an empty array
+    // included: refused before the operation runs, so before a client sends it to the daemon
+    // (DES-MCP-SERVER).
+    if let Some(option) = (operation.options.iter()).find(|option| {
+        option.required && option.kind != Kind::Inputs && args.value(option.name).is_none()
+    }) {
+        return Err(rejected(format!("`{tool}` needs `{}`", option.name)));
+    }
     Ok((args, project))
 }
 
 // @mara implements REQ-NODE-LIBRARY
-/// Runs the document operation whose tool is `name` with `given` for a client in this process,
-/// as a tool call of `mara mcp` runs: through the daemon of this host's build, or in-process,
-/// which then starts one, or always in-process in direct mode: `direct`, `CI` or
-/// `MARA_NO_DAEMON=1` ([`super::client::direct_mode`]). The client
-/// holds one project: `project`, relative to the working directory, else the one found from the
-/// working directory upward; so a `project` parameter is refused. `given` is an object, or null
-/// for none. The reply is the JSON object that `--format json` prints, and the request's work, or
-/// the daemon's for its session, is added to `work`.
+/// Runs the document operation whose tool is `name` with `given` for a client embedded in another
+/// program, the Node addon, as a tool call of `mara mcp` runs: through the daemon of this host's
+/// build, or in-process, which then starts one, or always in-process in direct mode: `direct`,
+/// `CI` or `MARA_NO_DAEMON=1` ([`super::client::direct_mode`]). The client holds one project:
+/// `project`, else the one found upward from `cwd`, the program's working directory when the call
+/// was made; so a `project` parameter is refused. `given` is an object, or null for none. The
+/// reply is the JSON object that `--format json` prints, and the request's work, or the daemon's
+/// for its session, is added to `work`.
+///
+/// The call never changes the process's state: it reads the umask that a request to the daemon
+/// carries from `/proc/self/status` only, and runs in-process where that file does not tell it
+/// ([`mara::caller::unchanged_caller`]); in direct mode it reads none, since the process's own
+/// umask applies.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn call(
     name: &str,
     given: &Value,
     project: Option<PathBuf>,
+    cwd: PathBuf,
     direct: bool,
     work: &mut mara_engine::work::WorkCounts,
 ) -> super::Reply {
@@ -130,13 +144,21 @@ pub fn call(
         Ok((args, _)) => args,
         Err(failure) => return super::Reply::new(Err(failure), true),
     };
+    let caller = match super::client::direct_mode(direct) {
+        true => None,
+        false => mara::caller::unchanged_caller(),
+    };
     let mut context = Context {
         work,
         now: std::time::SystemTime::now(),
         project,
-        cwd: super::working_directory(),
-        direct: super::client::direct_mode(direct),
-        caller: mara::caller::Caller::of_this_process(),
+        cwd: Ok(cwd),
+        direct: caller.is_none(),
+        // Read only by a request to the daemon, which direct mode never sends.
+        caller: caller.unwrap_or_else(|| mara::caller::Caller {
+            umask: 0,
+            temp_dir: std::env::temp_dir(),
+        }),
         session: None,
     };
     super::client::request(operation, run, &mut context, &args, true)

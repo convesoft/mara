@@ -1,8 +1,9 @@
 // A browser's client of the daemon's listener (DES-NODE-LIBRARY, DES-BROWSER-PROTOCOL): the
 // document operations of one project of the daemon, sent as MCP tool calls are written and
 // answered as `--format json` prints them. Like every client it checks the arguments before it
-// sends them (DES-OPERATIONS): their names, presence and types as `mara mcp` checks a tool call;
-// the daemon checks their values, and its refusal of them is the call's `invalid-argument`.
+// sends them (DES-OPERATIONS): their names, presence and types as `mara mcp` checks a tool call,
+// the required ones included; the daemon checks their values, and its refusal of a value is the
+// call's `invalid-argument`.
 
 import { MaraError } from "./errors.js";
 
@@ -10,8 +11,8 @@ import { MaraError } from "./errors.js";
 const PROTOCOL_VERSION = 1;
 
 // Each document operation's parameters by MCP tool name: its positional arguments in order,
-// then each option with its kind, as `mara mcp`'s tool list declares them. `strings` and
-// `integers` repeat; `input` holds the inputs of a `query` request.
+// then each option with its kind, as `mara mcp`'s tool list declares them, and the options it
+// requires. `strings` and `integers` repeat; `input` holds the inputs of a `query` request.
 const PAGED = { limit: "integer", cursor: "string" };
 const FILTERS = {
   ...PAGED,
@@ -40,6 +41,7 @@ const TOOLS = {
   item_create: {
     arguments: ["type", "path"],
     options: { title: "string", body: "string", id: "string", field: "strings", line: "integer" },
+    required: ["title", "body"],
   },
   item_update: {
     arguments: ["item"],
@@ -51,8 +53,24 @@ const TOOLS = {
   query_list: { arguments: [], options: PAGED },
   query_execute: { arguments: ["name"], options: { ...EVALUATED, id: "strings" } },
   query_view: { arguments: ["name"], options: { ...EVALUATED, id: "strings" } },
-  query_gate: { arguments: ["name"], options: { ...EVALUATED, id: "strings" } },
-  query_report: { arguments: ["name"], options: { ...EVALUATED, id: "string" } },
+  query_gate: { arguments: ["name"], options: { ...EVALUATED, id: "strings" }, required: ["id"] },
+  query_report: { arguments: ["name"], options: { ...EVALUATED, id: "string" }, required: ["id"] },
+};
+
+/** The operations that a browser cannot run, which the listener answers before their arguments. */
+const UNAVAILABLE = ["project_init", "project_convert"];
+
+/** The work of a call that ran nothing, as its stats line would hold it (DES-PERFORMANCE-HARNESS). */
+const NO_WORK = {
+  format_version: 1,
+  file_reads: 0,
+  hashes: 0,
+  parses: 0,
+  snapshot_builds: 0,
+  code_scans: 0,
+  subprocess_spawns: 0,
+  check_steps: 0,
+  program_runs: 0,
 };
 
 /** The parameters of each tool, for the test that compares them with `mara mcp`'s tool list. */
@@ -66,13 +84,19 @@ function failure(code, message) {
 /** Rejected arguments, in the words of `mara mcp`. */
 const rejected = (message) => failure("invalid-argument", message);
 
+/** The range of a whole number that `mara mcp` takes: a JSON integer that fits 64 bits. */
+const SMALLEST = -(2n ** 63n);
+const LARGEST = 2n ** 64n - 1n;
+
 /** One value of an option of `kind`, as the CLI reads it. */
 function scalar(name, kind, value) {
   if (kind === "integer" || kind === "integers") {
-    if (typeof value !== "number" || !Number.isInteger(value)) {
+    // As the JSON text that `mara mcp` would read: digits only, within 64 bits.
+    const text = typeof value === "number" ? JSON.stringify(value) : "";
+    if (!/^-?\d+$/.test(text) || BigInt(text) < SMALLEST || BigInt(text) > LARGEST) {
       throw rejected(`\`${name}\` is a whole number`);
     }
-    return String(value);
+    return text;
   }
   if (typeof value !== "string") {
     throw rejected(`\`${name}\` is a string`);
@@ -86,6 +110,13 @@ function scalar(name, kind, value) {
  * arguments that `mara mcp` would reject before the operation runs.
  */
 export function request(name, args, project) {
+  const words = name === "search" || name === "get" ? [name] : String(name).split("_");
+  const base = { version: PROTOCOL_VERSION, request: "operation", project, words, json: true };
+  // The listener answers these as unavailable before it reads their arguments, as a workspace
+  // does (DES-BROWSER-WORKSPACE).
+  if (UNAVAILABLE.includes(name)) {
+    return { ...base, arguments: [], options: [], supplied: [] };
+  }
   const tool = Object.hasOwn(TOOLS, name) ? TOOLS[name] : undefined;
   if (tool === undefined) {
     throw rejected(`unknown operation \`${name}\``);
@@ -149,17 +180,13 @@ export function request(name, args, project) {
   if (missing !== undefined) {
     throw rejected(`\`${name}\` needs \`${missing}\``);
   }
-  const words = name === "search" || name === "get" ? [name] : name.split("_");
-  return {
-    version: PROTOCOL_VERSION,
-    request: "operation",
-    project,
-    words,
-    arguments: positional,
-    options,
-    supplied,
-    json: true,
-  };
+  const unset = (tool.required ?? []).find(
+    (option) => !options.some(([given]) => given === option),
+  );
+  if (unset !== undefined) {
+    throw rejected(`\`${name}\` needs \`${unset}\``);
+  }
+  return { ...base, arguments: positional, options, supplied };
 }
 
 /** A client of one project that the daemon's listener at `url` serves. */
@@ -180,7 +207,19 @@ export class DaemonClient {
    */
   async run(name, args = {}, options = {}) {
     const stats = options?.debugStats === true;
-    const body = JSON.stringify(request(name, args, this.#project));
+    // A failure that ran nothing has no work, which a call with debug stats reports.
+    const nothing = (error) => {
+      if (stats && error instanceof MaraError) {
+        error.stats = { ...NO_WORK };
+      }
+      return error;
+    };
+    let body;
+    try {
+      body = JSON.stringify(request(name, args, this.#project));
+    } catch (error) {
+      throw nothing(error);
+    }
     const response = await fetch(new URL("/operation", this.#url), {
       method: "POST",
       headers: { Authorization: `Bearer ${this.#token}`, "Content-Type": "application/json" },
@@ -190,10 +229,7 @@ export class DaemonClient {
     });
     const answer = await response.json();
     if (response.status !== 200) {
-      // The listener checks what the client sent as the daemon checks a native request: what
-      // it refuses as malformed is an argument's value, since the client wrote the rest.
-      const code = answer.error === "malformed-request" ? "invalid-argument" : answer.error;
-      throw failure(code, answer.message);
+      throw nothing(failure(refusalCode(answer), answer.message));
     }
     const reply = JSON.parse(answer.text);
     const work = { format_version: 1, ...answer.work };
@@ -202,6 +238,17 @@ export class DaemonClient {
     }
     return stats ? { result: reply, stats: work } : reply;
   }
+}
+
+/**
+ * The code of the listener's refusal `answer`. The listener checks an option's value as the
+ * daemon checks a native request and refuses it as malformed with `` `<option>`: <reason> ``,
+ * which the client reports as `mara mcp` reports the same value: `invalid-argument`. Any other
+ * refusal, such as of a body past the listener's limit, keeps its code.
+ */
+function refusalCode(answer) {
+  const value = answer.error === "malformed-request" && /^`[a-z-]+`: /.test(answer.message ?? "");
+  return value ? "invalid-argument" : answer.error;
 }
 
 /**

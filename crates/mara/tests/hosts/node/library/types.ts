@@ -9,20 +9,23 @@ import { createClient, MaraError, type Arguments, type OperationName, type Resul
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
 /**
- * Whether `T`, or a member, array element or union member of it at any depth, is `any`. Types
- * that refer to themselves, as JSON values and proofs do, are followed 12 levels deep.
+ * Whether `T`, or a member, array element or union member of it at any depth, is `any`. `any`
+ * is checked before the depth: types that refer to themselves, as JSON values and proofs do, are
+ * followed 24 levels deep, past a whole round of each of them, so an `any` anywhere in one is
+ * met within that depth.
  */
-type HasAny<T, Depth extends unknown[] = []> = Depth["length"] extends 12
-  ? false
-  : IsAny<T> extends true
+type HasAny<T, Depth extends unknown[] = []> =
+  IsAny<T> extends true
     ? true
-    : T extends readonly (infer Element)[]
-      ? HasAny<Element, [...Depth, unknown]>
-      : T extends object
-        ? true extends { [K in keyof T]-?: HasAny<T[K], [...Depth, unknown]> }[keyof T]
-          ? true
-          : false
-        : false;
+    : Depth["length"] extends 24
+      ? false
+      : T extends readonly (infer Element)[]
+        ? HasAny<Element, [...Depth, unknown]>
+        : T extends object
+          ? true extends { [K in keyof T]-?: HasAny<T[K], [...Depth, unknown]> }[keyof T]
+            ? true
+            : false
+          : false;
 
 /** Compiles only for a type that holds no `any` at any depth. */
 type NoAny<T> = HasAny<T> extends false ? true : never;
@@ -63,11 +66,27 @@ interface Fixture {
 // @ts-expect-error: `any` three members deep
 const refused: NoAny<Fixture> = true;
 
+/** `any` 20 members deep, past the 12 levels that an earlier guard followed. */
+type Nested<T, Depth extends unknown[] = []> = Depth["length"] extends 20
+  ? T
+  : { child: Nested<T, [...Depth, unknown]> };
+// @ts-expect-error: `any` 20 members deep
+const refusedDeep: NoAny<Nested<any>> = true;
+const acceptedDeep: NoAny<Nested<string>> = true;
+
+/** A type that refers to itself, as a proof does, with `any` in a union deep in each round. */
+interface Tree {
+  children: Tree[];
+  value: string | { step: { atom: string; values: (string | any)[] } };
+}
+// @ts-expect-error: `any` inside a type that refers to itself
+const refusedTree: NoAny<Tree> = true;
+
 const client = createClient({ project: "." });
 
 /** Reads every member of each result. */
 async function everyOperation(): Promise<unknown[]> {
-  const read: unknown[] = [checked, refused];
+  const read: unknown[] = [checked, refused, refusedDeep, acceptedDeep, refusedTree];
   const validated = await client.run("project_validate", { path: ["docs"], limit: 10, cursor: "c" });
   read.push(validated.format_version, validated.valid, validated.errors, validated.warnings);
   read.push(validated.next_cursor);
@@ -114,9 +133,17 @@ async function everyOperation(): Promise<unknown[]> {
   const got = await client.run("get", { node: "REQ-A", cursor: "c" });
   read.push(got.format_version, got.node.kind, got.node.path, got.content);
   read.push(got.diagnostics, got.diagnostics_total, got.next_cursor);
-  if ("revision" in got.node) {
-    read.push(got.node.revision);
+  if (got.node.kind === "item") {
+    const revision: string = got.node.revision;
+    read.push(revision, got.node.mid);
   }
+  // A parameter set to `null` counts as left out.
+  const unpaged = await client.run("item_list", { cursor: null, limit: null, type: null });
+  read.push(unpaged.items);
+  // `debugStats` known only when the call runs.
+  const flag: boolean = read.length > 1;
+  const either = await client.run("search", { query: "read" }, { debugStats: flag });
+  read.push("stats" in either ? either.stats.hashes : either.results);
   for (const row of got.rows) {
     read.push(row.key, row.value, row.line, row.partial);
   }

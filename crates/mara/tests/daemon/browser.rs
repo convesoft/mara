@@ -678,15 +678,7 @@ fn every_unauthorized_request_is_refused_alike() {
         let request = read.clone().field("project", project);
         let response = browser.refused(case, &request, Some(ORIGIN));
         assert_eq!(response.status, 403, "{case}: {response:?}");
-        assert_eq!(
-            response.json(),
-            json!({
-                "version": 1,
-                "error": "refused",
-                "message": "the request names no project root that this daemon allows",
-            }),
-            "{case}"
-        );
+        assert_eq!(response.json(), project_refusal(), "{case}");
     }
 
     // Preflights need no token, and open no session.
@@ -719,7 +711,9 @@ fn every_unauthorized_request_is_refused_alike() {
     );
     assert_eq!(allowed.header("access-control-max-age"), Some("600"));
     let served = browser.served();
+    let files = browser.files();
     let other = browser.send(&preflight.clone().from(THIRD));
+    assert!(browser.files() == files, "a preflight changed a file");
     assert_eq!(other.status, 403, "{other:?}");
     assert_eq!(other.json(), origin_refusal());
     assert!(other.access_control().is_empty(), "{other:?}");
@@ -799,9 +793,13 @@ fn a_start_while_the_listener_runs_changes_nothing() {
     let status = browser.test.status();
     assert_eq!((&status["port"], &status["token"]), (&port, &token));
     assert_eq!(browser.test.daemons(), [browser.pid]);
-    browser.refused("the third origin", &browser.read().from(THIRD), None);
+    let third = browser.refused("the third origin", &browser.read().from(THIRD), None);
+    assert_eq!(third.status, 403, "{third:?}");
+    assert_eq!(third.json(), origin_refusal());
     let to_b = browser.read().field("project", json!(browser.b()));
-    browser.refused("project B", &to_b, Some(ORIGIN));
+    let b = browser.refused("project B", &to_b, Some(ORIGIN));
+    assert_eq!(b.status, 403, "{b:?}");
+    assert_eq!(b.json(), project_refusal());
     for origin in [ORIGIN, SECOND] {
         for root in [browser.a(), browser.c()] {
             let request = browser.read().from(origin).field("project", json!(root));
@@ -881,6 +879,15 @@ fn origin_refusal() -> Value {
         "version": 1,
         "error": "refused",
         "message": "the request comes from no origin that this daemon allows",
+    })
+}
+
+/// The body of a refusal for the project.
+fn project_refusal() -> Value {
+    json!({
+        "version": 1,
+        "error": "refused",
+        "message": "the request names no project root that this daemon allows",
     })
 }
 

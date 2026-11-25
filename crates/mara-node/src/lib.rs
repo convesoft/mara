@@ -23,6 +23,7 @@ pub struct Call {
     name: String,
     arguments: String,
     project: Option<String>,
+    cwd: String,
     direct: bool,
 }
 
@@ -47,8 +48,9 @@ impl Task for Call {
 
 // @mara implements REQ-NODE-LIBRARY
 /// Runs the document operation whose MCP tool is `name` with the arguments of the JSON text
-/// `arguments` in the project `project`, or the one found from the working directory, through
-/// the daemon of the addon's build or in-process, or always in-process when `direct`. Resolves
+/// `arguments` in the project `project`, or the one found upward from `cwd`, Node's working
+/// directory when the call was made, through the daemon of the addon's build or in-process, or
+/// always in-process when `direct`. Resolves
 /// with JSON text: `text`, the JSON object that `--format json` prints, `failed`, `status`, the
 /// CLI's exit status, and `stats`, the object of the request's stats line
 /// (DES-PERFORMANCE-HARNESS).
@@ -57,12 +59,14 @@ pub fn call(
     name: String,
     arguments: String,
     project: Option<String>,
+    cwd: String,
     direct: bool,
 ) -> AsyncTask<Call> {
     AsyncTask::new(Call {
         name,
         arguments,
         project,
+        cwd,
         direct,
     })
 }
@@ -79,6 +83,7 @@ fn answer(call: &Call) -> Result<String> {
         &call.name,
         &arguments,
         call.project.as_ref().map(PathBuf::from),
+        PathBuf::from(&call.cwd),
         call.direct,
         &mut work,
     );

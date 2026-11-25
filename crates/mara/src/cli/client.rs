@@ -316,11 +316,17 @@ fn lost(operation: &Operation, pid: Option<u32>, why: &str) -> Failure {
 /// Starts `mara daemon start` of this host's executable in the background, detached from the
 /// client's standard streams and process group, in the client's directory and with its
 /// `--project`. A failure to start it is no failure of the request, which runs in-process all the
-/// same.
+/// same. An embedded host starts none once its executable's file is another build.
 fn start_daemon(cwd: PathBuf, project: Option<PathBuf>) {
     let Ok(executable) = mara::system::executable() else {
         return;
     };
+    // An embedded host keeps the build it first had ([`Build::current`]): a file that replaced
+    // that executable is another build, whose daemon would serve none of its requests.
+    if mara::system::embedded() && Build::of_file(executable.clone()).ok() != Build::current().ok()
+    {
+        return;
+    }
     let mut command = Command::new(executable);
     if let Some(project) = project {
         command.arg("--project").arg(cwd.join(project));

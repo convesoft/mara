@@ -8,7 +8,12 @@ const [library, options] = process.argv.slice(2);
 const { createClient, MaraError } = await import(library);
 const client = createClient(JSON.parse(options));
 
-process.on("message", async ({ id, name, args, options, timed }) => {
+process.on("message", async ({ id, name, args, options, timed, chdir }) => {
+  if (chdir !== undefined) {
+    process.chdir(chdir);
+    process.send({ id });
+    return;
+  }
   let promise;
   let threw;
   const callbacks = [];

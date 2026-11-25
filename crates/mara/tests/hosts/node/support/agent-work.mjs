@@ -189,6 +189,15 @@ export async function agentWork(s) {
     { "id-or-mid": "REQ-WARM-READ", path: "docs/agent/reqs.mara.md", line: 0 },
     { rejected: true },
   );
+  // Required options left out: refused before anything is sent (DES-MCP-SERVER).
+  await s.run(
+    "item_create",
+    { type: "requirement", path: "docs/agent/reqs.mara.md", body: "Text." },
+    { rejected: true },
+  );
+  await s.run("query_gate", { name: "verified" }, { rejected: true });
+  await s.run("query_gate", { name: "verified", id: [] }, { rejected: true });
+  await s.run("query_report", { name: "verified" }, { rejected: true });
   await s.run("item_create", {
     type: "requirement",
     path: "notes/x.md",
@@ -231,7 +240,6 @@ export async function agentWork(s) {
   await s.run("query_gate", gate({ input: { candidate: "abc", result: wrong } }));
   await s.run("query_execute", { name: "broken" });
   await s.run("query_gate", { name: "broken-gate", id: ["NEED-FAST-ANSWERS"] });
-  await s.run("query_gate", { name: "passed", id: [] });
   await s.run("query_report", {
     name: "passed",
     id: "REQ-COLD-READ-BUDGET",

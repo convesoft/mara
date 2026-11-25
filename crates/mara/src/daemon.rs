@@ -55,24 +55,41 @@ pub struct Build {
 impl Build {
     /// The build of this process. On Linux the size and time are those of the image that runs,
     /// even when another file has since replaced it at its path. A host embedded in another
-    /// program, the Node addon, has the build of the `mara` executable it names, as that file is
-    /// now ([`crate::system::embed`]).
+    /// program, the Node addon, has the build of the `mara` executable it names
+    /// ([`crate::system::embed`]), as that file was when it first had one: the host keeps that
+    /// build for its life, as a process keeps its image, also when another file replaces it.
     pub fn current() -> io::Result<Build> {
-        let executable = crate::system::executable()?;
+        if !crate::system::embedded() {
+            let executable = crate::system::executable()?;
+            let executable = fs::canonicalize(&executable).unwrap_or(executable);
+            #[cfg(target_os = "linux")]
+            let metadata = fs::metadata("/proc/self/exe")?;
+            #[cfg(not(target_os = "linux"))]
+            let metadata = fs::metadata(&executable)?;
+            return Ok(Build::of(executable, &metadata));
+        }
+        static EMBEDDED: std::sync::OnceLock<Build> = std::sync::OnceLock::new();
+        if let Some(build) = EMBEDDED.get() {
+            return Ok(build.clone());
+        }
+        let build = Build::of_file(crate::system::executable()?)?;
+        Ok(EMBEDDED.get_or_init(|| build).clone())
+    }
+
+    /// The build of the executable file at `executable` as it is now.
+    pub fn of_file(executable: PathBuf) -> io::Result<Build> {
         let executable = fs::canonicalize(&executable).unwrap_or(executable);
-        #[cfg(target_os = "linux")]
-        let metadata = match crate::system::embedded() {
-            true => fs::metadata(&executable)?,
-            false => fs::metadata("/proc/self/exe")?,
-        };
-        #[cfg(not(target_os = "linux"))]
         let metadata = fs::metadata(&executable)?;
-        Ok(Build {
+        Ok(Build::of(executable, &metadata))
+    }
+
+    fn of(executable: PathBuf, metadata: &fs::Metadata) -> Build {
+        Build {
             version: env!("CARGO_PKG_VERSION"),
             executable,
             size: metadata.size(),
             modified: (metadata.mtime(), metadata.mtime_nsec()),
-        })
+        }
     }
 
     /// The lowercase hexadecimal BLAKE3 hash of every part of the build.

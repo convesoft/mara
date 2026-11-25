@@ -91,7 +91,7 @@ dependsOn = [
   "...",
   { projects = ["cargo-workspace"], target = "souffle" },
   { projects = ["mara-browser"], target = "build" },
-  { projects = ["mara-node"], target = "build" },
+  { projects = ["mara-node"], target = "build", params = "forward" },
 ]
 
 # `project validate` of this repository's own project (ADR-NX-RUST-TASKS), with the command of the

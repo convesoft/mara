@@ -260,7 +260,8 @@ export interface Operations {
   get: {
     args: { node: string; cursor?: string };
     result: Page & {
-      node: Node | (ItemNode & { revision: string });
+      /** The node, an item with its `revision`: the BLAKE3 hash of its region. */
+      node: NarrativeNode | DocumentNode | CodeNode | (ItemNode & { revision: string });
       rows: Row[];
       content: string;
     };
@@ -370,8 +371,11 @@ export interface Operations {
 /** The MCP tool name of each document operation. */
 export type OperationName = keyof Operations;
 
+/** `T` whose optional members may also be `null`, which counts as left out (DES-MCP-SERVER). */
+export type LeftOut<T> = { [K in keyof T]: undefined extends T[K] ? T[K] | null : T[K] };
+
 /** The arguments of the operation `N`; a member set to `null` counts as left out. */
-export type Arguments<N extends OperationName> = Operations[N]["args"];
+export type Arguments<N extends OperationName> = LeftOut<Operations[N]["args"]>;
 
 /** The result of the operation `N`: the JSON object that `--format json` prints. */
 export type Result<N extends OperationName> = Operations[N]["result"];
@@ -427,4 +431,9 @@ export interface Client {
     name: N,
     ...rest: RunParametersWithStats<N>
   ): Promise<{ result: Result<N>; stats: Stats }>;
+  /** A call whose `debugStats` is known only when it runs. */
+  run<N extends OperationName>(
+    name: N,
+    ...rest: RunParameters<N, CallOptions>
+  ): Promise<Result<N> | { result: Result<N>; stats: Stats }>;
 }
