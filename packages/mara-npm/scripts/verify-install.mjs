@@ -25,9 +25,10 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import {
-  dispatcherFiles,
+  dispatcherContents,
   dispatcherName,
   hostPlatform,
+  installedDocsProblems,
   minimumGlibc,
   nativeFiles,
   root,
@@ -531,13 +532,29 @@ async function main() {
     }
   }
 
+  // The dispatcher's `docs/` against the files that Git tracks under `docs/` at the checkout's HEAD,
+  // which in the release workflow's Build and Registry check jobs is the recorded commit.
+  let dispatcher;
+  await verifyCase("the installed dispatcher's docs/ equals the checkout's", () => {
+    dispatcher = dispatcherContents();
+    const docs = path.join(installed, "node_modules", ...dispatcherName.split("/"));
+    const problems = installedDocsProblems(docs, dispatcher.blobs);
+    return {
+      problem: problems.length > 0 ? problems.join("; ") : undefined,
+      details: `  compared: ${path.join(docs, "docs")} with docs/ at HEAD of ${root}\n`,
+    };
+  });
+
   if (options.registry === undefined) {
-    for (const [tarball, files] of [
-      [tarballs.dispatcher, dispatcherFiles],
+    for (const [tarball, files, blobs] of [
+      [tarballs.dispatcher, dispatcher?.files, dispatcher?.blobs],
       [tarballs.native, nativeFiles],
     ]) {
       await verifyCase(`the file list of ${path.basename(tarball)}`, () => {
-        const { problems, command, output } = tarballProblems(tarball, files);
+        if (files === undefined) {
+          throw new Error("the checkout's docs/ could not be read; see the case above");
+        }
+        const { problems, command, output } = tarballProblems(tarball, files, blobs);
         return {
           problem: problems.length > 0 ? problems.join("; ") : undefined,
           details: `  command: ${command}\n  stdout:\n${indent(output)}`,

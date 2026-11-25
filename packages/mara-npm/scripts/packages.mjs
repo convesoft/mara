@@ -2,7 +2,9 @@
 // version, repository and artifact directory, the platforms, and the exact file list of each package.
 
 import { execFileSync } from "node:child_process";
+import { lstatSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,7 +14,7 @@ export const dispatcherScript = path.join(project, "bin", "mara.cjs");
 export const { minimumGlibc, platforms } = createRequire(import.meta.url)(dispatcherScript);
 export const dispatcherName = "@convesoft/mara";
 
-// Each packed path with its mode.
+// Each packed path with its mode; the dispatcher also holds `docs/`, from `dispatcherContents`.
 export const dispatcherFiles = {
   "package.json": 0o644,
   "bin/mara.cjs": 0o755,
@@ -70,6 +72,150 @@ export function hostPlatform() {
   return platform;
 }
 
+function git(repository, args, options = {}) {
+  return execFileSync("git", ["-C", repository, ...args], {
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "inherit"],
+    ...options,
+  });
+}
+
+// The files that Git tracks under `docs/` at HEAD of `repository`, the packed commit (ADR-BUNDLED-
+// DOCS): a map from each path to its blob's object ID. Fails when a tracked entry is not a regular
+// file, such as a symbolic link, or when the working tree's `docs/` differs from HEAD by a
+// modified, staged, deleted, untracked or ignored file.
+export function trackedDocs(repository = root) {
+  const docs = new Map();
+  const others = [];
+  for (const entry of git(repository, ["ls-tree", "-r", "-z", "HEAD", "--", "docs"], {
+    encoding: "utf8",
+  })
+    .split("\0")
+    .filter(Boolean)) {
+    const [, mode, type, id, file] = entry.match(/^(\d+) (\w+) (\S+)\t(.*)$/s);
+    // tar and `git hash-object --stdin-paths` list one name per line.
+    if (file.includes("\n")) {
+      others.push(JSON.stringify(file));
+    } else if (type === "blob" && (mode === "100644" || mode === "100755")) {
+      docs.set(file, id);
+    } else {
+      others.push(`${file} (mode ${mode})`);
+    }
+  }
+  if (others.length > 0) {
+    throw new Error(
+      `docs/ at HEAD holds entries that are not regular files or whose name holds a line break: ${others.join(", ")}`,
+    );
+  }
+  if (docs.size === 0) {
+    throw new Error(`Git tracks no file under docs/ at HEAD of ${repository}`);
+  }
+  const status = git(
+    repository,
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--", "docs"],
+    { encoding: "utf8" },
+  )
+    .split("\0")
+    .filter(Boolean);
+  if (status.length > 0) {
+    throw new Error(
+      `docs/ in the working tree differs from HEAD, which is what is packed; commit or remove: ${status.join(", ")}`,
+    );
+  }
+  return docs;
+}
+
+// The dispatcher's paths with their modes and the blob that each file of `docs/` must equal.
+export function dispatcherContents(repository = root) {
+  const blobs = trackedDocs(repository);
+  const files = { ...dispatcherFiles };
+  for (const file of blobs.keys()) {
+    files[file] = 0o644;
+  }
+  return { files, blobs };
+}
+
+// The contents of each blob of `blobs`, a map from a path to an object ID, read from Git's object
+// database with one `git cat-file --batch`, never from the working tree.
+export function blobContents(blobs, repository = root) {
+  const ids = [...blobs.values()];
+  const output = git(repository, ["cat-file", "--batch"], { input: `${ids.join("\n")}\n` });
+  const contents = new Map();
+  let offset = 0;
+  for (const [file, id] of blobs) {
+    const end = output.indexOf(0x0a, offset);
+    const header = output.subarray(offset, end).toString("utf8");
+    const match = header.match(/^(\S+) blob (\d+)$/);
+    if (match === null || match[1] !== id) {
+      throw new Error(`git cat-file answered "${header}" for ${file}, the blob ${id}`);
+    }
+    const size = Number(match[2]);
+    contents.set(file, output.subarray(end + 1, end + 1 + size));
+    offset = end + 1 + size + 1;
+  }
+  return contents;
+}
+
+// The object ID that Git gives each file's contents, without filters, as `git hash-object`.
+function blobIds(files, repository) {
+  if (files.length === 0) {
+    return [];
+  }
+  return git(repository, ["hash-object", "--no-filters", "--stdin-paths"], {
+    input: `${files.join("\n")}\n`,
+    encoding: "utf8",
+  })
+    .split("\n")
+    .filter(Boolean);
+}
+
+// The problems of `docs` against `blobs`, the map of `dispatcherContents`: `docs` maps each path
+// found to its file, or to undefined for an entry that is not a regular file.
+function docsProblems(docs, blobs, repository) {
+  const compared = [...docs].filter(([name, file]) => file !== undefined && blobs.has(name));
+  const ids = blobIds(
+    compared.map(([, file]) => file),
+    repository,
+  );
+  return [
+    ...[...blobs.keys()].filter((name) => !docs.has(name)).map((name) => `missing ${name}`),
+    ...[...docs]
+      .filter(([name, file]) => file === undefined && blobs.has(name))
+      .map(([name]) => `${name} is not a regular file`),
+    ...[...docs].filter(([name]) => !blobs.has(name)).map(([name]) => `unexpected ${name}`),
+    ...compared
+      .filter(([name], index) => ids[index] !== blobs.get(name))
+      .map(([name]) => `${name} differs from the packed commit's`),
+  ];
+}
+
+// The problems of an installed package's `docs/` folder against `blobs`, without following a
+// symbolic link: a missing, unexpected or changed file, or an entry that is not a regular file.
+export function installedDocsProblems(directory, blobs, repository = root) {
+  const docs = new Map();
+  const walk = (relative) => {
+    for (const entry of readdirSync(path.join(directory, relative), { withFileTypes: true })) {
+      const name = path.posix.join(relative, entry.name);
+      if (entry.isDirectory()) {
+        walk(name);
+      } else {
+        docs.set(name, entry.isFile() ? path.join(directory, name) : undefined);
+      }
+    }
+  };
+  let folder;
+  try {
+    folder = lstatSync(path.join(directory, "docs"));
+  } catch {
+    return ["no docs/"];
+  }
+  if (!folder.isDirectory()) {
+    return ["docs is not a directory"];
+  }
+  walk("docs");
+  return docsProblems(docs, blobs, repository);
+}
+
 // The file name that `npm pack` gives a package's tarball.
 export function tarballName(name, version) {
   return `${name.replace(/^@/, "").replace("/", "-")}-${version}.tgz`;
@@ -93,7 +239,9 @@ export function releasePackages(version) {
 // or a file of another mode or type. `command` and `output` are the listing that was checked.
 // `tar -tzf` gives each member's name on a line of its own, spaces included; `tar -tvzf` lists the
 // members in the same order and starts each line with the type and mode, on GNU and BSD tar.
-export function tarballProblems(tarball, files) {
+// `blobs`, from `dispatcherContents`, adds the comparison of the tarball's `docs/` with the packed
+// commit, on a copy that tar extracts into a new temporary directory.
+export function tarballProblems(tarball, files, blobs = new Map()) {
   const list = (flags) =>
     execFileSync("tar", [flags, tarball], { encoding: "utf8" }).split("\n").filter(Boolean);
   const names = list("-tzf");
@@ -128,6 +276,28 @@ export function tarballProblems(tarball, files) {
       .filter((entry) => entry.path in files && entry.mode !== modeString(files[entry.path]))
       .map((entry) => `${entry.path} is ${entry.mode}, not ${modeString(files[entry.path])}`),
   ];
+  if (blobs.size > 0) {
+    const extracted = mkdtempSync(path.join(os.tmpdir(), "mara-docs-"));
+    try {
+      execFileSync("tar", ["-xzf", tarball, "-C", extracted]);
+      const docs = new Map(
+        entries
+          .filter((entry) => entry.path.startsWith("docs/"))
+          .map((entry) => [
+            entry.path,
+            entry.mode.startsWith("-") ? path.join(extracted, "package", entry.path) : undefined,
+          ]),
+      );
+      // A missing or unexpected file is also a problem of the list above, named alike.
+      for (const problem of docsProblems(docs, blobs, root)) {
+        if (!problems.includes(problem)) {
+          problems.push(problem);
+        }
+      }
+    } finally {
+      rmSync(extracted, { recursive: true, force: true });
+    }
+  }
   return {
     problems,
     command: `tar -tvzf ${tarball}`,

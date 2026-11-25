@@ -22,7 +22,8 @@ import {
 import os from "node:os";
 import path from "node:path";
 import {
-  dispatcherFiles,
+  blobContents,
+  dispatcherContents,
   dispatcherName,
   dispatcherScript,
   hostPlatform,
@@ -58,10 +59,11 @@ function baseManifest(name, description, license) {
 
 // Stages `sources`, a map from each packed path but `package.json` to its source file or
 // `{ contents }`, with `manifest` as `package.json`; packs it with npm, offline and with an empty
-// cache of its own; checks the tarball against `files`, the package's paths and modes; and only
-// then renames it over the tarball of the same name in `outDir`. A failure leaves that tarball as
-// it was and removes only what this run created.
-function pack(outDir, manifest, sources, files) {
+// cache of its own; checks the tarball against `files`, the package's paths and modes, and
+// against `blobs`, the contents of the dispatcher's `docs/` (`tarballProblems`); and only then
+// renames it over the tarball of the same name in `outDir`. A failure leaves that tarball as it
+// was and removes only what this run created.
+function pack(outDir, manifest, sources, files, blobs) {
   const stage = mkdtempSync(path.join(os.tmpdir(), "mara-pack-"));
   const name = tarballName(manifest.name, version);
   let output;
@@ -105,7 +107,7 @@ function pack(outDir, manifest, sources, files) {
       { stdio: ["ignore", "ignore", "inherit"] },
     );
     const packed = path.join(output, name);
-    const { problems } = tarballProblems(packed, files);
+    const { problems } = tarballProblems(packed, files, blobs);
     if (problems.length > 0) {
       throw new Error(`the tarball of ${manifest.name} is wrong: ${problems.join("; ")}`);
     }
@@ -130,13 +132,18 @@ function packDispatcher(outDir) {
     engines: { node: ">=24" },
     optionalDependencies: Object.fromEntries(platforms.map((platform) => [platform.name, version])),
   };
+  // `docs/` as Git tracks it at HEAD, read from Git's objects (ADR-BUNDLED-DOCS).
+  const { files, blobs } = dispatcherContents();
   const sources = {
     "bin/mara.cjs": dispatcherScript,
     "README.md": path.join(root, "README.md"),
     "LICENSE-MIT": path.join(root, "LICENSE-MIT"),
     "LICENSE-APACHE": path.join(root, "LICENSE-APACHE"),
   };
-  pack(outDir, manifest, sources, dispatcherFiles);
+  for (const [file, contents] of blobContents(blobs)) {
+    sources[file] = { contents };
+  }
+  pack(outDir, manifest, sources, files, blobs);
 }
 
 function packNative(souffle, souffleLicence, outDir) {
