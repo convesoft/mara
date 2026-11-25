@@ -1,14 +1,15 @@
 // The real packaging script and install verification on the dispatcher's `docs/` (ADR-BUNDLED-DOCS,
 // VER-INSTALL-WITHOUT-TOOLCHAIN): run in a disposable workspace, a Git repository with a copy of
-// packages/mara-npm and a Cargo workspace whose `cargo metadata` gives the version.
+// packages/mara-npm and a Cargo workspace whose `cargo metadata` gives the version. Every child
+// starts in the test's temporary directory, so that no project `.npmrc` of the caller applies.
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fromTarListing, hostPlatform, root, tarballName } from "../scripts/packages.mjs";
-import { environment, temporaryDirectory } from "./support.mjs";
+import { environment, run, startRegistry, temporaryDirectory } from "./support.mjs";
 
 const version = "0.0.1";
 const dispatcher = tarballName("@convesoft/mara", version);
@@ -23,7 +24,7 @@ const pages = {
 };
 
 // The workspace, committed, with `pages` under docs/ and `extra` files anywhere.
-function workspace(t, extra = {}) {
+function workspace(t, extra = {}, cargoVersion = version) {
   const directory = temporaryDirectory(t);
   const repo = path.join(directory, "repo");
   const env = environment(directory, { LC_ALL: "C" });
@@ -33,13 +34,17 @@ function workspace(t, extra = {}) {
       recursive: true,
     });
   }
+  // `run` starts a script by its path.
+  for (const name of ["pack.mjs", "verify-install.mjs"]) {
+    fs.chmodSync(path.join(project, "scripts", name), 0o755);
+  }
   for (const file of ["rust-toolchain.toml", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]) {
     fs.copyFileSync(path.join(root, file), path.join(repo, file));
   }
   const files = {
     "Cargo.toml": `[workspace]\nmembers = ["crates/mara"]\nresolver = "3"\n`,
     "crates/mara/Cargo.toml":
-      `[package]\nname = "mara"\nversion = "${version}"\nedition = "2024"\n` +
+      `[package]\nname = "mara"\nversion = "${cargoVersion}"\nedition = "2024"\n` +
       `repository = "https://example.invalid/mara"\n`,
     "crates/mara/src/main.rs": "fn main() {}\n",
     ...pages,
@@ -49,7 +54,8 @@ function workspace(t, extra = {}) {
     fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
     fs.writeFileSync(path.join(repo, file), contents);
   }
-  const git = (...args) => execFileSync("git", ["-C", repo, ...args], { env, encoding: "utf8" });
+  const git = (...args) =>
+    execFileSync("git", ["-C", repo, ...args], { cwd: directory, env, encoding: "utf8" });
   git("init", "--quiet");
   git("add", ".");
   git("commit", "--quiet", "--message", "workspace");
@@ -57,30 +63,30 @@ function workspace(t, extra = {}) {
   return { directory, repo, env, git, script };
 }
 
-function pack({ directory, env, script }, out = path.join(directory, "out")) {
-  const result = spawnSync("node", [script("pack.mjs"), "dispatcher", out], {
-    env,
-    encoding: "utf8",
-  });
+async function pack({ directory, env, script }, out = path.join(directory, "out")) {
+  const result = await run(script("pack.mjs"), ["dispatcher", out], { cwd: directory, env });
   return { ...result, tarball: path.join(out, dispatcher), out };
 }
 
-const listing = (tarball, env) =>
-  execFileSync("tar", ["-tzf", tarball], { env, encoding: "latin1" })
+const listing = (tarball, { directory, env }) =>
+  execFileSync("tar", ["-tzf", tarball], { cwd: directory, env, encoding: "latin1" })
     .split("\n")
     .filter(Boolean)
     .map((name) => fromTarListing(name).replace(/^package\//, ""));
 
-test("the packaging script packs the docs that Git tracks, under any locale", (t) => {
+test("the packaging script packs the docs that Git tracks, under any locale", async (t) => {
   const fixture = workspace(t);
-  const result = pack(fixture);
+  const result = await pack(fixture);
   assert.equal(result.status, 0, result.stderr);
   const tracked = fixture.git("ls-files", "-z", "docs").split("\0").filter(Boolean).sort();
   assert.deepEqual(tracked, Object.keys(pages).sort());
-  const packed = listing(result.tarball, fixture.env);
+  const packed = listing(result.tarball, fixture);
   assert.deepEqual(packed.filter((name) => name.startsWith("docs/")).sort(), tracked);
   const manifest = JSON.parse(
-    execFileSync("tar", ["-xzOf", result.tarball, "package/package.json"], { encoding: "utf8" }),
+    execFileSync("tar", ["-xzOf", result.tarball, "package/package.json"], {
+      cwd: fixture.directory,
+      encoding: "utf8",
+    }),
   );
   assert.deepEqual(manifest.files, [
     "bin/mara.cjs",
@@ -103,10 +109,10 @@ for (const [name, change, named] of [
     "docs/new.md",
   ],
 ]) {
-  test(`the packaging script refuses docs/ with ${name} and writes no tarball`, (t) => {
+  test(`the packaging script refuses docs/ with ${name} and writes no tarball`, async (t) => {
     const fixture = workspace(t);
     change(fixture);
-    const result = pack(fixture);
+    const result = await pack(fixture);
     assert.equal(result.status, 1, result.stdout);
     assert.match(result.stderr, /docs\/ in the working tree differs from HEAD/);
     assert.ok(result.stderr.includes(named), result.stderr);
@@ -114,9 +120,9 @@ for (const [name, change, named] of [
   });
 }
 
-test("the packaging script fails, naming it, on a tracked page that npm never packs", (t) => {
+test("the packaging script fails, naming it, on a tracked page that npm never packs", async (t) => {
   const fixture = workspace(t, { "docs/notes.orig": "x" });
-  const result = pack(fixture);
+  const result = await pack(fixture);
   assert.equal(result.status, 1, result.stdout);
   assert.match(
     result.stderr,
@@ -145,17 +151,14 @@ function nativeTarball({ directory, env }, out) {
     mode: 0o755,
   });
   execFileSync("npm", ["pack", stage, "--pack-destination", out, "--ignore-scripts", "--offline"], {
+    cwd: directory,
     env,
     stdio: "ignore",
   });
 }
 
-function verify({ env, script }, tarballs) {
-  const result = spawnSync("node", [script("verify-install.mjs"), "--tarballs", tarballs], {
-    env,
-    encoding: "utf8",
-    timeout: 300_000,
-  });
+async function verify({ directory, env, script }, args) {
+  const result = await run(script("verify-install.mjs"), args, { cwd: directory, env });
   const line = (name) => result.stdout.split("\n").find((text) => text.includes(name));
   return {
     result,
@@ -164,14 +167,14 @@ function verify({ env, script }, tarballs) {
   };
 }
 
-test("the install verification compares the dispatcher's docs/ with the checkout's HEAD", (t) => {
+test("the install verification compares the dispatcher's docs/ with the checkout's HEAD", async (t) => {
   const fixture = workspace(t);
-  const packed = pack(fixture);
+  const packed = await pack(fixture);
   assert.equal(packed.status, 0, packed.stderr);
   nativeTarball(fixture, packed.out);
 
   // The stand-in binary fails the cases that run mara, but not the dispatcher's.
-  const same = verify(fixture, packed.out);
+  const same = await verify(fixture, ["--tarballs", packed.out]);
   assert.equal(same.docs, "ok      the installed dispatcher's docs/ equals the checkout's");
   assert.equal(same.files, `ok      the file list of ${dispatcher}`);
 
@@ -179,10 +182,39 @@ test("the install verification compares the dispatcher's docs/ with the checkout
   fs.writeFileSync(path.join(fixture.repo, "docs", "[id].md"), "# Changed\n");
   fixture.git("rm", "--quiet", "docs/démarrage.md");
   fixture.git("commit", "--quiet", "--all", "--message", "change");
-  const moved = verify(fixture, packed.out);
+  const moved = await verify(fixture, ["--tarballs", packed.out]);
   for (const line of [moved.docs, moved.files]) {
     assert.match(line, /^FAILED /);
     assert.ok(line.includes("docs/[id].md differs from the packed commit's"), line);
     assert.ok(line.includes("unexpected docs/démarrage.md"), line);
   }
+});
+
+test("with --registry, a docs mismatch at another version names both versions", async (t) => {
+  const registry = await startRegistry(t);
+  const fixture = workspace(t, {}, "0.0.2");
+  // The dispatcher of 0.0.1, from a workspace at 0.0.1 whose pages differ.
+  const old = workspace(t);
+  fs.writeFileSync(path.join(old.repo, "docs", "index.mara.md"), "# Older\n");
+  old.git("commit", "--quiet", "--all", "--message", "older");
+  const packed = await pack(old);
+  assert.equal(packed.status, 0, packed.stderr);
+  registry.add(
+    "@convesoft/mara",
+    { version, bin: { mara: "bin/mara.cjs" } },
+    fs.readFileSync(packed.tarball),
+  );
+
+  const { docs } = await verify(
+    { ...fixture, env: { ...fixture.env, npm_config_registry: registry.url } },
+    [`--registry=${version}`],
+  );
+  assert.match(docs, /^FAILED /);
+  assert.ok(docs.includes("docs/index.mara.md differs from the packed commit's"), docs);
+  assert.ok(
+    docs.includes(
+      `the checkout is at version 0.0.2, not ${version}: run from a checkout of ${version}'s commit`,
+    ),
+    docs,
+  );
 });

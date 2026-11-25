@@ -229,14 +229,38 @@ export function installedDocsProblems(directory, blobs, repository = root) {
   return docsProblems(docs, blobs, repository);
 }
 
-const tarEscapes = { a: "\x07", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v", "\\": "\\" };
+const tarEscapes = { a: 0x07, b: 0x08, f: 0x0c, n: 0x0a, r: 0x0d, t: 0x09, v: 0x0b, "\\": 0x5c };
+const utf8 = new TextDecoder("utf-8", { fatal: true });
 
-// A name as tar lists it in the C locale, decoded into the name's bytes and read as UTF-8.
+// A name as tar lists it in the C locale, decoded into the name's bytes and read as UTF-8. Throws,
+// naming the listed line, on a backslash before anything but those escapes or three octal digits,
+// on an octal value above 0o377, and on bytes that are not UTF-8: nothing is guessed.
 export function fromTarListing(listed) {
-  const bytes = listed.replace(/\\([0-7]{3}|[abfnrtv\\])/g, (_, escape) =>
-    escape.length === 3 ? String.fromCharCode(Number.parseInt(escape, 8)) : tarEscapes[escape],
-  );
-  return Buffer.from(bytes, "latin1").toString("utf8");
+  const bytes = [];
+  const fail = (reason) => new Error(`tar listed ${JSON.stringify(listed)}, ${reason}`);
+  for (let index = 0; index < listed.length; index += 1) {
+    const code = listed.charCodeAt(index);
+    if (code !== 0x5c) {
+      bytes.push(code);
+    } else if (/^[0-7]{3}$/.test(listed.slice(index + 1, index + 4))) {
+      const value = Number.parseInt(listed.slice(index + 1, index + 4), 8);
+      if (value > 0o377) {
+        throw fail(`whose escape \\${listed.slice(index + 1, index + 4)} is above \\377`);
+      }
+      bytes.push(value);
+      index += 3;
+    } else if (Object.hasOwn(tarEscapes, listed[index + 1] ?? "")) {
+      bytes.push(tarEscapes[listed[index + 1]]);
+      index += 1;
+    } else {
+      throw fail("with a backslash that starts no escape of tar's");
+    }
+  }
+  try {
+    return utf8.decode(Uint8Array.from(bytes));
+  } catch {
+    throw fail("which is not UTF-8");
+  }
 }
 
 // The file name that `npm pack` gives a package's tarball.
@@ -275,7 +299,16 @@ export function tarballProblems(tarball, files, blobs = new Map()) {
     })
       .split("\n")
       .filter(Boolean);
-  const names = list("-tzf").map(fromTarListing);
+  // A line that does not decode is a problem, and stays as listed so that it matches no file.
+  const undecoded = [];
+  const names = list("-tzf").map((line) => {
+    try {
+      return fromTarListing(line);
+    } catch (error) {
+      undecoded.push(error.message);
+      return line;
+    }
+  });
   const verbose = list("-tvzf");
   const modes = verbose.map((line) => line.trim().split(/\s+/)[0]);
   const entries = names.map((name, index) => ({
@@ -295,6 +328,7 @@ export function tarballProblems(tarball, files, blobs = new Map()) {
     counts.set(entry.path, (counts.get(entry.path) ?? 0) + 1);
   }
   const problems = [
+    ...undecoded,
     ...(names.length === modes.length ? [] : ["the two listings of tar differ in length"]),
     ...Object.keys(files)
       .filter((file) => !counts.has(file))

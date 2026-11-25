@@ -543,11 +543,20 @@ async function main() {
     dispatcher = dispatcherContents();
     const docs = path.join(installed, "node_modules", ...dispatcherName.split("/"));
     const problems = installedDocsProblems(docs, dispatcher.blobs);
-    const checkout = workspace().version;
-    if (problems.length > 0 && checkout !== version) {
-      problems.push(
-        `the checkout is at version ${checkout}, not ${version}: run from a checkout of ${version}'s commit`,
-      );
+    // With --registry, a checkout at another version is the likely cause. Its version is read only
+    // now, and a failure to read it leaves the hint out.
+    if (problems.length > 0 && options.registry !== undefined) {
+      let checkout;
+      try {
+        checkout = workspace().version;
+      } catch {
+        // No hint.
+      }
+      if (checkout !== undefined && checkout !== version) {
+        problems.push(
+          `the checkout is at version ${checkout}, not ${version}: run from a checkout of ${version}'s commit`,
+        );
+      }
     }
     return {
       problem: problems.length > 0 ? problems.join("; ") : undefined,

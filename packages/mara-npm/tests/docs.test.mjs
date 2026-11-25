@@ -11,6 +11,7 @@ import {
   blobContents,
   dispatcherContents,
   dispatcherFiles,
+  fromTarListing,
   installedDocsProblems,
   tarballProblems,
   trackedDocs,
@@ -23,7 +24,8 @@ function repository(t) {
   const directory = temporaryDirectory(t);
   const repo = path.join(directory, "repo");
   const env = environment(directory);
-  const git = (...args) => execFileSync("git", ["-C", repo, ...args], { env, encoding: "utf8" });
+  const git = (...args) =>
+    execFileSync("git", ["-C", repo, ...args], { cwd: directory, env, encoding: "utf8" });
   fs.mkdirSync(path.join(repo, "docs", "rules"), { recursive: true });
   fs.writeFileSync(path.join(repo, "docs", "index.mara.md"), "# Index\n");
   fs.writeFileSync(path.join(repo, "docs", "rules", "page one.mara.md"), "# Rules\n");
@@ -159,7 +161,7 @@ function tarball(directory, name, files) {
   }
   const out = path.join(directory, `${name}.tgz`);
   const members = Object.keys(files).map((file) => `package/${file}`);
-  execFileSync("tar", ["-czf", out, "-C", stage, "--no-recursion", ...members]);
+  execFileSync("tar", ["-czf", out, "-C", stage, "--no-recursion", ...members], { cwd: directory });
   return out;
 }
 
@@ -253,4 +255,40 @@ test("the install verification compares the installed docs/ with the packed comm
 
   fs.rmSync(path.join(installed, "docs"));
   assert.deepEqual(installedDocsProblems(installed, blobs, repo), ["no docs/"]);
+});
+
+// What GNU tar and bsdtar print for a name in the C locale, and what neither prints.
+test("a tar listing decodes into the name, and one that does not decode is refused", () => {
+  assert.equal(fromTarListing("docs/d\\303\\251marrage \\\\b\\tx.md"), "docs/démarrage \\b\tx.md");
+  for (const [listed, reason] of [
+    ["docs/a\\qb.md", "with a backslash that starts no escape of tar's"],
+    ["docs/a\\", "with a backslash that starts no escape of tar's"],
+    ["docs/a\\400.md", "whose escape \\400 is above \\377"],
+    ["docs/latin\\351.md", "which is not UTF-8"],
+  ]) {
+    assert.throws(
+      () => fromTarListing(listed),
+      (error) => error.message === `tar listed ${JSON.stringify(listed)}, ${reason}`,
+    );
+  }
+});
+
+test("the tarball check reports a member whose name is not UTF-8, naming tar's line", (t) => {
+  const { directory, repo } = repository(t);
+  const { files, blobs } = dispatcherContents(repo);
+  const out = tarball(directory, "latin", packedFiles(repo, {}));
+  // A member named with the byte 0xe9 alone, which tar lists as \351.
+  const stage = path.join(directory, "stage-latin");
+  fs.writeFileSync(
+    Buffer.concat([Buffer.from(`${stage}/package/docs/latin`), Buffer.from([0xe9])]),
+    "x",
+  );
+  execFileSync("tar", ["-xzf", out, "-C", stage], { cwd: directory });
+  const repacked = path.join(directory, "latin-repacked.tgz");
+  execFileSync("tar", ["-czf", repacked, "-C", stage, "package"], { cwd: directory });
+  const { problems } = tarballProblems(repacked, files, blobs);
+  assert.ok(
+    problems.includes('tar listed "package/docs/latin\\\\351", which is not UTF-8'),
+    problems.join("; "),
+  );
 });
