@@ -80,7 +80,7 @@ Counters:
 - Engine and hosts count file reads, hashes, parses, snapshot builds, code scans, subprocess spawns, built-in check steps and program runs.
 - A debug stats option exposes the counts, so tests check the real CLI and daemon.
 - The counts of one request are one `WorkCounts` value (`mara-engine`, module `work`). The host creates it and passes it by `&mut` to each engine call that does counted work. The code that does a piece of work counts it.
-- A file read is one read of a file's contents by the host. A stat or a failed read is none.
+- A file read is one read of a file's contents by the host. A stat or a failed read is none, and a browser workspace reads no files: the contents that the caller supplies or writes are hashed by the engine and are no file reads ([VER-WORK-COUNTERS](verification.mara.md#01M7BF6HGG6ET88HS641Y5676G)).
 - A built-in check step is one item or edge that a built-in check visits.
 - A request that the daemon serves reports the daemon's counts for its project's session: the work done since the session's previous response, the opening of the session and background re-derivation after a watched change included. The client adds none, and starting a daemon is not counted.
 - `--debug-stats` makes the stats line the last line on stderr, after any diagnostic: also when the request fails or its arguments are rejected. Stdout stays the operation's.

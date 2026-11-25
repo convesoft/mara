@@ -24,3 +24,5 @@ As a result, with such a `CARGO_TARGET_DIR`, the CLI tests and `project validate
 The binary also looks first for `souffle` beside its own executable (`crates/mara/src/rules.rs:77-89`), for example `target/debug/souffle`. Neither `mara:test` nor `mara:validate` keys that file, so a Soufflé put there changes what the checks run while Nx restores their earlier results.
 
 - [ ] Decide one place: the script follows `CARGO_TARGET_DIR`, or the binary also looks in the checkout's `target/`. Then align the script, the tests, the Nx inputs and the `souffle` target's output with it.
+
+The browser package's `mara-browser:build` (mara-jptfbq) refuses to copy the WebAssembly module when Cargo's target directory is not `target/` of the workspace, naming the directory and this issue, since Nx stores `mara-wasm:build`'s module only there.

@@ -64,11 +64,12 @@ One orchestrator starts a worker for each ready issue and integrates its branch.
 
 ## Local checks
 
-The local checks are `pnpm run checks`; while working, `pnpm run checks:fast` leaves out `mara:test:performance` and `mara-engine:build:wasm32`. Each check is an Nx target, and [ADR-NX-RUST-TASKS](docs/decisions.mara.md#01M8094G2DV9JZ35C8VRMFPWYV) names the command each runs. Run them from the repository root; each must exit 0.
+The local checks are `pnpm run checks`; while working, `pnpm run checks:fast` leaves out `mara:test:performance`, `mara-engine:build:wasm32` and `mara-wasm:lint:wasm32`. Each check is an Nx target, and [ADR-NX-RUST-TASKS](docs/decisions.mara.md#01M8094G2DV9JZ35C8VRMFPWYV) names the command each runs. Run them from the repository root; each must exit 0.
 
 - Once in a fresh worktree: `pnpm install --frozen-lockfile`. The checks build Soufflé when it is missing.
 - Once on each machine: `cargo run --quiet --bin mara -- --no-daemon code add rust`, because `mara:validate` needs this repository's pinned grammar in the per-user cache ([DES-GRAMMAR-ASSETS](docs/code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
 - `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins.
+- Once on each machine: `pnpm exec playwright install chromium`, the browser that the host tests drive ([VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9)), at the revision that the pinned Playwright names, into Playwright's per-user cache. They need Node 24 or later.
 - Install cargo-nextest, at the version that [DES-CI-WORKFLOW](docs/distribution.mara.md#01M82C8WTKYXH8S92ZJQ4FX73R) pins, before running the local checks.
 - `mara-engine:build:wasm32` is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9); `mara:test:performance` times a release build for [VER-SCALING](docs/verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW).
 - On this machine run Nx with `NX_DAEMON=false NX_USE_LOCAL=true` (no daemon, the worktree's own Nx) under `berth --`, and `pnpm run checks` under `berth --exclusive --`, because the performance test needs the machine to itself.
@@ -94,14 +95,6 @@ The local checks are `pnpm run checks`; while working, `pnpm run checks:fast` le
 - A worker never merges its own pull request, never force-pushes and never pushes to `main`.
 - Only the orchestrator squash-merges pull requests to `main`, one at a time after the required checks pass. Use the pull request title as the squash commit subject and the description as its body. The orchestrator's tracker-only changes go through a pull request of their own that changes only `.zban/`.
 - Nobody rewrites the history of `main`: `d7f0e73` and the alpha tags stay on it.
-
-### Until `main` is fast-forwarded
-
-[Pull requests](#pull-requests) apply from the fast-forward of `main` on. Until then:
-
-- The rewrite integrates on `chore/clear-worktree-for-rewrite`. For each zban issue, the orchestrator first sets it `in-progress` on the integration branch. The worker then creates one branch from its tip in a dedicated worktree.
-- A worker rebases its own unmerged branch onto, or merges into it, the integration branch's tip, reruns the local checks and hands over the branch unpushed. This rule authorizes the rebase. Only the orchestrator integrates into the integration branch. It reruns the local checks, squash-merges one branch at a time and deletes each merged branch.
-- The maintainer fast-forwards `origin/main` to the integration branch: `git push origin chore/clear-worktree-for-rewrite:main`, with branch protection lifted for that push. Never squash it and never use GitHub's "Rebase and merge": both change commit SHAs.
 
 ## Nx
 

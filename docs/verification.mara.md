@@ -402,7 +402,7 @@ In the setup of [VER-BROWSER-WORKSPACE](hosts/verification.mara.md#01M7JQJKGBSCM
 | Case | Expectation |
 | --- | --- |
 | `project init` of each template, and `project convert` of the 0.3.0 input of [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA), in a workspace and through the daemon from Chromium | Fail with `unavailable-operation` naming the operation; the next export is empty, and the daemon's project is byte-identical |
-| The fixtures of [VER-GRAMMAR-MARKERS](code/verification.mara.md#01M7JKT47QR2NYFK59JRV8EV7G), with both grammars pinned, in a workspace: each operation that reads code | The result of CLI direct mode on the same files with both grammars removed from the cache, but for each `unavailable-grammar` message, which says the browser cannot load grammars; `project validate` is invalid |
+| The fixtures of [VER-GRAMMAR-MARKERS](code/verification.mara.md#01M7JKT47QR2NYFK59JRV8EV7G), with both grammars pinned, in a workspace: each operation that reads code, those that read it only for a program from mara-xsm8w6 | The result of CLI direct mode on the same files with both grammars removed from the cache, but for each `unavailable-grammar` message, which says the browser cannot load grammars; `project validate` is invalid |
 | The setup of [VER-PROGRAM-FAULTS](rules/verification.mara.md#01M7HZYKB4R632Q63YWS8CY1FJ) with a program that passes, in a workspace whose Soufflé module the test's server answers with status 404, and in a second run with a truncated module | A fault without a line at the configuration line of each declared program; `project validate` is invalid, `query execute` and `query view` fail, and the gate and both items are unavailable |
 
 ---

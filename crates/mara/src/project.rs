@@ -2,7 +2,6 @@
 //! (REQ-ONE-PROJECT-PER-OPERATION and DES-PROJECT-CONFIGURATION in `docs/project.mara.md`).
 
 use std::fmt;
-use std::fs::{self, Metadata};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,6 +13,7 @@ use mara_engine::hash::Hash;
 use mara_engine::schema::{Schema, parse_schema};
 use mara_engine::work::WorkCounts;
 
+use crate::system::fs::{self, Metadata};
 use crate::tracked::{self, Check, Reads, Tracked};
 
 /// Why no project was selected.
@@ -211,7 +211,7 @@ impl Project {
 pub fn load(root: PathBuf, work: &mut WorkCounts) -> Project {
     let root = fs::canonicalize(&root).unwrap_or(root);
     let mut reads = Reads::default();
-    ProjectFiles::default().load(root, SystemTime::now(), work, &mut reads)
+    ProjectFiles::default().load(root, crate::system::now(), work, &mut reads)
 }
 
 /// The configuration and the schema as last read, with what was read of them, kept between

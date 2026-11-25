@@ -1,0 +1,36 @@
+[package]
+name = "mara-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# The WebAssembly module of the browser package (DES-BROWSER-WORKSPACE, ADR-RAW-WASM-MODULE):
+# exported functions for `wasm32-unknown-unknown`; on any other target the crate is empty. The
+# `rlib` lets the workspace's doctest run take the crate, which it skips with a warning when it is
+# only a `cdylib`.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+mara = { path = "../mara" }
+mara-engine = { path = "../mara-engine" }
+serde_json = "1.0.154"
+
+# `build` builds the module, in release, so that the target that copies it into the package can
+# depend on it: Nx's `dependsOn` cannot name a configuration. The plugin declares a `cdylib`'s
+# outputs as the native library files, so the module itself is added to them.
+[package.metadata.nx.targets.build]
+outputs = ["...", "{workspaceRoot}/target/wasm32-unknown-unknown/release/mara_wasm.wasm"]
+
+[package.metadata.nx.targets.build.options]
+targetTriple = "wasm32-unknown-unknown"
+profile = "release"
+
+# The lint of the WebAssembly build, which the native lint never compiles: `nx run
+# mara-wasm:lint:wasm32` lints this crate with the `mara` library and the engine for
+# `wasm32-unknown-unknown`, their libraries only, as the module builds them (ADR-NX-RUST-TASKS).
+[package.metadata.nx.targets.lint.configurations.wasm32]
+targetTriple = "wasm32-unknown-unknown"
+allTargets = false
