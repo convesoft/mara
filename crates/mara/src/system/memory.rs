@@ -7,7 +7,8 @@
 //! change of a file's contents or of a directory's entries gives it a new modification time from a
 //! logical clock that starts at the Unix epoch, one nanosecond per change: a change is always seen
 //! by its stat, and every stat lies long before any check, so a check always settles what it read
-//! (DES-INPUTS-AND-KEYS). A rename keeps the file's inode, as POSIX's does.
+//! (DES-INPUTS-AND-KEYS). A rename keeps the file's inode, as POSIX's does. A directory goes
+//! with its last entry, as a Git checkout holds no empty directory.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -130,6 +131,22 @@ impl Tree {
         }
         self.touch(&parent);
         Ok(self.nodes.remove(path).expect("looked up"))
+    }
+
+    /// Removes `directory` if it is empty and not the root, then each emptied directory above.
+    fn prune(&mut self, directory: &Path) {
+        let mut directory = directory.to_owned();
+        while directory != Path::new("/") {
+            match self.nodes.get(&directory) {
+                Some(Node {
+                    kind: Contents::Directory(entries),
+                    ..
+                }) if entries.is_empty() => {}
+                _ => return,
+            }
+            let _ = self.take(&directory);
+            directory.pop();
+        }
     }
 }
 
@@ -386,17 +403,22 @@ pub fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<(
     })
 }
 
-/// Removes the file at `path`.
+/// Removes the file at `path`, and each directory above that it leaves empty.
 pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     let path = normal(path.as_ref())?;
     with(|tree| match tree.get(&path)?.kind {
-        Contents::File(_) => tree.take(&path).map(drop),
+        Contents::File(_) => {
+            tree.take(&path)?;
+            tree.prune(path.parent().expect("a file lies below the root"));
+            Ok(())
+        }
         Contents::Directory(_) => Err(io::ErrorKind::IsADirectory.into()),
     })
 }
 
-/// Moves the file at `from` to `to`, replacing a file there, as POSIX's `rename` does. A
-/// directory is never moved or replaced here.
+/// Moves the file at `from` to `to`, replacing a file there, as POSIX's `rename` does, and
+/// removes each directory above `from` that it leaves empty. A directory is never moved or
+/// replaced here.
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     let (from, to) = (normal(from.as_ref())?, normal(to.as_ref())?);
     with(|tree| {
@@ -416,7 +438,9 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
             Err(error) => return Err(error),
         }
         let node = tree.take(&from)?;
-        tree.insert(&to, node)
+        tree.insert(&to, node)?;
+        tree.prune(from.parent().expect("a file lies below the root"));
+        Ok(())
     })
 }
 
@@ -605,5 +629,25 @@ mod tests {
         remove_file("/docs/a.mara.md").unwrap();
         assert!(symlink_metadata("/docs/a.mara.md").is_err());
         assert!(SystemTime::UNIX_EPOCH + Duration::from_secs(1) > stat("/docs").0);
+    }
+
+    /// A directory goes with its last file, so that a file can take its path.
+    #[test]
+    fn a_directory_goes_with_its_last_file() {
+        filled();
+        remove_file("/docs/sub/b.mara.md").unwrap();
+        assert!(symlink_metadata("/docs/sub").is_err());
+        write("/docs/sub", "a file now").unwrap();
+        rename("/docs/a.mara.md", "/moved.mara.md").unwrap();
+        assert_eq!(
+            files().into_iter().collect::<Vec<_>>(),
+            [
+                ("docs/sub".to_owned(), b"a file now".to_vec()),
+                ("moved.mara.md".to_owned(), b"a".to_vec())
+            ]
+        );
+        remove_file("/docs/sub").unwrap();
+        assert!(symlink_metadata("/docs").is_err());
+        assert!(symlink_metadata("/").unwrap().is_dir());
     }
 }

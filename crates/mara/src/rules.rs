@@ -98,6 +98,7 @@ pub fn souffle() -> Result<PathBuf, String> {
         })
 }
 
+// @mara implements REQ-UNAVAILABLE-NOT-PARTIAL
 /// Soufflé in a browser workspace, which has no module of it: each evaluation is a fault
 /// without a line (DES-BROWSER-WORKSPACE).
 #[cfg(target_arch = "wasm32")]

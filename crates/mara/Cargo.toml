@@ -54,14 +54,15 @@ signal-hook = { version = "0.3.18", default-features = false }
 # limited length, the mode and bytes of the pinned Soufflé that `scripts/build-souffle.sh` builds
 # beside the artifact directory, and the tag `v0.3.0` that the conversion tests archive. The host
 # tests (`tests/hosts`) also read the browser package's files, its WebAssembly module, which
-# `mara-browser:build` copies there, Playwright's library and the browser it runs, found through
-# `PLAYWRIGHT_BROWSERS_PATH` or the per-user cache, and the `node` on `PATH`.
+# `mara-browser:build` copies there, Playwright's library and the Chromium they launch, found
+# through `PLAYWRIGHT_BROWSERS_PATH` or the per-user cache and keyed by the path, size and
+# modification time that `tests/hosts/node/support/browser.mjs` prints, and the `node` on `PATH`.
 [package.metadata.nx.targets.test]
 inputs = [
   "{workspaceRoot}/packages/mara-browser/**/*",
   { dependentTasksOutputFiles = "**/*.wasm" },
   { env = "PLAYWRIGHT_BROWSERS_PATH" },
-  { runtime = "node --version 2>&1; node -e \"import('playwright').then(({ chromium }) => console.log(require('playwright/package.json').version, chromium.executablePath()))\" 2>&1; true" },
+  { runtime = "node --version 2>&1; node crates/mara/tests/hosts/node/support/browser.mjs 2>&1; true" },
   "...",
   { env = "CI" },
   { env = "MARA_NO_DAEMON" },

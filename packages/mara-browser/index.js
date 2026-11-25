@@ -17,12 +17,27 @@ export class MaraError extends Error {
   }
 }
 
-/** A copy of `contents`, which the caller keeps as it was. */
+/** A refusal of the caller's arguments, as the module refuses them: `invalid-argument`. */
+function invalidArgument(message) {
+  return new MaraError({
+    format_version: 1,
+    error: { code: "invalid-argument", message, diagnostics: [] },
+  });
+}
+
+/**
+ * A copy of `contents`, which the caller keeps as it was. A `Uint8Array` or `ArrayBuffer` is
+ * told by its kind, so that one from another realm, such as a same-origin frame, is taken too.
+ */
 function bytes(contents, what) {
-  if (contents instanceof Uint8Array || contents instanceof ArrayBuffer) {
-    return new Uint8Array(contents.slice(0));
+  const kind = Object.prototype.toString.call(contents);
+  if (kind === "[object Uint8Array]" || kind === "[object ArrayBuffer]") {
+    const view = kind === "[object ArrayBuffer]" ? new Uint8Array(contents) : contents;
+    const copy = new Uint8Array(view.length);
+    copy.set(view);
+    return copy;
   }
-  throw new TypeError(`${what} is no Uint8Array or ArrayBuffer`);
+  throw invalidArgument(`${what} is no Uint8Array or ArrayBuffer`);
 }
 
 export class Workspace {
@@ -63,7 +78,13 @@ export class Workspace {
     const id = this.#next++;
     const answer = await new Promise((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });
-      this.#worker.postMessage({ id, ...message });
+      try {
+        this.#worker.postMessage({ id, ...message });
+      } catch (error) {
+        // An argument that cannot be sent, such as a function.
+        this.#pending.delete(id);
+        reject(invalidArgument(`the call cannot be sent: ${error.message}`));
+      }
     });
     if (answer.failed) {
       throw new MaraError(answer.reply, stats ? answer.stats : undefined);

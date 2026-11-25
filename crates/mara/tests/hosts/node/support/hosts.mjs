@@ -8,6 +8,8 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:
 import { createServer } from "node:http";
 import { extname, join, relative, sep } from "node:path";
 
+export { launchBrowser } from "./browser.mjs";
+
 /** A variable that `hosts/node.rs` sets. */
 function env(name) {
   const value = process.env[name];
@@ -287,29 +289,6 @@ export function isPackageFile(path) {
 }
 
 /**
- * Playwright's Chromium, launched, never as a persistent context: its new profile lies in
- * `TMPDIR`, the test's directory. A missing Playwright or Chromium fails with a message that
- * names it.
- */
-export async function launchBrowser() {
-  let chromium;
-  try {
-    ({ chromium } = await import("playwright"));
-  } catch (error) {
-    throw new Error(
-      `the browser cases need Playwright's library: run \`pnpm install --frozen-lockfile\` (${error.message})`,
-    );
-  }
-  try {
-    return await chromium.launch();
-  } catch (error) {
-    throw new Error(
-      `the browser cases need Playwright's Chromium: run \`pnpm exec playwright install chromium\` (${error.message})`,
-    );
-  }
-}
-
-/**
  * A page of the test, in a new context of `browser`, that loads the browser package from
  * `server` after it wrapped `WebAssembly`'s compiling and instantiating functions to count their
  * calls. `harness(name, ...args)` calls a function of the page's harness. `workers` and
@@ -412,6 +391,36 @@ try {
           contents: contents === null ? null : encode(contents),
         })),
       })),
+    // A call with a BigInt argument, which no JSON holds.
+    runWithBigInt: (name) => call(() => workspace.run(name, { limit: 10n }).then((result) => ({ result }))),
+    // Writes bytes made in a same-origin frame, another realm, as a Uint8Array and as an
+    // ArrayBuffer.
+    writeFromFrame: (path, contents) =>
+      call(async () => {
+        const frame = document.createElement("iframe");
+        document.body.append(frame);
+        const bytes = new frame.contentWindow.Uint8Array(decode(contents));
+        await workspace.write(path, bytes);
+        await workspace.write(path + ".copy", bytes.buffer);
+        frame.remove();
+        return {};
+      }),
+    // Sends two calls \`create\` to one worker of the package, and returns each answer.
+    secondCreate: (files) =>
+      new Promise((resolve) => {
+        const worker = new Worker("/package/worker.js", { type: "module" });
+        const supplied = files.map(({ path, contents }) => ({ path, contents: decode(contents) }));
+        const answers = [];
+        worker.onmessage = ({ data }) => {
+          answers.push(data.answer ?? data);
+          if (answers.length === 2) {
+            worker.terminate();
+            resolve(answers);
+          }
+        };
+        worker.postMessage({ id: 0, call: "create", files: supplied });
+        worker.postMessage({ id: 1, call: "create", files: supplied });
+      }),
     close: () => {
       workspace?.close();
       workspace = undefined;

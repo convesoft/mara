@@ -12,10 +12,12 @@ use std::time::{Duration, SystemTime};
 use mara_engine::hash::Hash;
 use mara_engine::work::WorkCounts;
 
-use crate::system::{self, fs, fs::Metadata};
+use crate::system::{fs, fs::Metadata};
 
 /// A check less than this long after a file's last change does not settle its contents: an edit
 /// in the same timestamp tick would leave its stat unchanged.
+// A browser workspace's stats settle at once ([`Stat::settled_at`]).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const SETTLE: Duration = Duration::from_secs(2);
 
 /// What a stat, without following a symbolic link, tells of a file or directory.
@@ -54,6 +56,7 @@ impl Stat {
 
     /// Whether what a check at `checked` found still holds while the stat stays this one: the
     /// check came at least [`SETTLE`] after the last modification and status change.
+    #[cfg(not(target_arch = "wasm32"))]
     fn settled_at(&self, checked: SystemTime) -> bool {
         let last = match (self.modified, self.changed) {
             (Some(modified), Some(changed)) => modified.max(changed),
@@ -62,6 +65,15 @@ impl Stat {
         };
         last.checked_add(SETTLE)
             .is_some_and(|settled| settled <= checked)
+    }
+
+    /// Whether what a check at `checked` found still holds while the stat stays this one: in a
+    /// browser workspace's memory always, since its logical clock gives every change a
+    /// modification time of its own (`crate::system::memory`), whatever the worker's clock reads.
+    #[cfg(target_arch = "wasm32")]
+    fn settled_at(&self, checked: SystemTime) -> bool {
+        let _ = checked;
+        true
     }
 }
 
@@ -200,11 +212,10 @@ impl Reads {
 
 // @mara implements REQ-NEVER-STALE
 /// Checks the regular file at `path`, whose metadata without following links is `metadata`, in
-/// a request that began at `now`. Reads and hashes it, counting one file read
-/// ([`system::COUNTS_FILE_READS`]) and one hash in `work`, unless the stat is unchanged and
-/// `previous` was settled or `reads` keeps it ([`Keep`]), or `reads` holds the same file read in
-/// this request. With `share`, what it reads joins `reads`. Contents that hash as before keep the
-/// previous value.
+/// a request that began at `now`. Reads and hashes it, counting one file read and one hash in
+/// `work`, unless the stat is unchanged and `previous` was settled or `reads` keeps it
+/// ([`Keep`]), or `reads` holds the same file read in this request. With `share`, what it reads joins `reads`. Contents that hash as
+/// before keep the previous value.
 pub(crate) fn check<T>(
     path: &Path,
     metadata: &Metadata,
@@ -231,9 +242,7 @@ pub(crate) fn check<T>(
         Some((read, hash, contents)) if *read == stat => (*hash, contents.to_vec()),
         _ => {
             let contents = fs::read(path)?;
-            if system::COUNTS_FILE_READS {
-                work.file_reads += 1;
-            }
+            work.file_reads += 1;
             let hash = Hash::of_file(&contents, work);
             if share {
                 let shared = (stat, hash, Arc::from(contents.as_slice()));

@@ -6,7 +6,15 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 
-import { isPackageFile, launchBrowser, openPage, replaceMids, pairMids, startServer } from "../support/hosts.mjs";
+import {
+  encode,
+  isPackageFile,
+  launchBrowser,
+  openPage,
+  pairMids,
+  replaceMids,
+  startServer,
+} from "../support/hosts.mjs";
 import { Compared } from "../support/workspace.mjs";
 
 const SCHEMA_WITHOUT_REQUIREMENT = `format_version = 1
@@ -196,6 +204,52 @@ describe("a browser workspace works on supplied files as CLI direct mode on a co
     assert.ok(ids.includes("REQ-EXPORT-TIME") && ids.includes("REQ-IMPORT-TIME"), ids);
   });
 
+  test("a directory goes with its last file, so that a file can take its path", async () => {
+    const workspace = await Compared.create(page, "workspace");
+    await workspace.remove("docs/needs.mara.md");
+    await workspace.remove("docs/reqs.mara.md");
+    await workspace.write("docs", "No longer a directory.\n");
+    assert.deepEqual(await workspace.export(), [
+      { path: "docs", base: null, contents: Buffer.from("No longer a directory.\n").toString("base64") },
+      { path: "docs/needs.mara.md", base: workspace.supplied.hashes["docs/needs.mara.md"], contents: null },
+      { path: "docs/reqs.mara.md", base: workspace.supplied.hashes["docs/reqs.mara.md"], contents: null },
+    ]);
+  });
+
+  test("arguments that cannot be sent are refused, and the workspace goes on", async () => {
+    const workspace = await Compared.create(page, "workspace");
+    await workspace.request("item_update", { item: "REQ-COLD-READ-TIME", title: "Cold read latency" });
+    const refused = await page.harness("runWithBigInt", "item_list");
+    assert.equal(refused.error?.code, "invalid-argument", JSON.stringify(refused));
+    await workspace.request("item_list");
+    assert.deepEqual(await workspace.export(), workspace.expectedChanges());
+  });
+
+  test("bytes from another realm are taken; a path with a NUL is refused", async () => {
+    const workspace = await Compared.create(page, "workspace");
+    const contents = Buffer.from("# From a frame\n");
+    assert.deepEqual(await page.harness("writeFromFrame", "docs/framed.md", contents.toString("base64")), {});
+    assert.deepEqual(await workspace.export(), [
+      { path: "docs/framed.md", base: null, contents: contents.toString("base64") },
+      { path: "docs/framed.md.copy", base: null, contents: contents.toString("base64") },
+    ]);
+    for (const path of ["docs/a\u0000b.mara.md", "docs/reqs.mara.md\u0000"]) {
+      const written = await page.harness("write", path, contents.toString("base64"));
+      assert.equal(written.error?.code, "invalid-argument", JSON.stringify(written));
+      const removed = await page.harness("remove", path);
+      assert.equal(removed.error?.code, "invalid-argument", JSON.stringify(removed));
+    }
+  });
+
+  test("the module's instance holds one workspace: a second creation in one worker is refused", async () => {
+    const files = encode(new Map([["docs/a.mara.md", Buffer.from("# A\n")]]));
+    const [first, second] = await page.harness("secondCreate", files);
+    assert.deepEqual(first, { failed: false });
+    assert.equal(second.failed, true, JSON.stringify(second));
+    assert.equal(second.reply.error.code, "invalid-argument");
+    assert.match(second.reply.error.message, /holds a workspace already/);
+  });
+
   test("the page kept its buffers, stored nothing and fetched only the package's files", async () => {
     await page.harness("close");
     assert.equal(await page.harness("suppliedIntact"), true);
@@ -207,8 +261,9 @@ describe("a browser workspace works on supplied files as CLI direct mode on a co
       opfs: [],
     });
     const notPackage = (path) => path !== "/" && !isPackageFile(path);
+    const origin = new URL(server.url).origin;
     assert.deepEqual(
-      page.requests.map((url) => new URL(url).pathname).filter(notPackage),
+      page.requests.filter((url) => new URL(url).origin !== origin || notPackage(new URL(url).pathname)),
       [],
       "requests that Playwright reported",
     );

@@ -62,6 +62,7 @@ describe("a browser workspace reports what it cannot do as unavailable", { timeo
 
   for (const [fixture, name, args] of [
     ["workspace", "project_init", {}],
+    ["workspace", "project_init", [1]],
     ["workspace", "project_init", { template: "engineering" }],
     ["workspace", "project_init", { template: "empty" }],
     ["legacy", "project_convert", {}],

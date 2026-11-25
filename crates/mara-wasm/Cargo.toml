@@ -27,3 +27,10 @@ outputs = ["...", "{workspaceRoot}/target/wasm32-unknown-unknown/release/mara_wa
 [package.metadata.nx.targets.build.options]
 targetTriple = "wasm32-unknown-unknown"
 profile = "release"
+
+# The lint of the WebAssembly build, which the native lint never compiles: `nx run
+# mara-wasm:lint:wasm32` lints this crate with the `mara` library and the engine for
+# `wasm32-unknown-unknown`, their libraries only, as the module builds them (ADR-NX-RUST-TASKS).
+[package.metadata.nx.targets.lint.configurations.wasm32]
+targetTriple = "wasm32-unknown-unknown"
+allTargets = false

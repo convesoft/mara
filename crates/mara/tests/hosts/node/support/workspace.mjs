@@ -3,7 +3,7 @@
 // and the same writes of the caller, and its files are the expected bytes.
 
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import {
@@ -92,10 +92,19 @@ export class Compared {
     writeFileSync(join(this.root, path), bytes);
   }
 
-  /** Removes the file at `path` in the workspace and in the copy. */
+  /**
+   * Removes the file at `path` in the workspace and in the copy, with each directory above it in
+   * the copy that it leaves empty, as the workspace's memory does (DES-BROWSER-WORKSPACE).
+   */
   async remove(path) {
     assert.deepEqual(await this.page.harness("remove", path), {});
     rmSync(join(this.root, path));
+    for (let directory = dirname(path); directory !== "."; directory = dirname(directory)) {
+      if (readdirSync(join(this.root, directory)).length > 0) {
+        break;
+      }
+      rmdirSync(join(this.root, directory));
+    }
   }
 
   /** Checks that the workspace's files are the copy's, once their generated MIDs are paired. */

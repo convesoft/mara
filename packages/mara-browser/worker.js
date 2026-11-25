@@ -48,10 +48,20 @@ loaded.catch(() => {});
 // Set once the module trapped: its memory may be inconsistent, so it answers no other call.
 let stopped;
 
-function call(exports, header, files) {
-  const text = encoder.encode(JSON.stringify(header));
+// A refused call that the module never saw, in the form of the module's own refusals.
+function refused(message) {
+  return {
+    failed: true,
+    status: 2,
+    reply: { format_version: 1, error: { code: "invalid-argument", message, diagnostics: [] } },
+  };
+}
+
+// Runs one call of the header's JSON text `text` and `files`. The module's pointers and lengths
+// are unsigned 32-bit numbers, which JavaScript receives as signed ones.
+function call(exports, text, files) {
   const length = files.reduce((sum, file) => sum + file.length, 4 + text.length);
-  const at = exports.mara_alloc(length);
+  const at = exports.mara_alloc(length) >>> 0;
   const frame = new Uint8Array(exports.memory.buffer, at, length);
   new DataView(frame.buffer, at, 4).setUint32(0, text.length, true);
   frame.set(text, 4);
@@ -63,8 +73,8 @@ function call(exports, header, files) {
   exports.mara_call(at, length);
   const answer = new Uint8Array(
     exports.memory.buffer,
-    exports.mara_answer(),
-    exports.mara_answer_length(),
+    exports.mara_answer() >>> 0,
+    exports.mara_answer_length() >>> 0,
   ).slice();
   const headerLength = new DataView(answer.buffer).getUint32(0, true);
   return {
@@ -125,9 +135,18 @@ self.onmessage = ({ data }) => {
         throw stopped;
       }
       const { header, files } = request(message);
+      // A header that JSON cannot hold, such as one with a BigInt or a cycle, never reaches the
+      // module, which goes on.
+      let text;
+      try {
+        text = encoder.encode(JSON.stringify(header));
+      } catch (error) {
+        self.postMessage({ id, answer: refused(`the call cannot be sent: ${error.message}`) });
+        return;
+      }
       let answer;
       try {
-        answer = call(exports, header, files);
+        answer = call(exports, text, files);
       } catch (error) {
         stopped = new Error(`Mara's WebAssembly module stopped: ${error.message}`);
         throw stopped;

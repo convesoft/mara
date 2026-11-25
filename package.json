@@ -3,7 +3,7 @@
   "private": true,
   "license": "MIT OR Apache-2.0",
   "scripts": {
-    "checks": "nx run-many -t fmt-check lint test validate zban-check --output-style=static && nx run mara-engine:build:wasm32 --output-style=static && nx run mara:test:performance --skip-nx-cache --output-style=static",
+    "checks": "nx run-many -t fmt-check lint test validate zban-check --output-style=static && nx run mara-engine:build:wasm32 --output-style=static && nx run mara-wasm:lint:wasm32 --output-style=static && nx run mara:test:performance --skip-nx-cache --output-style=static",
     "checks:fast": "nx run-many -t fmt-check lint test validate zban-check --output-style=static"
   },
   "dependencies": {},

@@ -3,10 +3,18 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "targets": {
     "build": {
-      "command": "cp target/wasm32-unknown-unknown/release/mara_wasm.wasm packages/mara-browser/mara.wasm",
+      "command": "node packages/mara-browser/copy-module.mjs",
       "cache": true,
       "dependsOn": [{ "projects": ["mara-wasm"], "target": "build" }],
-      "inputs": [{ "dependentTasksOutputFiles": "**/*.wasm" }],
+      "inputs": [
+        "{projectRoot}/copy-module.mjs",
+        { "dependentTasksOutputFiles": "**/*.wasm" },
+        "{workspaceRoot}/.cargo/config.toml",
+        "{workspaceRoot}/.cargo/config",
+        "{workspaceRoot}/rust-toolchain.toml",
+        { "env": "CARGO_TARGET_DIR" },
+        { "env": "CARGO_BUILD_TARGET_DIR" }
+      ],
       "outputs": ["{projectRoot}/mara.wasm"]
     }
   }

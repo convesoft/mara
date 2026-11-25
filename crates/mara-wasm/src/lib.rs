@@ -2,7 +2,7 @@
 //! `docs/hosts/index.mara.md`): the calls of the package's worker, over the workspace of the
 //! `mara` library ([`mara::cli::workspace`]). It is built for `wasm32-unknown-unknown` and
 //! exports plain functions, without generated bindings (ADR-RAW-WASM-MODULE in
-//! `docs/decisions.mara.md`); on any other target the crate is empty.
+//! `docs/hosts/index.mara.md`); on any other target the crate is empty.
 //!
 //! A call is one message in the module's memory, and its answer another, each a frame: the
 //! length of a JSON header as a 32-bit little-endian number, the header, then the bytes of the
@@ -20,7 +20,8 @@
 //!
 //! `reply` is the JSON object that `--format json` prints, and `stats` the object of the stats
 //! line (DES-PERFORMANCE-HARNESS). A refused call answers `{"failed": true, "status", "reply"}`
-//! with the failure's object. A removed file's change has `at` and `length` null.
+//! with the failure's object. A removed file's change has `at` and `length` null. The instance
+//! holds one workspace for its life: a second `create` is refused.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -40,13 +41,11 @@ thread_local! {
     static ANSWER: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
-/// `length` bytes for the worker to write a call's frame into.
+/// `length` bytes for the worker to write a call's frame into: a boxed slice of exactly that
+/// length, which `mara_call` takes back.
 #[unsafe(no_mangle)]
 pub extern "C" fn mara_alloc(length: usize) -> *mut u8 {
-    let mut buffer = Vec::<u8>::with_capacity(length);
-    let pointer = buffer.as_mut_ptr();
-    std::mem::forget(buffer);
-    pointer
+    Box::into_raw(vec![0u8; length].into_boxed_slice()).cast::<u8>()
 }
 
 /// Answers the call whose frame of `length` bytes `mara_alloc` gave at `frame`, and frees it.
@@ -55,11 +54,13 @@ pub extern "C" fn mara_alloc(length: usize) -> *mut u8 {
 ///
 /// `frame` is a pointer that `mara_alloc(length)` returned, filled with `length` bytes, and not
 /// passed here before.
+// @mara implements REQ-BROWSER-LOCAL-WORKSPACE
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mara_call(frame: *mut u8, length: usize) {
-    // SAFETY: the caller's contract: `mara_alloc` allocated it with this capacity, and the worker
-    // filled it.
-    let frame = unsafe { Vec::from_raw_parts(frame, length, length) };
+    // SAFETY: the caller's contract: `mara_alloc(length)` returned it, a boxed slice of `length`
+    // bytes, which the worker filled.
+    let frame: Box<[u8]> =
+        unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(frame, length)) };
     let answer = match unframe(&frame) {
         Ok((header, files)) => answer(&header, files),
         Err(message) => refused(rejected(message)),
@@ -107,7 +108,10 @@ fn frame(header: &str, files: &[u8]) -> Vec<u8> {
 fn answer(header: &Map<String, Value>, files: &[u8]) -> Vec<u8> {
     let text = |name: &str| header.get(name).and_then(Value::as_str);
     let bytes = |at: &Map<String, Value>| -> Result<Vec<u8>, String> {
-        let number = |name: &str| at.get(name).and_then(Value::as_u64).map(|n| n as usize);
+        let number = |name: &str| {
+            let number = at.get(name).and_then(Value::as_u64)?;
+            usize::try_from(number).ok()
+        };
         match (number("at"), number("length")) {
             (Some(at), Some(length))
                 if at.checked_add(length).is_some_and(|end| end <= files.len()) =>
@@ -136,12 +140,7 @@ fn answer(header: &Map<String, Value>, files: &[u8]) -> Vec<u8> {
         })(),
         Some("run") => with_workspace(|workspace| {
             let name = text("name").ok_or_else(|| rejected("`name` is no string".to_owned()))?;
-            let empty = Map::new();
-            let arguments = match header.get("arguments") {
-                None | Some(Value::Null) => &empty,
-                Some(Value::Object(arguments)) => arguments,
-                Some(_) => return Err(rejected("`arguments` is no object".to_owned())),
-            };
+            let arguments = header.get("arguments").unwrap_or(&Value::Null);
             let mut work = WorkCounts::default();
             let reply = workspace.run(name, arguments, &mut work);
             Ok(ran(&reply, &work))

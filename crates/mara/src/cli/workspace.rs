@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mara_engine::hash::Hash;
@@ -60,6 +61,9 @@ pub struct Change {
     pub base: Option<String>,
 }
 
+/// Whether the module's instance holds a workspace: it holds one for its life.
+static CREATED: AtomicBool = AtomicBool::new(false);
+
 /// A workspace. The module's memory holds one filesystem, so a worker holds one workspace.
 #[derive(Debug)]
 pub struct Workspace {
@@ -72,8 +76,15 @@ impl Workspace {
     // @mara implements REQ-BROWSER-LOCAL-WORKSPACE
     /// A workspace of `files`, each a path relative to the project root with its contents. A
     /// path that is not in the form a diagnostic gives it, a path given twice and a path below
-    /// another file are refused with `invalid-argument`.
+    /// another file are refused with `invalid-argument`, and so is a second workspace in the
+    /// module's instance, whose memory holds the first's files.
     pub fn new(files: Vec<(String, Vec<u8>)>) -> Result<Workspace, Failure> {
+        if CREATED.load(Ordering::Relaxed) {
+            return Err(rejected(
+                "this module holds a workspace already: start another worker for another one"
+                    .to_owned(),
+            ));
+        }
         let mut supplied = BTreeMap::new();
         for (path, contents) in files {
             checked(&path)?;
@@ -97,6 +108,7 @@ impl Workspace {
             .map(|(path, contents)| (path.clone(), contents.clone()));
         memory::reset(files)
             .map_err(|error| Failure::new("io-error", format!("cannot hold the files: {error}")))?;
+        CREATED.store(true, Ordering::Relaxed);
         Ok(Workspace {
             supplied,
             kept: Kept {
@@ -112,16 +124,16 @@ impl Workspace {
     /// Runs the document operation whose MCP tool is named `name` with `arguments`, as that
     /// tool's call does: its reply is the JSON object that `--format json` prints. `project
     /// init` and `project convert` fail with `unavailable-operation` before their arguments are
-    /// read, and a `project` argument is refused: the workspace holds one project. Adds the
-    /// request's work to `work`.
-    pub fn run(&self, name: &str, arguments: &Map<String, Value>, work: &mut WorkCounts) -> Reply {
+    /// read, and a `project` argument is refused: the workspace holds one project. `arguments`
+    /// is an object, or null for none. Adds the request's work to `work`.
+    pub fn run(&self, name: &str, arguments: &Value, work: &mut WorkCounts) -> Reply {
         Reply::new(self.outcome(name, arguments, work), true)
     }
 
     fn outcome(
         &self,
         name: &str,
-        arguments: &Map<String, Value>,
+        arguments: &Value,
         work: &mut WorkCounts,
     ) -> Result<super::Response, Failure> {
         if UNAVAILABLE.contains(&name) {
@@ -134,6 +146,12 @@ impl Workspace {
         }
         let Some((operation, run)) = tool::find(name) else {
             return Err(rejected(format!("unknown operation `{name}`")));
+        };
+        let none = Map::new();
+        let arguments = match arguments {
+            Value::Null => &none,
+            Value::Object(arguments) => arguments,
+            _ => return Err(rejected("the arguments are no object".to_owned())),
         };
         if arguments
             .get("project")
@@ -213,8 +231,12 @@ impl Workspace {
 }
 
 /// Refuses a path that is not relative to the project root in the form a diagnostic gives it:
-/// `/` between parts, none of them empty, `.` or `..`.
+/// `/` between parts, none of them empty, `.` or `..`, and no NUL, which no native filesystem
+/// takes.
 fn checked(path: &str) -> Result<(), Failure> {
+    if path.contains('\0') {
+        return Err(rejected(format!("{path:?} holds a NUL character")));
+    }
     match project_path(path) {
         Ok(normal) if normal == path => Ok(()),
         Ok(_) => Err(rejected(format!(
