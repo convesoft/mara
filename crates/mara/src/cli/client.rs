@@ -419,6 +419,16 @@ pub fn writes(request: &Value) -> bool {
     WRITES.contains(&words.as_slice())
 }
 
+/// Whether the daemon serves the operation `words` to browsers (DES-BROWSER-LISTENER): `Some(true)`
+/// for a document operation that native clients send to the daemon, `Some(false)` for another
+/// operation, which fails with `unavailable-operation`, and `None` when no operation has them.
+pub fn served_to_browsers(words: &[&str]) -> Option<bool> {
+    let operation = OPERATIONS
+        .iter()
+        .find(|operation| operation.words == words)?;
+    Some(matches!(operation.run, Run::Document(_)) && !IN_PROCESS.contains(&operation.words))
+}
+
 /// The operation a request names, if the daemon serves it.
 fn served(request: &Value) -> Result<(&'static Operation, Document), String> {
     let words: Vec<&str> = (request["words"].as_array().into_iter().flatten())

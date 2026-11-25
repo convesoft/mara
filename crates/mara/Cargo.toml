@@ -28,6 +28,9 @@ tree-sitter = { version = "0.27.0", features = ["wasm"] }
 ureq = { version = "3.5.0", default-features = false, features = ["rustls"] }
 # The private directory of an evaluation (DES-RULE-EXECUTION), removed when it ends.
 tempfile = "3.27"
+# The head of a request to the daemon's listener for browsers (ADR-HTTPARSE-LISTENER), the
+# parser that `ureq` already builds.
+httparse = "1.10.1"
 
 # The limits of the `souffle` child process (DES-RULE-EXECUTION); the daemon's user ID, peer
 # credentials, `fork`, `setsid` and signals (DES-DAEMON-LIFECYCLE); and the CPU time of the
@@ -58,6 +61,7 @@ inputs = [
   { env = "MARA_TEST_GRAMMAR_LOAD_STALL" },
   { env = "MARA_TEST_GRAMMAR_EVENTS" },
   { env = "MARA_TEST_GRAMMAR_CATALOG" },
+  { env = "MARA_TEST_PAUSE_ANSWER" },
   { runtime = "s=${CARGO_TARGET_DIR:-target}/souffle-2.5/souffle; ls -Ln \"$s\" 2>&1 | cut -c1-10; sha256sum \"$s\" 2>&1; true" },
   { runtime = "git rev-parse 'v0.3.0^{tree}' 2>&1 || true" },
 ]
@@ -96,6 +100,7 @@ inputs = [
   { env = "MARA_TEST_GRAMMAR_LOAD_STALL" },
   { env = "MARA_TEST_GRAMMAR_EVENTS" },
   { env = "MARA_TEST_GRAMMAR_CATALOG" },
+  { env = "MARA_TEST_PAUSE_ANSWER" },
   { runtime = "s=${CARGO_TARGET_DIR:-target}/souffle-2.5/souffle; ls -Ln \"$s\" 2>&1 | cut -c1-10; sha256sum \"$s\" 2>&1; true" },
   { runtime = "env | grep -E '^CARGO_TARGET_' | LC_ALL=C sort; true" },
   { runtime = "c=${XDG_CACHE_HOME:-}; case $c in /*) ;; *) c=$HOME/.cache ;; esac; for d in \"$c\" \"$HOME/Library/Caches\"; do (cd \"$d/mara/grammars\" 2>&1 && find -L . -type f -exec sha256sum {} + | LC_ALL=C sort); done; true" },
