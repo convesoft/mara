@@ -86,6 +86,62 @@ pub fn args(
     Ok((args, project))
 }
 
+// @mara implements REQ-NODE-LIBRARY
+/// Runs the document operation whose tool is `name` with `given` for a client in this process,
+/// as a tool call of `mara mcp` runs: through the daemon of this host's build, or in-process,
+/// which then starts one, or always in-process in direct mode: `direct`, `CI` or
+/// `MARA_NO_DAEMON=1` ([`super::client::direct_mode`]). The client
+/// holds one project: `project`, relative to the working directory, else the one found from the
+/// working directory upward; so a `project` parameter is refused. `given` is an object, or null
+/// for none. The reply is the JSON object that `--format json` prints, and the request's work, or
+/// the daemon's for its session, is added to `work`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn call(
+    name: &str,
+    given: &Value,
+    project: Option<PathBuf>,
+    direct: bool,
+    work: &mut mara_engine::work::WorkCounts,
+) -> super::Reply {
+    let Some((operation, run)) = find(name) else {
+        let failure = rejected(format!("unknown operation `{name}`"));
+        return super::Reply::new(Err(failure), true);
+    };
+    let none = Map::new();
+    let given = match given {
+        Value::Null => &none,
+        Value::Object(given) => given,
+        _ => {
+            let failure = rejected("the arguments are no object".to_owned());
+            return super::Reply::new(Err(failure), true);
+        }
+    };
+    if given
+        .get(PROJECT.name)
+        .is_some_and(|value| !value.is_null())
+    {
+        let failure = rejected(
+            "`project` is no parameter of a client, which holds the project it was created with"
+                .to_owned(),
+        );
+        return super::Reply::new(Err(failure), true);
+    }
+    let args = match args(operation, given, None) {
+        Ok((args, _)) => args,
+        Err(failure) => return super::Reply::new(Err(failure), true),
+    };
+    let mut context = Context {
+        work,
+        now: std::time::SystemTime::now(),
+        project,
+        cwd: super::working_directory(),
+        direct: super::client::direct_mode(direct),
+        caller: mara::caller::Caller::of_this_process(),
+        session: None,
+    };
+    super::client::request(operation, run, &mut context, &args, true)
+}
+
 /// A string parameter's value.
 fn string(name: &str, value: &Value) -> Result<String, Failure> {
     match value {

@@ -434,8 +434,9 @@ const failure = (error) => ({
   error: { name: error.name, code: error.code, message: error.message, reply: error.reply, stats: error.stats },
 });
 try {
-  const { createWorkspace } = await import("/package/index.js");
+  const { createWorkspace, connectDaemon } = await import("/package/index.js");
   let workspace;
+  let daemonClient;
   const supplied = [];
   const call = async (run) => {
     try {
@@ -455,6 +456,20 @@ try {
         return {};
       }),
     run: (name, args, options) => call(() => workspace.run(name, args, options).then((result) => (options?.debugStats ? result : { result }))),
+    // A client of the daemon's listener (DES-NODE-LIBRARY), and its calls.
+    connect: (url, token, project) => {
+      daemonClient = connectDaemon({ url, token, project });
+      return {};
+    },
+    daemonRun: (name, args, options) => {
+      let promise;
+      try {
+        promise = daemonClient.run(name, args, options);
+      } catch (error) {
+        return { threw: String(error) };
+      }
+      return call(() => promise.then((result) => (options?.debugStats ? result : { result })));
+    },
     write: (path, contents) => call(() => workspace.write(path, decode(contents)).then(() => ({}))),
     remove: (path) => call(() => workspace.remove(path).then(() => ({}))),
     export: () =>

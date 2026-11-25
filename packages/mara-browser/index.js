@@ -1,21 +1,13 @@
-// A Mara workspace in the browser (REQ-BROWSER-LOCAL-WORKSPACE, DES-BROWSER-WORKSPACE): the
+// Mara in the browser: a workspace (REQ-BROWSER-LOCAL-WORKSPACE, DES-BROWSER-WORKSPACE), the
 // document operations on supplied files, run by Mara's WebAssembly module in a dedicated worker,
-// and the change set of what they and the caller changed. Every method is asynchronous and
-// throws nothing: a failure rejects its promise.
+// with the change set of what they and the caller changed; and a client of the daemon's listener
+// (`daemon.js`, DES-NODE-LIBRARY). Every method is asynchronous and throws nothing: a failure
+// rejects its promise.
 
-/** A failed request, with the failure object that `--format json` prints. */
-export class MaraError extends Error {
-  constructor(reply, stats) {
-    super(reply.error.message);
-    this.name = "MaraError";
-    this.code = reply.error.code;
-    this.diagnostics = reply.error.diagnostics;
-    this.reply = reply;
-    if (stats !== undefined) {
-      this.stats = stats;
-    }
-  }
-}
+import { MaraError } from "./errors.js";
+
+export { MaraError };
+export { DaemonClient, connectDaemon } from "./daemon.js";
 
 /** A refusal of the caller's arguments, as the module refuses them: `invalid-argument`. */
 function invalidArgument(message) {

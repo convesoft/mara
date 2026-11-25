@@ -54,12 +54,17 @@ pub struct Build {
 
 impl Build {
     /// The build of this process. On Linux the size and time are those of the image that runs,
-    /// even when another file has since replaced it at its path.
+    /// even when another file has since replaced it at its path. A host embedded in another
+    /// program, the Node addon, has the build of the `mara` executable it names, as that file is
+    /// now ([`crate::system::embed`]).
     pub fn current() -> io::Result<Build> {
-        let executable = std::env::current_exe()?;
+        let executable = crate::system::executable()?;
         let executable = fs::canonicalize(&executable).unwrap_or(executable);
         #[cfg(target_os = "linux")]
-        let metadata = fs::metadata("/proc/self/exe")?;
+        let metadata = match crate::system::embedded() {
+            true => fs::metadata(&executable)?,
+            false => fs::metadata("/proc/self/exe")?,
+        };
         #[cfg(not(target_os = "linux"))]
         let metadata = fs::metadata(&executable)?;
         Ok(Build {

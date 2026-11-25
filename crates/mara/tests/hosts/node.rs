@@ -10,6 +10,10 @@
 //! | `MARA_HOSTS_FIXTURES` | Its `fixtures/`, one directory per fixture project, with `<name>.hashes.json` beside each that [`Host::hash`] wrote |
 //! | `MARA_BIN` | The `mara` binary of the build, for CLI direct mode |
 //! | `MARA_BROWSER_PACKAGE` | The browser package's directory, `packages/mara-browser` |
+//! | `MARA_DISPATCHER` | The dispatcher's directory, `packages/mara-npm`, which holds the Node library |
+//! | `MARA_NODE_ADDON` | The Node addon of the build, `libmara_node.so` beside `MARA_BIN`, which `mara-node:build` builds |
+//! | `MARA_SOUFFLE` | The pinned Soufflé that `scripts/build-souffle.sh` builds beside the build's directory |
+//! | `MARA_TSC` | TypeScript's compiler of the workspace's `node_modules` |
 //! | `TMPDIR` | Its `tmp/`, where Playwright puts the browser's new profile |
 
 use std::collections::BTreeMap;
@@ -90,6 +94,10 @@ impl Host {
         let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let package = fs::canonicalize(workspace.join("packages/mara-browser"))
             .expect("the browser package's directory");
+        let dispatcher = fs::canonicalize(workspace.join("packages/mara-npm"))
+            .expect("the dispatcher's directory");
+        let binary = Path::new(env!("CARGO_BIN_EXE_mara"));
+        let builds = binary.parent().expect("the build's directory");
         node_version();
         let output = Command::new("node")
             .arg("--test")
@@ -99,6 +107,13 @@ impl Host {
             .env("MARA_HOSTS_FIXTURES", self.path().join("fixtures"))
             .env("MARA_BIN", env!("CARGO_BIN_EXE_mara"))
             .env("MARA_BROWSER_PACKAGE", &package)
+            .env("MARA_DISPATCHER", &dispatcher)
+            .env("MARA_NODE_ADDON", builds.join("libmara_node.so"))
+            .env("MARA_SOUFFLE", builds.join("../souffle-2.5/souffle"))
+            .env(
+                "MARA_TSC",
+                workspace.join("node_modules/typescript/bin/tsc"),
+            )
             .env("TMPDIR", self.path().join("tmp"))
             .stdin(Stdio::null())
             .output()

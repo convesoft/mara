@@ -264,10 +264,10 @@ above(a, c) :- above(a, b), edge("decomposes", b, c, _, _).
 deep(a, b) :- above(a, b), item(a, _, "C0", _, _, _), item(b, _, "C8", _, _, _).
 `;
     await declare(workspace, program, invariant("deep", "p.dl", "deep", "warning"));
-    const report = await workspace.request("query_report", { name: "deep", id: "C0" });
-    explained(report);
-    const leaves = nodes(report.rows[0].proof).filter((node) => node.relation === "edge");
-    assert.equal(leaves.length, 8, JSON.stringify(report));
+    const reported = await report(workspace, { name: "deep", id: "C0" });
+    explained(reported);
+    const leaves = nodes(reported.rows[0].proof).filter((node) => node.relation === "edge");
+    assert.equal(leaves.length, 8, JSON.stringify(reported));
   });
 
   test("VER-PROGRAM-FAULTS: each runtime fault makes the outcome unavailable", async () => {

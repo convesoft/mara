@@ -1,6 +1,7 @@
 // `nx run mara-browser:build`: copies the WebAssembly module that `mara-wasm:build` wrote into
 // the package, with Soufflé's module that `cargo-workspace:souffle-wasm` built
-// (ADR-NX-RUST-TASKS); mara-865a2e packs Soufflé's. Nx stores that build's module at `target/` of the workspace,
+// (ADR-NX-RUST-TASKS), and the operations' types of the Node library, which the package shares
+// (DES-NODE-LIBRARY); mara-865a2e packs Soufflé's. Nx stores that build's module at `target/` of the workspace,
 // where nx-rust names its outputs. When Cargo writes elsewhere, through `CARGO_TARGET_DIR` or
 // `build.target-dir`, a build that Nx restored leaves the module only at `target/` and the one in
 // Cargo's directory may be older, so the copy refuses instead of taking a module that this build
@@ -39,6 +40,10 @@ const packageDir = join(root, "packages", "mara-browser");
 copyFileSync(
   join(expected, "wasm32-unknown-unknown", "release", "mara_wasm.wasm"),
   join(packageDir, "mara.wasm"),
+);
+copyFileSync(
+  join(root, "packages", "mara-npm", "lib", "operations.d.ts"),
+  join(packageDir, "operations.d.ts"),
 );
 for (const name of ["souffle.js", "souffle.wasm"]) {
   copyFileSync(join(expected, "souffle-2.5-wasm", name), join(packageDir, name));

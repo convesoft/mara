@@ -11,6 +11,10 @@
 //! | `node/browser/corpus.test.mjs` | The 1× corpus row of VER-HOST-COMPARISON: the `engineering` template's queries, views, gate and report |
 //! | `node/browser/programs.test.mjs` | The browser rows of VER-FACT-ROWS, VER-EXPLANATIONS, VER-PROGRAM-FAULTS and VER-PROGRAM-REACH-CASES |
 //! | `node/browser/limits.test.mjs` | The browser row of VER-EVALUATION-TIME-LIMIT, and a module that aborts |
+//! | `node/library/parity.test.mjs` | The first three rows of the Node and browser table of VER-HOST-COMPARISON, the parity cases of VER-NODE-LIBRARY, the Chromium case of VER-BROWSER-ACCESS and the daemon part of the first row of VER-UNAVAILABLE-NOT-PARTIAL |
+//! | `node/library/types.test.mjs` | The `tsc` case of VER-NODE-LIBRARY |
+//! | `node/library/timing.test.mjs` | The time-limit case of VER-NODE-LIBRARY |
+//! | `node/library/daemon.test.mjs` | The Node rows of VER-DAEMON-START, VER-DAEMON-WRITES and VER-CONCURRENT-WRITERS |
 
 // The setup ends leftover processes by signal.
 #![cfg(unix)]
@@ -84,4 +88,33 @@ fn browser_corpus_programs() {
     });
     std::fs::write(host.fixture("corpus.json"), described.to_string()).unwrap();
     host.run("browser/corpus.test.mjs");
+}
+
+#[test]
+fn library_parity() {
+    let host = Host::new();
+    let corpus = corpus::Corpus::generate(1, SEED);
+    fixtures::copy(corpus.root(), &host.fixture("corpus"));
+    fixtures::legacy(&host);
+    host.run("library/parity.test.mjs");
+}
+
+#[test]
+fn library_types() {
+    let host = Host::new();
+    host.run("library/types.test.mjs");
+}
+
+#[test]
+fn library_timing() {
+    let host = Host::new();
+    fixtures::programs(&host);
+    host.run("library/timing.test.mjs");
+}
+
+#[test]
+fn library_daemon() {
+    let host = Host::new();
+    fixtures::workspace(&host);
+    host.run("library/daemon.test.mjs");
 }

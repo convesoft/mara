@@ -57,11 +57,15 @@ signal-hook = { version = "0.3.18", default-features = false }
 # Soufflé's (`souffle.js`, `souffle.wasm`), which `mara-browser:build` copies there, Playwright's
 # library and the Chromium they launch, found through `PLAYWRIGHT_BROWSERS_PATH` or the per-user
 # cache and keyed by the path, size and modification time that
-# `tests/hosts/node/support/browser.mjs` prints, and the `node` on `PATH`.
+# `tests/hosts/node/support/browser.mjs` prints, and the `node` on `PATH`; the Node library's
+# files in `packages/mara-npm`, the addon `libmara_node.so` that `mara-node:build` builds, and
+# TypeScript's compiler of the workspace's `node_modules`, keyed by its version.
 [package.metadata.nx.targets.test]
 inputs = [
   "{workspaceRoot}/packages/mara-browser/**/*",
-  { dependentTasksOutputFiles = "**/*.{wasm,js}" },
+  "{workspaceRoot}/packages/mara-npm/**/*",
+  { dependentTasksOutputFiles = "**/*.{wasm,js,so}" },
+  { runtime = "node node_modules/typescript/bin/tsc --version 2>&1; true" },
   { env = "PLAYWRIGHT_BROWSERS_PATH" },
   { runtime = "node --version 2>&1; node crates/mara/tests/hosts/node/support/browser.mjs 2>&1; true" },
   "...",
@@ -87,6 +91,7 @@ dependsOn = [
   "...",
   { projects = ["cargo-workspace"], target = "souffle" },
   { projects = ["mara-browser"], target = "build" },
+  { projects = ["mara-node"], target = "build" },
 ]
 
 # `project validate` of this repository's own project (ADR-NX-RUST-TASKS), with the command of the

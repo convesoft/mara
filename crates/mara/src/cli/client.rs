@@ -313,11 +313,12 @@ fn lost(operation: &Operation, pid: Option<u32>, why: &str) -> Failure {
     )
 }
 
-/// Starts `mara daemon start` of this executable in the background, detached from the client's
-/// standard streams and process group, in the client's directory and with its `--project`. A
-/// failure to start it is no failure of the request, which runs in-process all the same.
+/// Starts `mara daemon start` of this host's executable in the background, detached from the
+/// client's standard streams and process group, in the client's directory and with its
+/// `--project`. A failure to start it is no failure of the request, which runs in-process all the
+/// same.
 fn start_daemon(cwd: PathBuf, project: Option<PathBuf>) {
-    let Ok(executable) = std::env::current_exe() else {
+    let Ok(executable) = mara::system::executable() else {
         return;
     };
     let mut command = Command::new(executable);

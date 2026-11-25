@@ -1,0 +1,323 @@
+// The Node rows of VER-DAEMON-START and VER-DAEMON-WRITES (docs/daemon/verification.mara.md) and
+// the embedded Node row of VER-CONCURRENT-WRITERS (docs/authoring/verification.mara.md): the
+// Node client is a client of the daemon of its package's `mara`, as that package's CLI is.
+//
+// A call is served in-process when its debug stats hold the counts of a cold request, those of
+// the same read in CLI direct mode, and no daemon of the test can have answered it: none ran. A
+// call is served by the daemon when `served` of `mara daemon status` rose by exactly one across
+// it, under the same process (VER-DAEMON-START).
+
+import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { after, describe, test } from "node:test";
+
+import { cliStats, copy, filesOf, fixture, testDir } from "../support/hosts.mjs";
+import {
+  clientEnv,
+  daemon,
+  daemonsOfTest,
+  install,
+  startClient,
+  status,
+  stopDaemons,
+  waitFor,
+} from "../support/library.mjs";
+
+const maraBin = process.env.MARA_BIN;
+
+/** The read of the cases. */
+const READ = ["item_list", { limit: 5 }];
+
+/** A new directory of the test. */
+const dirOf = (name) => mkdtempSync(join(testDir, `${name}-`));
+
+/**
+ * A copy of the fixture `workspace` with `REQ-TWO` in `docs/reqs.mara.md`, as the CLI writes it,
+ * whose files last changed at least 2 s before this returns (VER-DAEMON-START).
+ */
+async function project() {
+  const root = copy(fixture("workspace").root);
+  const created = spawnSync(
+    maraBin,
+    ["item", "create", "requirement", "docs/reqs.mara.md", "--id", "REQ-TWO", "--title", "Two"]
+      .concat(["--field", "status=draft", "--body", "Text."]),
+    { cwd: root, env: clientEnv({ MARA_NO_DAEMON: "1" }), encoding: "utf8" },
+  );
+  assert.equal(created.status, 0, created.stderr);
+  await sleep(2000);
+  return root;
+}
+
+/** The debug stats of `READ` in CLI direct mode in `root`: the counts of a cold request. */
+function cold(root) {
+  const { format_version, ...counts } = cliStats(root, ...READ);
+  return { format_version, ...counts };
+}
+
+/** No daemon of the test starts within `ms`. */
+async function noneStarts(ms = 1000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    assert.deepEqual(daemonsOfTest(), [], "a daemon of the test started");
+    await sleep(20);
+  }
+}
+
+/** Runs `script` with Node in `cwd`, a module beside the installation's `library.mjs`. */
+function node(installation, script, cwd, env = clientEnv()) {
+  const file = join(installation.dir, `script-${Date.now()}-${Math.random()}.mjs`);
+  writeFileSync(file, script);
+  return spawn(process.execPath, [file], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+}
+
+describe("the Node client is a client of its package's daemon", { timeout: 600_000 }, () => {
+  const installation = install(dirOf("package"));
+  const copied = install(dirOf("copy"));
+
+  after(async () => {
+    await stopDaemons([installation.mara, copied.mara]);
+  });
+
+  test("a read with no daemon running is served in-process and starts the package's daemon", async () => {
+    const root = await project();
+    assert.deepEqual(daemonsOfTest(), []);
+    const child = node(
+      installation,
+      'import { createClient } from "./library.mjs";\n' +
+        `const answer = await createClient().run(${JSON.stringify(READ[0])}, ${JSON.stringify(READ[1])}, { debugStats: true });\n` +
+        "console.log(JSON.stringify({ settled: Date.now(), stats: answer.stats }));\n",
+      root,
+    );
+    let printed = "";
+    child.stdout.on("data", (chunk) => (printed += chunk));
+    let errors = "";
+    child.stderr.on("data", (chunk) => (errors += chunk));
+    const code = await new Promise((resolve) => child.on("exit", resolve));
+    const exited = Date.now();
+    assert.equal(code, 0, errors);
+    const { settled, stats } = JSON.parse(printed);
+    assert.deepEqual(stats, cold(root), "the counts of a cold request");
+    assert.ok(exited - settled < 5000, `Node exited ${exited - settled} ms after the call settled`);
+    await waitFor("the daemon's session", () => (status(installation.mara).sessions.includes(root) ? true : undefined));
+
+    // The reads of the second case: 2 s apart, once that session is open.
+    const client = startClient(installation, { cwd: root });
+    try {
+      await sleep(2000);
+      const first = await client.run(...READ, { debugStats: true });
+      assert.deepEqual(first.result.stats, cold(root), "the daemon's first answer: a cold request");
+      await sleep(2000);
+      const before = status(installation.mara);
+      const second = await client.run(...READ, { debugStats: true });
+      const now = status(installation.mara);
+      assert.equal(now.served - before.served, 1, "the daemon served the second read");
+      assert.equal(now.pid, before.pid, "the CLI's status names the process that served it");
+      assert.deepEqual(second.result.result, first.result.result);
+      assert.deepEqual(daemonsOfTest(), [now.pid], "another daemon of the test started");
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("CI, MARA_NO_DAEMON=1 and the direct-mode option serve every call in-process", async () => {
+    const root = await project();
+    const ways = [
+      [{}, { CI: "true" }],
+      [{}, { MARA_NO_DAEMON: "1" }],
+      [{ noDaemon: true }, {}],
+    ];
+    await stopDaemons([installation.mara]);
+    for (const [options, extra] of ways) {
+      const client = startClient(installation, { cwd: root, options, env: clientEnv(extra) });
+      try {
+        const answer = await client.run(...READ, { debugStats: true });
+        assert.deepEqual(answer.result.stats, cold(root), JSON.stringify(extra));
+        await noneStarts();
+      } finally {
+        await client.close();
+      }
+    }
+    daemon(installation.mara, ["start", "--project", root]);
+    const running = status(installation.mara);
+    for (const [options, extra] of ways) {
+      const client = startClient(installation, { cwd: root, options, env: clientEnv(extra) });
+      try {
+        const answer = await client.run(...READ, { debugStats: true });
+        assert.deepEqual(answer.result.stats, cold(root), JSON.stringify(extra));
+        const now = status(installation.mara);
+        assert.equal(now.served, running.served, `${JSON.stringify(extra)}: the daemon served it`);
+        assert.deepEqual(daemonsOfTest(), [running.pid]);
+      } finally {
+        await client.close();
+      }
+    }
+  });
+
+  test("the client of a package whose binary is a copy at another path starts that copy's daemon", async () => {
+    const root = await project();
+    const running = status(installation.mara);
+    assert.equal(running.running, true);
+    assert.equal(status(copied.mara).running, false);
+    const client = startClient(copied, { cwd: root });
+    try {
+      const answer = await client.run(...READ);
+      assert.ok(answer.result, JSON.stringify(answer));
+    } finally {
+      await client.close();
+    }
+    const other = await waitFor("the copy's daemon", () => {
+      const now = status(copied.mara);
+      return now.running ? now : undefined;
+    });
+    assert.notEqual(other.pid, running.pid);
+    assert.equal(status(installation.mara).pid, running.pid);
+  });
+});
+
+/** A daemon of `installation` whose writer waits at each pause point, and its pauses' directory. */
+function pausedDaemon(installation) {
+  const pauses = dirOf("pauses");
+  daemon(installation.mara, ["start"], { MARA_TEST_PAUSE: pauses });
+  return { pid: status(installation.mara).pid, paused: join(pauses, "paused") };
+}
+
+/** What the writer's pause holds, once it waits there. */
+async function pausedAt(paused) {
+  return waitFor("the daemon's writer to pause", () => {
+    try {
+      return readFileSync(paused, "utf8");
+    } catch {
+      return undefined;
+    }
+  });
+}
+
+describe("a Node write whose daemon is killed fails with daemon-lost and is not run again", { timeout: 600_000 }, () => {
+  const installation = install(dirOf("writes"));
+
+  after(async () => {
+    await stopDaemons([installation.mara]);
+  });
+
+  test("a create killed before step 2 changes nothing", async () => {
+    const root = await project();
+    const before = filesOf(root);
+    const { pid, paused } = pausedDaemon(installation);
+    const client = startClient(installation, { cwd: root });
+    try {
+      const call = client.run("item_create", {
+        type: "requirement",
+        path: "docs/reqs.mara.md",
+        title: "Four",
+        field: ["status=draft"],
+        body: "Text.",
+      });
+      assert.equal(await pausedAt(paused), "", "the pause before step 2");
+      process.kill(pid, "SIGKILL");
+      const answer = await call;
+      assert.equal(answer.error?.code, "daemon-lost", JSON.stringify(answer));
+      assert.match(answer.error.message, new RegExp(`^the daemon \\(process ${pid}\\) gave no answer to`));
+    } finally {
+      await client.close();
+      rmSync(paused, { force: true });
+    }
+    await waitFor("no daemon", () => (daemonsOfTest().length === 0 ? true : undefined));
+    const after = filesOf(root);
+    assert.deepEqual([...after.keys()], [...before.keys()]);
+    for (const [path, bytes] of after) {
+      assert.ok(bytes.equals(before.get(path)), path);
+    }
+  });
+
+  test("a move killed at its second file is left interrupted and reported", async () => {
+    const root = await project();
+    const { pid, paused } = pausedDaemon(installation);
+    const client = startClient(installation, { cwd: root });
+    try {
+      const call = client.run("item_move", { "id-or-mid": "REQ-TWO", path: "docs/moved.mara.md" });
+      const files = [];
+      while (files.length < 2) {
+        const at = await pausedAt(paused);
+        if (at !== "") {
+          files.push(at);
+        }
+        if (files.length < 2) {
+          rmSync(paused);
+        }
+      }
+      assert.deepEqual(files, ["docs/moved.mara.md", "docs/reqs.mara.md"]);
+      process.kill(pid, "SIGKILL");
+      const answer = await call;
+      assert.equal(answer.error?.code, "daemon-lost", JSON.stringify(answer));
+    } finally {
+      await client.close();
+      rmSync(paused, { force: true });
+    }
+    await waitFor("no daemon", () => (daemonsOfTest().length === 0 ? true : undefined));
+    const moved = readFileSync(join(root, "docs/moved.mara.md"), "utf8");
+    const source = readFileSync(join(root, "docs/reqs.mara.md"), "utf8");
+    assert.ok(moved.includes("REQ-TWO") && source.includes("REQ-TWO"), "an interrupted move");
+    // No daemon runs, so the validation is served in-process, and reports it.
+    const validator = startClient(installation, { cwd: root, options: { noDaemon: true } });
+    try {
+      const validated = await validator.run("project_validate", {});
+      const codes = validated.result.diagnostics.map((diagnostic) => diagnostic.code);
+      assert.ok(codes.some((code) => code.startsWith("duplicate-")), JSON.stringify(codes));
+    } finally {
+      await validator.close();
+    }
+  });
+});
+
+test("an embedded Node write and a CLI write at once land as two CLI writes do", { timeout: 300_000 }, async () => {
+  const installation = install(dirOf("writers"), { binary: false });
+  const root = await project();
+  const client = startClient(installation, { cwd: root, options: { noDaemon: true } });
+  const create = (title) => ({
+    type: "requirement",
+    path: "docs/reqs.mara.md",
+    title,
+    field: ["status=draft"],
+    body: "Text.",
+  });
+  let created = 0;
+  try {
+    const listedBefore = await client.run("item_list", { type: ["requirement"] });
+    for (let round = 0; round < 3; round += 1) {
+      const cli = spawn(
+        maraBin,
+        ["--format", "json", "item", "create", "requirement", "docs/reqs.mara.md", "--title", `By the CLI ${round}`]
+          .concat(["--field", "status=draft", "--body", "Text."]),
+        { cwd: root, env: clientEnv({ MARA_NO_DAEMON: "1" }), stdio: ["ignore", "pipe", "pipe"] },
+      );
+      let printed = "";
+      cli.stdout.on("data", (chunk) => (printed += chunk));
+      const [call, code] = await Promise.all([
+        client.run("item_create", create(`By Node ${round}`)),
+        new Promise((resolve) => cli.on("exit", resolve)),
+      ]);
+      const document = readFileSync(join(root, "docs/reqs.mara.md"), "utf8");
+      for (const [ok, json] of [
+        [code === 0, JSON.parse(printed)],
+        [call.result !== undefined, call.result ?? call.error.reply],
+      ]) {
+        if (ok) {
+          created += 1;
+          assert.ok(document.includes(`<a id="${json.item.mid}"></a>`), JSON.stringify(json));
+        } else {
+          assert.equal(typeof json.error.code, "string", JSON.stringify(json));
+        }
+      }
+    }
+    assert.ok(created > 0);
+    const listed = await client.run("item_list", { type: ["requirement"] });
+    assert.equal(listed.result.items.length, listedBefore.result.items.length + created);
+    const validated = await client.run("project_validate", {});
+    assert.deepEqual(validated.result.diagnostics, []);
+  } finally {
+    await client.close();
+  }
+});
