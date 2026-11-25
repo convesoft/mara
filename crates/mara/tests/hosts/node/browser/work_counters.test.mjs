@@ -1,14 +1,15 @@
 // The browser workspace's warm rows of VER-WORK-COUNTERS (docs/verification.mara.md) on the 1×
 // corpus of the performance harness, read through the workspace's debug stats option
 // (DES-PERFORMANCE-HARNESS). Contents the caller supplies or writes are hashed by the engine and
-// are no file reads. The rows of programs come with Soufflé's module (mara-xsm8w6).
+// are no file reads; Soufflé's worker starts no process, so a program run counts no subprocess
+// spawn.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { encode, fixture, launchBrowser, openPage, startServer } from "../support/hosts.mjs";
+import { encode, fixture, launchBrowser, openPage, requireSouffle, startServer } from "../support/hosts.mjs";
 
 /** No work: every counter 0. */
 const NONE = {
@@ -74,6 +75,29 @@ describe("a browser workspace does only the work that a change calls for", { tim
     assert.deepEqual(await page.harness("write", document, edited.toString("base64")), {});
     // Written contents are hashed by the engine and are no file reads.
     assert.deepEqual(await stats("item_list"), { ...NONE, hashes: 1, parses: 1, snapshot_builds: 1 });
+  });
+
+  test("a query after project validate, nothing written, runs no program", async () => {
+    requireSouffle();
+    assert.deepEqual(await page.harness("create", encode(corpus.files)), {});
+    const validated = await stats("project_validate");
+    assert.ok(validated.program_runs > 0, JSON.stringify(validated));
+    // Validation ran `knowledge.dl` with the snapshot's facts, since invariants use it, and
+    // compiled `readiness.dl`, which no invariant uses, against empty facts (DES-RULE-EXECUTION).
+    assert.deepEqual(await stats("query_execute", { name: "requirement-basis" }), NONE);
+    assert.deepEqual(await stats("query_view", { name: "risk-treatment" }), { ...NONE, program_runs: 1 });
+    assert.deepEqual(await stats("query_view", { name: "risk-treatment" }), NONE);
+  });
+
+  test("one program written by the caller, then project validate: 1 program run, 0 parses, 0 snapshot builds", async () => {
+    requireSouffle();
+    assert.deepEqual(await page.harness("create", encode(corpus.files)), {});
+    await stats("project_validate");
+    // No other program includes `readiness.dl`, which includes the template's other two.
+    const path = ".mara/rules/readiness.dl";
+    const edited = Buffer.concat([corpus.files.get(path), Buffer.from("\n// Edited by the caller.\n")]);
+    assert.deepEqual(await page.harness("write", path, edited.toString("base64")), {});
+    assert.deepEqual(await stats("project_validate"), { ...NONE, hashes: 1, program_runs: 1 });
   });
 
   test("after a write of Mara's, the same read request again does no work", async () => {

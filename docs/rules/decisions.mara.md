@@ -182,3 +182,21 @@
 - Rejected: evaluating without the sandbox, with or without a warning. A checkout could then reach outside exactly on the hosts that lack it, and a warning undoes no read or write.
 - Rejected: requiring ABI 6, 9 or 10, which cover signals, UNIX sockets and UDP themselves. They refuse Ubuntu 24.04's kernel 6.8 (ABI 4), and the filter covers those.
 - Rejected: an option that allows evaluation without the sandbox. It adds a capability that loosens a security requirement, which only the maintainer decides.
+
+---
+
+<a id="01M89DA9KA577J1HF2SMKHABSH"></a>
+
+### Answer a browser request that evaluates programs by passes
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-BROWSER-EVALUATION-PASSES |
+| Status | Accepted |
+| Justifies | [DES-RULE-EXECUTION](evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH) |
+
+- Chosen during the rewrite on 2026-11-25 (mara-xsm8w6): Mara's module answers the runs of Soufflé that a request waits for, and runs the request again once the workspace's worker supplied what they left, until a pass waits for none. Planning, the private directory's files, the reading of what Soufflé printed and wrote, faults and the explanation console are the native host's code; only the start of Soufflé differs. The cost is one more pass of the request per wave of runs, on inputs the workspace keeps, and for an explanation one run of Soufflé per console command.
+- Rejected: suspending the module during a run with JavaScript Promise Integration or Asyncify. JSPI is missing from browsers the package serves, and Asyncify rewrites Mara's module, which grows and slows it.
+- Rejected: a synchronous wait on Soufflé's worker through `SharedArrayBuffer` and `Atomics.wait`. It needs a cross-origin isolated page.
+- Rejected: asynchronous operations in the library, Rust `async` from each evaluation up to every operation. It changes every native call site for one host.
+- Rejected: the explanation console in Soufflé's worker, through a second instance of Mara's module. The rows to explain come from the request's snapshot, which only the workspace's worker holds, so the console's state and the chosen rows would cross the module's boundary.

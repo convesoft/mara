@@ -1,7 +1,6 @@
 // VER-BROWSER-WORKSPACE (docs/hosts/verification.mara.md): a page of the test works on the files
 // of a disposable project in a browser workspace; a copy of the project receives the same
-// requests and writes in CLI direct mode, and its files are the expected bytes. The program part
-// of the caller's writes comes with Soufflé's module (mara-xsm8w6).
+// requests and writes in CLI direct mode, and its files are the expected bytes.
 
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
@@ -13,6 +12,7 @@ import {
   openPage,
   pairMids,
   replaceMids,
+  requireSouffle,
   startServer,
 } from "../support/hosts.mjs";
 import { Compared } from "../support/workspace.mjs";
@@ -167,6 +167,22 @@ describe("a browser workspace works on supplied files as CLI direct mode on a co
       await workspace.request("project_validate");
       await workspace.request("item_list");
     }
+  });
+
+  test("the caller's program and the configuration that declares it apply as in CLI direct mode", async () => {
+    requireSouffle();
+    const workspace = await Compared.create(page, "workspace");
+    const program = '.include "mara.dl"\n.decl drafted(m: Mid)\ndrafted(m) :- item(m, "requirement", _, "draft", _, _).\n';
+    await workspace.write(".mara/rules/drafts.dl", program);
+    await workspace.request("project_validate");
+    const config = workspace.supplied.files.get(".mara/config.toml").toString("utf8");
+    const declared =
+      `${config}\n[rules]\nprograms = [".mara/rules/*.dl"]\n\n[invariants.drafted]\n` +
+      'program = ".mara/rules/drafts.dl"\nrelation = "drafted"\nseverity = "warning"\nmessage = "Still a draft"\n';
+    await workspace.write(".mara/config.toml", declared);
+    const validated = await workspace.request("project_validate");
+    assert.equal(validated.diagnostics.filter((d) => d.code === "drafted").length, 2, JSON.stringify(validated));
+    await workspace.request("item_list");
   });
 
   test("an item created inside an item fails as in CLI direct mode and changes nothing", async () => {

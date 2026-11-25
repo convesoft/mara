@@ -3,20 +3,27 @@
 //! the inputs a command line supplies (DES-REQUEST-INPUTS in `docs/rules/index.mara.md`), and the
 //! evaluation by the pinned Soufflé (DES-RULE-EXECUTION in `docs/rules/evaluation.mara.md`).
 
+#[cfg(target_arch = "wasm32")]
+pub mod browser;
 mod consumer;
 mod explain;
 mod invariants;
 #[cfg(target_os = "linux")]
 mod sandbox;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::{Command, Stdio};
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 
-use mara_engine::evaluation::{self, Exit, Fault, Limit, Limits, Rows};
+#[cfg(not(target_arch = "wasm32"))]
+use mara_engine::evaluation::Limit;
+use mara_engine::evaluation::{self, Exit, Fault, Limits, Rows};
 use mara_engine::facts::{
     CodeFacts, Facts, InputError, Inputs, MARA_DL, Relation, Supplied, file_name,
 };
@@ -25,6 +32,7 @@ use mara_engine::program::Program;
 use mara_engine::work::WorkCounts;
 
 use crate::caller;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::hooks::{self, Hook};
 
 /// Writes `mara.dl`, every fact relation of `facts`, every relation of `inputs` and an empty
@@ -98,12 +106,11 @@ pub fn souffle() -> Result<PathBuf, String> {
         })
 }
 
-// @mara implements REQ-UNAVAILABLE-NOT-PARTIAL
-/// Soufflé in a browser workspace, which has no module of it: each evaluation is a fault
-/// without a line (DES-BROWSER-WORKSPACE).
+/// Soufflé in a browser workspace: the package's module, which its Soufflé worker loads
+/// ([`browser`]); the name only identifies it.
 #[cfg(target_arch = "wasm32")]
 pub fn souffle() -> Result<PathBuf, String> {
-    Err("this browser workspace has no Soufflé module to run programs with".to_owned())
+    Ok(PathBuf::from(browser::MODULE))
 }
 
 /// The Soufflé release Mara runs.
@@ -144,13 +151,46 @@ impl Evaluations {
     }
 }
 
+/// Soufflé's arguments: `--no-preprocessor -l ""`, `-t explain` in provenance mode, and the
+/// wrapper, which it reads from its working directory, the private directory.
+pub fn arguments(provenance: bool) -> Vec<&'static str> {
+    let mut arguments = vec!["--no-preprocessor", "-l", ""];
+    if provenance {
+        arguments.extend(["-t", "explain"]);
+    }
+    arguments.push(evaluation::WRAPPER);
+    arguments
+}
+
+/// What a run of Soufflé printed and wrote: natively the files of its private directory, in a
+/// browser workspace what the package's worker gave back ([`browser`]).
+pub(crate) trait Left {
+    /// At most the first 64 KiB of what it printed on the stream whose file is `name`,
+    /// [`evaluation::STDERR`] or [`evaluation::STDOUT`]; nothing when it printed nothing.
+    fn printed(&self, name: &str) -> Vec<u8>;
+    /// The file at `path` relative to the private directory, such as an output relation's.
+    fn read(&self, path: &str) -> io::Result<Vec<u8>>;
+}
+
+impl Left for &Path {
+    fn printed(&self, name: &str) -> Vec<u8> {
+        bounded_read(&self.join(name))
+    }
+
+    fn read(&self, path: &str) -> io::Result<Vec<u8>> {
+        fs::read(self.join(path))
+    }
+}
+
 // @mara implements REQ-PROJECT-AUTHORED-LOGIC
 /// Evaluates `run.program` with Soufflé as a child process, in a new private directory under
 /// the system's temporary directory that is removed when it ends: the parsed copies of the
 /// program's files, the facts and inputs it reads and the generated wrapper, run as
 /// `souffle --no-preprocessor -l "" wrapper.dl` there, with an empty environment and within
 /// the limits (DES-RULE-EXECUTION). Returns the rows of every output relation, or the fault
-/// that makes the outcome unavailable. Counts one subprocess spawn and one program run.
+/// that makes the outcome unavailable. Counts one subprocess spawn and one program run. In a
+/// browser workspace the package's Soufflé worker runs it ([`browser::evaluate`]).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn evaluate(run: &Run, work: &mut WorkCounts) -> Result<Rows, Fault> {
     // Declared before the directory, so that it is dropped after it.
     let _started = Started::begin()?;
@@ -162,11 +202,13 @@ pub fn evaluate(run: &Run, work: &mut WorkCounts) -> Result<Rows, Fault> {
 /// so that a stopping daemon waits for it (DES-DAEMON-LIFECYCLE), and with the signals deferred.
 /// Dropped after the directory, it ends Mara for a deferred signal only once the directory is
 /// removed.
+#[cfg(not(target_arch = "wasm32"))]
 struct Started {
     _interrupts: interrupt::Deferred,
     _running: cancel::Running,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Started {
     /// Begins an evaluation, or refuses it once the daemon stops. The check follows the count,
     /// so a stopping daemon either sees the evaluation counted and waits for it, or the
@@ -186,12 +228,23 @@ impl Started {
     }
 }
 
+/// The outcome of an evaluation in a browser workspace ([`browser::evaluate`]).
+#[cfg(target_arch = "wasm32")]
+pub fn evaluate(run: &Run, work: &mut WorkCounts) -> Result<Rows, Fault> {
+    browser::evaluate(run, work)
+}
+
 /// Runs Soufflé on the prepared private directory `dir` and reads its outcome.
+#[cfg(not(target_arch = "wasm32"))]
 fn run_in(run: &Run, dir: &Path, work: &mut WorkCounts) -> Result<Rows, Fault> {
     let exit = spawn_and_wait(run.souffle, dir, run.limits, None, work)
         .map_err(|error| host("cannot run Soufflé", &error))?;
-    let printed = |name: &str| bounded_read(&dir.join(name));
-    let stderr = printed(evaluation::STDERR);
+    outcome(run, exit, &dir)
+}
+
+/// The rows of a run of Soufflé that ended as `exit` and left `left`, or its fault.
+fn outcome(run: &Run, exit: Exit, left: &dyn Left) -> Result<Rows, Fault> {
+    let stderr = left.printed(evaluation::STDERR);
     #[cfg(target_os = "linux")]
     if !exit.success
         && let Some(problem) = sandbox::library_fault(run.souffle, &stderr)
@@ -201,56 +254,76 @@ fn run_in(run: &Run, dir: &Path, work: &mut WorkCounts) -> Result<Rows, Fault> {
     evaluation::interpret(
         run.program,
         exit,
-        &printed(evaluation::STDOUT),
+        &left.printed(evaluation::STDOUT),
         &stderr,
         run.limits,
     )?;
-    read_rows(dir, run)
+    read_rows(left, run)
 }
 
 /// A fault of the host, from `error` while doing `what`.
+#[cfg(not(target_arch = "wasm32"))]
 fn host(what: &str, error: &dyn std::fmt::Display) -> Fault {
     Fault::Host(format!("{what}: {error}"))
 }
 
 /// A new private directory, prepared for a run of `run.program`.
+#[cfg(not(target_arch = "wasm32"))]
 fn private_dir(run: &Run) -> Result<caller::TempDir, Fault> {
     let dir = caller::tempdir("mara-evaluation-")
         .map_err(|error| host("cannot create the evaluation's private directory", &error))?;
-    let read = evaluation::read_relations(run.program, run.relations);
-    let inputs: Vec<&str> = read.iter().map(|relation| relation.name.as_str()).collect();
-    prepare(dir.path(), run, &read, &inputs)
+    prepare(dir.path(), run)
         .map_err(|error| host("cannot write the evaluation's private directory", &error))?;
     Ok(dir)
 }
 
-/// The rows of each output relation of `run`, from the files Soufflé wrote in `dir`.
-fn read_rows(dir: &Path, run: &Run) -> Result<Rows, Fault> {
+/// The rows of each output relation of `run`, from the files Soufflé wrote ([`Left`]).
+fn read_rows(left: &dyn Left, run: &Run) -> Result<Rows, Fault> {
     let mut rows = Rows::default();
     for relation in run.outputs {
-        let path = dir.join(evaluation::output_file(relation));
-        let bytes = fs::read(&path).map_err(|error| Fault::Output {
-            relation: (*relation).to_owned(),
-            problem: format!("Soufflé wrote no readable file: {error}"),
-        })?;
+        let bytes = left
+            .read(&evaluation::output_file(relation))
+            .map_err(|error| Fault::Output {
+                relation: (*relation).to_owned(),
+                problem: format!("Soufflé wrote no readable file: {error}"),
+            })?;
         let read = evaluation::read_output(run.program, relation, &bytes, run.limits)?;
         rows.relations.insert((*relation).to_owned(), read);
     }
     Ok(rows)
 }
 
-/// Writes the private copies, the relations the wrapper reads, the output directory and the
-/// wrapper into `dir`.
-fn prepare(dir: &Path, run: &Run, read: &[&Relation], inputs: &[&str]) -> io::Result<()> {
-    for (name, text) in evaluation::copies(run.program) {
-        caller::write(&dir.join(name), text)?;
+/// The files of a run's private directory, each by its path there: the private copies, the
+/// relations the wrapper reads and the wrapper. The output directory is [`evaluation::OUTPUT_DIR`].
+fn private_files<'r>(run: &Run<'r>) -> Vec<(String, Cow<'r, [u8]>)> {
+    let read = evaluation::read_relations(run.program, run.relations);
+    let inputs: Vec<&str> = read.iter().map(|relation| relation.name.as_str()).collect();
+    let mut files: Vec<(String, Cow<[u8]>)> = evaluation::copies(run.program)
+        .into_iter()
+        .map(|(name, text)| (name, Cow::Owned(text.into_bytes())))
+        .collect();
+    for relation in &read {
+        files.push((
+            file_name(&relation.name),
+            Cow::Borrowed(relation.json.as_bytes()),
+        ));
     }
-    for relation in read {
-        caller::write(&dir.join(file_name(&relation.name)), &relation.json)?;
+    let wrapper = evaluation::wrapper(run.program, &inputs, run.outputs);
+    files.push((
+        evaluation::WRAPPER.to_owned(),
+        Cow::Owned(wrapper.into_bytes()),
+    ));
+    files
+}
+
+/// Writes the files of the private directory ([`private_files`]) and its output directory into
+/// `dir`.
+#[cfg(not(target_arch = "wasm32"))]
+fn prepare(dir: &Path, run: &Run) -> io::Result<()> {
+    for (name, bytes) in private_files(run) {
+        caller::write(&dir.join(name), bytes)?;
     }
-    caller::create_dir(&dir.join(evaluation::OUTPUT_DIR))?;
-    let wrapper = evaluation::wrapper(run.program, inputs, run.outputs);
-    caller::write(&dir.join(evaluation::WRAPPER), wrapper)
+    caller::create_dir(&dir.join(evaluation::OUTPUT_DIR))
 }
 
 /// The first 64 KiB of the file at `path`; nothing when it cannot be read.
@@ -269,6 +342,7 @@ fn bounded_read(path: &Path) -> Vec<u8> {
 /// runs in provenance mode, the console's commands on its standard input and its replies read
 /// from its standard output, both bounded ([`explain::Exchange`]). On Linux it runs in its
 /// sandbox; where that cannot be built, it does not start.
+#[cfg(not(target_arch = "wasm32"))]
 fn spawn_and_wait(
     souffle: &Path,
     dir: &Path,
@@ -280,12 +354,8 @@ fn spawn_and_wait(
         return Err(cancel::error());
     }
     let mut command = Command::new(souffle);
-    command.args(["--no-preprocessor", "-l", ""]);
-    if console.is_some() {
-        command.args(["-t", "explain"]);
-    }
     command
-        .arg(evaluation::WRAPPER)
+        .args(arguments(console.is_some()))
         .current_dir(dir)
         .env_clear()
         .stderr(caller::create_new(&dir.join(evaluation::STDERR))?);
@@ -441,7 +511,7 @@ fn limit(command: &mut Command, limits: Limits) {
     unsafe { command.pre_exec(pre_exec) };
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, target_arch = "wasm32")))]
 fn limit(_: &mut Command, _: Limits) {}
 
 /// The child's soft core limit. For a piped `core_pattern` the kernel treats 1 byte as "start no
@@ -452,6 +522,7 @@ const CORE_LIMIT_BYTES: u64 = 1;
 
 /// Ending the evaluations of a daemon that stops (DES-DAEMON-LIFECYCLE): the daemon blocks the
 /// signals that [`interrupt`] takes, so it ends them through this flag instead.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod cancel {
     use std::io;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -562,7 +633,7 @@ mod interrupt {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, target_arch = "wasm32")))]
 mod interrupt {
     pub(super) struct Deferred;
 
@@ -584,7 +655,7 @@ fn output_limit(status: &std::process::ExitStatus) -> Option<Limit> {
     (status.signal() == Some(libc::SIGXFSZ)).then_some(Limit::Output)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, target_arch = "wasm32")))]
 fn output_limit(_: &std::process::ExitStatus) -> Option<Limit> {
     None
 }

@@ -7,6 +7,7 @@
     "index.js",
     "index.d.ts",
     "worker.js",
+    "souffle-worker.js",
     "mara.wasm"
   ],
   "type": "module",

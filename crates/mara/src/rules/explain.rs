@@ -6,21 +6,31 @@
 //! limits. Its standard input carries the commands of [`mara_engine::evaluation::explain`];
 //! its standard output, read on a thread of its own up to [`REPLY_BYTES`], carries the JSON
 //! replies. Neither can block the run past its time limit: the commands are written on another
-//! thread, and the wait for a reply is the loop that stops the run at that limit.
+//! thread, and the wait for a reply is the loop that stops the run at that limit. In a browser
+//! workspace the same console reads the replies of runs that the package's worker made
+//! ([`super::browser::explain`]).
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{self, Read as _, Write as _};
-use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::Child;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
-use mara_engine::evaluation::explain::{EXIT, Explainer, Explanation, START, Target, Vocabulary};
+#[cfg(not(target_arch = "wasm32"))]
+use mara_engine::evaluation::explain::{EXIT, START};
+use mara_engine::evaluation::explain::{Explainer, Explanation, Target, Vocabulary};
 use mara_engine::evaluation::{self, Exit, Fault, Limit, Rows};
 use mara_engine::facts::Relation;
 use mara_engine::work::WorkCounts;
 
-use super::{Run, Started, bounded_read, host, private_dir, read_rows};
+use super::{Left, Run, read_rows};
+#[cfg(not(target_arch = "wasm32"))]
+use super::{Started, host, private_dir};
 
 /// The most bytes of replies that one run may print; past it, the rows not yet explained
 /// cannot be.
@@ -47,7 +57,8 @@ pub struct Explained {
 /// leaves it without rows, as [`super::evaluate`] reports it; the console failing after the
 /// evaluation ended, at the time limit included, leaves the rows and the outcome as they are
 /// and the rows not yet explained without an explanation. Counts one subprocess spawn and one
-/// program run.
+/// program run. In a browser workspace the package's worker runs it ([`super::browser::explain`]).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn explain(
     run: &Run,
     select: &mut dyn FnMut(&Rows) -> Vec<Target>,
@@ -57,15 +68,8 @@ pub fn explain(
     let _started = Started::begin()?;
     let dir = private_dir(run)?;
     let read = evaluation::read_relations(run.program, run.relations);
-    let mut console = Provenance {
-        dir: dir.path(),
-        run,
-        read: &read,
-        select,
-        phase: Phase::Starting,
-        printed: Vec::new(),
-        stderr_at_ready: 0,
-    };
+    let path = dir.path();
+    let mut console = Provenance::new(&path, run, &read, select);
     let exit = super::spawn_and_wait(
         run.souffle,
         dir.path(),
@@ -75,6 +79,16 @@ pub fn explain(
     )
     .map_err(|error| host("cannot run Soufflé", &error))?;
     console.finish(exit)
+}
+
+/// The run in provenance mode of a browser workspace ([`super::browser::explain`]).
+#[cfg(target_arch = "wasm32")]
+pub fn explain(
+    run: &Run,
+    select: &mut dyn FnMut(&Rows) -> Vec<Target>,
+    work: &mut WorkCounts,
+) -> Result<Explained, Fault> {
+    super::browser::explain(run, select, work)
 }
 
 /// What a console receives from Soufflé's standard output.
@@ -91,17 +105,61 @@ pub(super) trait Console {
     fn reply(&mut self, reply: Reply) -> Option<String>;
 }
 
+/// Soufflé's standard output in provenance mode, cut into replies.
+#[derive(Default)]
+pub(super) struct Replies {
+    buffer: Vec<u8>,
+}
+
+impl Replies {
+    /// Takes `bytes` that came; whether the replies may be read now. Each reply ends with `}`:
+    /// a buffer that does not is read again only once more came.
+    pub(super) fn take(&mut self, bytes: &[u8]) -> bool {
+        self.buffer.extend_from_slice(bytes);
+        self.buffer.trim_ascii_end().ends_with(b"}")
+    }
+
+    /// The next complete reply in what came, `ended` when nothing more comes; `None` for only
+    /// whitespace or a reply not yet complete.
+    pub(super) fn next(&mut self, ended: bool) -> Option<Reply> {
+        let mut values =
+            serde_json::Deserializer::from_slice(&self.buffer).into_iter::<serde_json::Value>();
+        match values.next() {
+            Some(Ok(value)) => {
+                let used = values.byte_offset();
+                self.buffer.drain(..used);
+                Some(Reply::Json(value))
+            }
+            Some(Err(error)) if ended || !error.is_eof() => {
+                let text = std::mem::take(&mut self.buffer);
+                let reason = format!("Soufflé's reply is not valid JSON: {error}");
+                Some(Reply::Broken { text, reason })
+            }
+            _ => None,
+        }
+    }
+
+    /// What came when Soufflé printed more than [`REPLY_BYTES`].
+    pub(super) fn overflow(&mut self) -> Reply {
+        let reason = format!("Soufflé's replies exceed {} MiB", REPLY_BYTES >> 20);
+        let text = std::mem::take(&mut self.buffer);
+        Reply::Broken { text, reason }
+    }
+}
+
 /// The exchange with one Soufflé process: a thread that writes the commands to its standard
 /// input, and one that reads its standard output, at most [`REPLY_BYTES`].
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) struct Exchange<'c> {
     console: &'c mut dyn Console,
     commands: Option<Sender<String>>,
     output: Receiver<Chunk>,
-    buffer: Vec<u8>,
+    replies: Replies,
     /// Whether the console ended the exchange.
     ended: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 enum Chunk {
     Bytes(Vec<u8>),
     /// The standard output ended, or exceeded [`REPLY_BYTES`].
@@ -110,6 +168,7 @@ enum Chunk {
     },
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'c> Exchange<'c> {
     /// Takes the child's standard input and output, and sends the commands that start the
     /// exchange. Fails when the system cannot start one of the threads; the caller then ends
@@ -175,7 +234,7 @@ impl<'c> Exchange<'c> {
             console,
             commands: Some(commands),
             output,
-            buffer: Vec::new(),
+            replies: Replies::default(),
             ended: false,
         })
     }
@@ -193,37 +252,22 @@ impl<'c> Exchange<'c> {
         };
         let ended = match chunk {
             Chunk::Bytes(bytes) => {
-                self.buffer.extend(bytes);
+                if !self.replies.take(&bytes) {
+                    return;
+                }
                 false
             }
             Chunk::End { overflow: false } => true,
             Chunk::End { overflow: true } => {
-                let reason = format!("Soufflé's replies exceed {} MiB", REPLY_BYTES >> 20);
-                let text = std::mem::take(&mut self.buffer);
-                self.receive(Reply::Broken { text, reason });
+                let reply = self.replies.overflow();
+                self.receive(reply);
                 return;
             }
         };
-        // Each reply ends with `}`: a buffer that does not is read again only once more came.
-        if !ended && !self.buffer.trim_ascii_end().ends_with(b"}") {
-            return;
-        }
         while !self.ended {
-            let mut values =
-                serde_json::Deserializer::from_slice(&self.buffer).into_iter::<serde_json::Value>();
-            match values.next() {
-                Some(Ok(value)) => {
-                    let used = values.byte_offset();
-                    self.buffer.drain(..used);
-                    self.receive(Reply::Json(value));
-                }
-                Some(Err(error)) if ended || !error.is_eof() => {
-                    let text = std::mem::take(&mut self.buffer);
-                    let reason = format!("Soufflé's reply is not valid JSON: {error}");
-                    self.receive(Reply::Broken { text, reason });
-                }
-                // Only whitespace, or a reply not yet complete.
-                _ => return,
+            match self.replies.next(ended) {
+                Some(reply) => self.receive(reply),
+                None => return,
             }
         }
     }
@@ -264,8 +308,10 @@ enum Phase<'r> {
     },
 }
 
-struct Provenance<'r, 's> {
-    dir: &'r Path,
+/// The console of a run in provenance mode: it chooses the rows to explain once the evaluation
+/// answered, and sends the commands that explain them.
+pub(super) struct Provenance<'r, 's> {
+    left: &'r dyn Left,
     run: &'r Run<'r>,
     /// The relations the wrapper reads: the facts and the supplied inputs of the run.
     read: &'r [&'r Relation],
@@ -277,12 +323,33 @@ struct Provenance<'r, 's> {
     stderr_at_ready: usize,
 }
 
+impl<'r, 's> Provenance<'r, 's> {
+    /// The console of `run`, whose files Soufflé leaves at `left`, explaining the rows that
+    /// `select` chooses; `read` holds the relations the wrapper reads.
+    pub(super) fn new(
+        left: &'r dyn Left,
+        run: &'r Run<'r>,
+        read: &'r [&'r Relation],
+        select: &'s mut dyn FnMut(&Rows) -> Vec<Target>,
+    ) -> Provenance<'r, 's> {
+        Provenance {
+            left,
+            run,
+            read,
+            select,
+            phase: Phase::Starting,
+            printed: Vec::new(),
+            stderr_at_ready: 0,
+        }
+    }
+}
+
 impl Console for Provenance<'_, '_> {
     fn reply(&mut self, reply: Reply) -> Option<String> {
         match (&mut self.phase, reply) {
             (Phase::Starting, Reply::Json(_)) => {
                 // Soufflé answers only once the evaluation ended and wrote its outputs.
-                let stderr = bounded_read(&self.dir.join(evaluation::STDERR));
+                let stderr = self.left.printed(evaluation::STDERR);
                 self.stderr_at_ready = stderr.len();
                 let finished = Exit {
                     success: true,
@@ -290,7 +357,7 @@ impl Console for Provenance<'_, '_> {
                 };
                 let limits = self.run.limits;
                 let rows = evaluation::interpret(self.run.program, finished, &[], &stderr, limits)
-                    .and_then(|()| read_rows(self.dir, self.run));
+                    .and_then(|()| read_rows(self.left, self.run));
                 match rows {
                     Err(fault) => {
                         self.phase = Phase::Failed(fault);
@@ -333,8 +400,8 @@ impl Console for Provenance<'_, '_> {
 impl Provenance<'_, '_> {
     /// The rows and explanations once Soufflé ended as `exit` says, or the fault that left the
     /// evaluation without rows.
-    fn finish(self, exit: Exit) -> Result<Explained, Fault> {
-        let stderr = bounded_read(&self.dir.join(evaluation::STDERR));
+    pub(super) fn finish(self, exit: Exit) -> Result<Explained, Fault> {
+        let stderr = self.left.printed(evaluation::STDERR);
         let limits = self.run.limits;
         match self.phase {
             Phase::Failed(fault) => Err(fault),

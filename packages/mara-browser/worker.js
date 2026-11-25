@@ -6,6 +6,12 @@
 // A call and its answer are frames in the module's memory (ADR-RAW-WASM-MODULE): a JSON header's
 // length as a 32-bit little-endian number, the header, then the bytes of the files it carries,
 // which the header names by `at` and `length`.
+//
+// A request that evaluates programs is answered by passes (DES-RULE-EXECUTION): the module
+// answers the runs of Soufflé it waits for, this worker makes each in Soufflé's worker, one at a
+// time, and supplies what they left with the call `ran`, until the module answers the result.
+// Soufflé's worker holds nothing of the workspace: at a run's time limit this worker terminates
+// it and starts another for the next run.
 
 const moduleUrl = new URL("./mara.wasm", import.meta.url);
 const encoder = new TextEncoder();
@@ -47,6 +53,94 @@ loaded.catch(() => {});
 
 // Set once the module trapped: its memory may be inconsistent, so it answers no other call.
 let stopped;
+
+const souffleWorkerUrl = new URL("./souffle-worker.js", import.meta.url);
+
+// Soufflé's worker, `{ worker, loaded }`, started when a run needs it; `loaded` settles with
+// `{ ready }` or `{ failed }`.
+let souffle;
+
+function startSouffle() {
+  const worker = new Worker(souffleWorkerUrl, { type: "module" });
+  const loaded = new Promise((resolve) => {
+    worker.onmessage = ({ data }) => resolve(data);
+    worker.onerror = (event) => {
+      event.preventDefault();
+      resolve({ failed: `Soufflé's worker ${souffleWorkerUrl} failed: ${event.message}` });
+    };
+  });
+  return { worker, loaded };
+}
+
+function endSouffle() {
+  souffle?.worker.terminate();
+  souffle = undefined;
+}
+
+// Makes `run`, one of the runs the module waits for, with its files' bytes in `bytes`, in
+// Soufflé's worker; resolves with what it left. A module that could not be loaded is a fault of
+// each run, and so is a worker that failed; another run starts another worker.
+async function make(run, bytes) {
+  const part = ({ at, length }) => bytes.slice(at, at + length);
+  souffle ??= startSouffle();
+  const { worker, loaded } = souffle;
+  const state = await loaded;
+  if (state.failed) {
+    endSouffle();
+    return { id: run.id, fault: state.failed };
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      endSouffle();
+      resolve({ id: run.id, limit: "time" });
+    }, run.time_limit_ms);
+    worker.onmessage = ({ data }) => {
+      clearTimeout(timer);
+      resolve(data.fault ? { id: run.id, fault: data.fault } : { id: run.id, ...data.ran });
+    };
+    worker.onerror = (event) => {
+      event.preventDefault();
+      clearTimeout(timer);
+      endSouffle();
+      resolve({ id: run.id, fault: `Soufflé's worker failed: ${event.message}` });
+    };
+    worker.postMessage({
+      arguments: run.arguments,
+      files: run.files.map((file) => ({ path: file.path, contents: part(file) })),
+      stdin: run.stdin === null ? null : part(run.stdin),
+      output_bytes: run.output_bytes,
+      stdout_bytes: run.stdout_bytes,
+      stderr_bytes: run.stderr_bytes,
+    });
+  });
+}
+
+// The call `ran` that supplies what each of `made` left.
+function ran(made) {
+  const files = [];
+  let at = 0;
+  const place = (bytes) => {
+    if (bytes === undefined) {
+      return null;
+    }
+    files.push(bytes);
+    const placed = { at, length: bytes.length };
+    at += bytes.length;
+    return placed;
+  };
+  const runs = made.map((run) => ({
+    id: run.id,
+    status: run.status ?? null,
+    limit: run.limit ?? null,
+    fault: run.fault ?? null,
+    stdout: place(run.stdout),
+    stdout_length: run.stdout_length ?? 0,
+    stderr: place(run.stderr),
+    stderr_at_stdout: run.stderr_at_stdout ?? 0,
+    outputs: (run.outputs ?? []).map(({ path, contents }) => ({ path, ...place(contents) })),
+  }));
+  return { text: encoder.encode(JSON.stringify({ call: "ran", runs })), files };
+}
 
 // A refused call that the module never saw, in the form of the module's own refusals.
 function refused(message) {
@@ -144,12 +238,22 @@ self.onmessage = ({ data }) => {
         self.postMessage({ id, answer: refused(`the call cannot be sent: ${error.message}`) });
         return;
       }
-      let answer;
-      try {
-        answer = call(exports, text, files);
-      } catch (error) {
-        stopped = new Error(`Mara's WebAssembly module stopped: ${error.message}`);
-        throw stopped;
+      const guarded = (text, files) => {
+        try {
+          return call(exports, text, files);
+        } catch (error) {
+          stopped = new Error(`Mara's WebAssembly module stopped: ${error.message}`);
+          throw stopped;
+        }
+      };
+      let answer = guarded(text, files);
+      while (answer.header.pending) {
+        const made = [];
+        for (const run of answer.header.pending) {
+          made.push(await make(run, answer.files));
+        }
+        const next = ran(made);
+        answer = guarded(next.text, next.files);
       }
       const answered = reply(answer);
       const transfer = (answered.changes ?? [])
