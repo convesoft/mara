@@ -1,0 +1,19 @@
+{
+  "name": "@convesoft/mara-browser",
+  "private": true,
+  "description": "Mara's document operations in a browser, on supplied files, in a dedicated worker",
+  "license": "MIT OR Apache-2.0",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "worker.js",
+    "mara.wasm"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  }
+}

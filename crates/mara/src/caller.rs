@@ -11,8 +11,11 @@
 //! and to the request.
 
 use std::cell::RefCell;
-use std::fs::{self, File, OpenOptions, Permissions};
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::{self, Permissions};
+use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
+#[cfg(not(target_arch = "wasm32"))]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
@@ -27,6 +30,7 @@ pub struct Caller {
 
 impl Caller {
     /// The values of this process.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn of_this_process() -> Caller {
         Caller {
             umask: this_umask(),
@@ -53,7 +57,7 @@ fn umask_in(status: &[u8]) -> Option<u32> {
     u32::from_str_radix(std::str::from_utf8(field).ok()?.trim(), 8).ok()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_arch = "wasm32")))]
 fn this_umask() -> u32 {
     umask_by_setting()
 }
@@ -62,6 +66,7 @@ fn this_umask() -> u32 {
 /// macOS: set and set back. Race: a file another thread of this process creates between the two
 /// calls gets mode bits less 0o077 instead of less the umask, and two threads that read it so at
 /// once can leave 0o077 set.
+#[cfg(not(target_arch = "wasm32"))]
 fn umask_by_setting() -> u32 {
     // SAFETY: umask takes no pointer and cannot fail.
     let umask = unsafe {
@@ -108,6 +113,7 @@ pub fn temp_dir() -> PathBuf {
 /// Gives what was just created at `path` the mode `requested` less the client's umask, as
 /// creating it in the client's process would have: the daemon's own umask may have taken
 /// other bits.
+#[cfg(not(target_arch = "wasm32"))]
 fn restore(path: &Path, requested: u32, umask: Option<u32>) -> io::Result<()> {
     match umask {
         Some(umask) => fs::set_permissions(path, Permissions::from_mode(requested & !umask)),
@@ -116,6 +122,7 @@ fn restore(path: &Path, requested: u32, umask: Option<u32>) -> io::Result<()> {
 }
 
 /// Creates the directory `path` with the mode direct mode would give it: 0777 less the umask.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn create_dir(path: &Path) -> io::Result<()> {
     let umask = umask();
     let mode = 0o777 & !umask.unwrap_or(0);
@@ -125,6 +132,7 @@ pub fn create_dir(path: &Path) -> io::Result<()> {
 
 /// Creates the file `path`, which must not exist, for writing, with the mode direct mode would
 /// give it: 0666 less the umask.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn create_new(path: &Path) -> io::Result<File> {
     let umask = umask();
     let file = OpenOptions::new()
@@ -155,7 +163,8 @@ pub fn write(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
 
 /// A new private directory, named with `prefix`, in the client's temporary directory, removed
 /// when the value is dropped: mode 0700 less the umask, as in direct mode.
-pub fn tempdir(prefix: &str) -> io::Result<tempfile::TempDir> {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn tempdir(prefix: &str) -> io::Result<TempDir> {
     let umask = umask();
     let dir = tempfile::Builder::new()
         .prefix(prefix)
@@ -163,6 +172,44 @@ pub fn tempdir(prefix: &str) -> io::Result<tempfile::TempDir> {
         .tempdir_in(temp_dir())?;
     restore(dir.path(), 0o700, umask)?;
     Ok(dir)
+}
+
+/// A private directory removed when dropped ([`tempdir`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub type TempDir = tempfile::TempDir;
+
+// A browser workspace has no operating system to create files on: its writes go through
+// `crate::system`, and the functions below, which only an evaluation calls, report that.
+
+/// The directory `path`, which a browser workspace cannot create.
+#[cfg(target_arch = "wasm32")]
+pub fn create_dir(path: &Path) -> io::Result<()> {
+    std::fs::create_dir(path)
+}
+
+/// The file `path`, which a browser workspace cannot create.
+#[cfg(target_arch = "wasm32")]
+pub fn create_new(path: &Path) -> io::Result<File> {
+    OpenOptions::new().write(true).create_new(true).open(path)
+}
+
+/// A private directory, which a browser workspace cannot create.
+#[cfg(target_arch = "wasm32")]
+pub fn tempdir(prefix: &str) -> io::Result<TempDir> {
+    let message = format!("a browser workspace has no temporary directory for {prefix}");
+    Err(io::Error::new(io::ErrorKind::Unsupported, message))
+}
+
+/// A private directory, of which a browser workspace has none.
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+pub struct TempDir(std::convert::Infallible);
+
+#[cfg(target_arch = "wasm32")]
+impl TempDir {
+    pub fn path(&self) -> &Path {
+        match self.0 {}
+    }
 }
 
 #[cfg(test)]

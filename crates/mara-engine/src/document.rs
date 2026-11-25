@@ -320,6 +320,8 @@ pub fn parse(bytes: &[u8], work: &mut WorkCounts) -> Document {
 }
 
 /// [`parse`], refusing a document of more than `limit` bytes, at most [`MAX_DOCUMENT_BYTES`].
+// Where `usize` has 32 bits, as in WebAssembly, `MAX_DOCUMENT_BYTES` is its maximum.
+#[cfg_attr(target_pointer_width = "32", allow(clippy::unnecessary_min_or_max))]
 fn parse_within(bytes: &[u8], limit: usize, work: &mut WorkCounts) -> Document {
     work.parses += 1;
     if bytes.len() > limit.min(MAX_DOCUMENT_BYTES) {

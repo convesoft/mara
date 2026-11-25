@@ -1,11 +1,9 @@
 //! The `mara` command line.
 
-mod cli;
-mod debug_stats;
-
 use std::ffi::OsString;
 use std::process::ExitCode;
 
+use mara::{cli, debug_stats};
 use mara_engine::work::WorkCounts;
 
 fn main() -> ExitCode {
