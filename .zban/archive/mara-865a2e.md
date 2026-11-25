@@ -59,3 +59,10 @@ Checks:
 - The Emscripten SDK step is the composite action `.github/actions/emscripten`, shared by CI and Pack dispatcher, so one SHA-256 pin (DES-CI-WORKFLOW).
 - The licence inventory's `cargo metadata` runs without `--offline`, with `--locked` (DES-PACKAGES).
 - `packages/mara-browser/package.json` is the private source folder `mara-browser`, without `files` or `exports`; the browser file list lives in `packages.mjs`.
+
+## Fix round 1
+
+- `pack.mjs dispatcher` refuses a Cargo target directory other than `target/` (mara-6z7bjs), where Nx restores `mara-wasm:build`'s module, as `copy-module.mjs` does; a test checks that it writes no tarball (DES-RELEASE-WORKFLOW).
+- The Node-library case reads each `/proc/self/maps` pathname after its five fixed columns, so spaces in it are kept (`mappedPath` in `verify-hosts.mjs`, `tests/verify-hosts.test.mjs`); a run with two spaces in `TMPDIR` passes the case.
+- Docs: DES-PACKAGES records the licence inventory's `cargo metadata --locked` without `--offline` and `browserFiles` as the browser file list; ADR-ONE-MAIN-PACKAGE says `0.4.0-rc.2` publishes the three packages of `0.4.0-rc.1`; VER-INSTALL-WITHOUT-TOOLCHAIN names each case's entry point.
+- `pnpm run checks` (`berth --exclusive`, fresh `NX_CACHE_DIRECTORY`) on c36590a: exit 0; workspace run 859 passed, 0 failed, 14 skipped (229 + 630); performance run 32 passed, 2 skipped; `mara-npm:test` 118 passed; `project validate` 0 errors, 0 warnings. Local `verify-install` on x64 tarballs: every case but the three `GLIBC_` analyses of this machine's newer glibc.
