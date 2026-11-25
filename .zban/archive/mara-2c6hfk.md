@@ -1,6 +1,6 @@
 ---
 title: The npm name of the browser package, and where the Node library is imported from
-status: todo
+status: done
 type: task
 tags:
   - maintainer
@@ -8,6 +8,7 @@ tags:
 related:
   - mara-9a1zjp
 created_at: 2026-11-25T10:18:35Z
+closed_at: 2026-11-25T15:24:52Z
 ---
 
 Goal: the maintainer names the browser package of `0.4.0-rc.2` before anything packs or publishes it, and confirms where a Node application imports the library from.
@@ -24,4 +25,14 @@ Context: `DES-PACKAGES` (docs/distribution.mara.md) lists "the browser package, 
 
 Until answered: workers build under the recommended names and publish nothing. The issue that packs the browser package waits for this answer.
 
-- [ ] The maintainer has answered both
+- [x] The maintainer has answered both
+
+## Decision (maintainer, 2026-11-25)
+
+Single main package: `@convesoft/mara` carries all platform-independent parts, matching 0.3.0 (`d7f0e73`):
+- CLI dispatcher (`bin/mara.cjs`)
+- Node library at `.` (`import … from "@convesoft/mara"`), loading `bin/mara.node` from the installed native package
+- Browser workspace + `connectDaemon` + WASM modules (`mara.wasm`, `souffle.wasm`, `souffle.js`, workers) at `./browser` (`import … from "@convesoft/mara/browser"`)
+- `docs/`, `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, `LICENSE-SOUFFLE`, and `THIRD-PARTY-LICENSES` for `mara.wasm` (`(MIT OR Apache-2.0) AND UPL-1.0`)
+
+No separate `@convesoft/mara-browser` npm package is created; `0.4.0-rc.2` publishes the same three packages as `0.4.0-rc.1`.
