@@ -48,3 +48,11 @@ Checks: `pnpm run checks` with a fresh Nx cache after the review round and the m
 - After review: the manifest's `files` names the folder `docs`, as nx-rust's package does, replacing one entry per page, which npm read as a pattern (ADR-BUNDLED-DOCS).
 - After review: tar's listings are read in the C locale and decoded, which works with GNU tar and bsdtar alike (DES-PACKAGES).
 - After review: a failure of the docs case under `--registry` names the version mismatch when the checkout is at another version.
+
+## Fix round 2
+
+- `fromTarListing` is strict: a backslash before anything but tar's C escapes, `\\` or three octal digits, an octal value above `\377`, and bytes that are not UTF-8 (`TextDecoder` with `fatal: true`) each throw, naming the listed line; `tarballProblems` reports that as a problem instead of guessing a name. Tests: four unit cases of `fromTarListing` and a tarball with a member named by the byte 0xe9, whose problem names tar's line `package/docs/latin\351`; each fails when its guard is removed. DES-PACKAGES says that such a name fails the check.
+- The packaging tests start every child (the scripts through `run`, npm, git and tar) in the test's temporary directory. Probe: from a directory whose project `.npmrc` sets `dry-run=true`, the earlier `pack.test.mjs` failed 3 of 5 tests and the new one passes all 6.
+- The `--registry` hint of `verify-install.mjs` reads the checkout's version only after the docs case failed, and leaves the hint out when `cargo metadata` fails. Test: a dispatcher of 0.0.1 served by the registry stub, verified from a checkout at 0.0.2 with another page, names both versions; it fails without the hint.
+- Merged `origin/main` with pull requests #85 and #87: the dispatcher is 36 files, 174.2 kB packed, 549.5 kB unpacked.
+- Checks: `pnpm run checks` with a fresh Nx cache: 988 passed, 0 failed, 16 skipped (nextest 229 and 621 passed, 14 skipped; `mara-npm:test` 106 passed; performance 32 passed, 2 skipped); `project validate` 0 errors, 0 warnings.
