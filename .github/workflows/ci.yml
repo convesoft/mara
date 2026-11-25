@@ -65,13 +65,13 @@ jobs:
 
       # Soufflé's WebAssembly module, likewise from its own entry: scripts/build-souffle-wasm.sh
       # keeps an existing module that passes its smoke run. The script pins the Emscripten SDK, and
-      # the patch and the smoke run are its inputs.
+      # the patch, the smoke run and the output-size guard that the smoke run checks are its inputs.
       - name: Restore Soufflé's WebAssembly module
         id: souffle-wasm
         uses: actions/cache/restore@v6
         with:
           path: target/souffle-2.5-wasm
-          key: souffle-wasm-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-souffle-wasm.sh', 'scripts/souffle-emscripten.patch', 'scripts/souffle-wasm-smoke.mjs') }}
+          key: souffle-wasm-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-souffle-wasm.sh', 'scripts/souffle-emscripten.patch', 'scripts/souffle-wasm-smoke.mjs', 'packages/mara-browser/output-limit.js') }}
 
       # The Emscripten SDK of the version that scripts/build-souffle-wasm.sh pins, only to build
       # the module: emsdk's archive of that tag, checked against its SHA-256, which installs the

@@ -5,6 +5,8 @@
 // a fresh instance on an in-memory filesystem, writes the run's files into its private directory
 // `/run`, runs `main` with the run's arguments and standard input, and posts what the run left.
 
+import { Stopped, limitWrites } from "./output-limit.js";
+
 const glueUrl = new URL("./souffle.js", import.meta.url);
 const moduleUrl = new URL("./souffle.wasm", import.meta.url);
 
@@ -75,9 +77,6 @@ class Printed {
   }
 }
 
-// Thrown into the module where the system would end Soufflé's process: at the output-size limit.
-class Stopped extends Error {}
-
 // Runs `run` in a fresh instance of the compiled module.
 async function evaluate({ factory, compiled }, run) {
   const stdout = new Printed(run.stdout_bytes);
@@ -134,15 +133,9 @@ async function evaluate({ factory, compiled }, run) {
         FS.chdir("/run");
         // A write that would take a file of the private directory past the output-size limit
         // ends the run, as the system ends Soufflé's process natively.
-        const write = FS.write;
-        FS.write = (stream, buffer, offset, length, position, canOwn) => {
-          const at = position ?? stream.position;
-          if (stream.path?.startsWith("/run/") && at + length > run.output_bytes) {
-            limit = "output";
-            throw new Stopped();
-          }
-          return write(stream, buffer, offset, length, position, canOwn);
-        };
+        limitWrites(FS, "/run/", run.output_bytes, () => {
+          limit = "output";
+        });
       },
     ],
   };
@@ -165,7 +158,14 @@ async function evaluate({ factory, compiled }, run) {
       if (name === "." || name === "..") {
         continue;
       }
-      outputs.push({ path: `out/${name}`, contents: instance.FS.readFile(`/run/out/${name}`) });
+      const path = `/run/out/${name}`;
+      // Also checked after the run, should a write have passed `limitWrites`.
+      if (instance.FS.stat(path).size > run.output_bytes) {
+        limit = "output";
+        outputs.length = 0;
+        break;
+      }
+      outputs.push({ path: `out/${name}`, contents: instance.FS.readFile(path) });
     }
   } catch {
     // An instance that stopped before its filesystem existed wrote no output.

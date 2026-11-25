@@ -1,9 +1,13 @@
 // The browser row of VER-EVALUATION-TIME-LIMIT (docs/rules/verification.mara.md): at the time
 // limit the workspace's worker terminates Soufflé's worker, which holds nothing of the workspace
 // (DES-RULE-EXECUTION). The workspace keeps every unexported edit, and the next request works,
-// with a program too; so after a module that aborts, whose worker goes on.
+// with a program too; so after a module that aborts, whose worker goes on. The time limit also
+// stops a load of Soufflé's module that does not end, and a Soufflé worker that cannot be
+// started is a fault of each run.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { after, before, describe, test } from "node:test";
 
@@ -111,5 +115,59 @@ describe("an evaluation stopped in Soufflé's worker loses nothing of the worksp
       "one Soufflé worker ran both evaluations",
     );
     await workspace.sameFiles();
+  });
+
+  test("a load of Soufflé's module that does not end stops at the time limit; the workspace goes on", async () => {
+    // The server never answers the module: its worker waits for it.
+    server.answer("/package/souffle.wasm", () => {});
+    const fresh = await openPage(browser, server);
+    try {
+      const workspace = await Compared.create(fresh, "programs");
+      await edit(workspace);
+      await declare(workspace, admitted(""), bothSeverities("p.dl", "bad"), { timeLimit: 1 });
+      const before = await workspace.export();
+      const started = Date.now();
+      const fault = onlyFault(await workspace.browser("project_validate"));
+      const elapsed = Date.now() - started;
+      assert.ok(elapsed >= 1000 && elapsed < 10_000, `${elapsed} ms`);
+      assert.deepEqual([fault.path, fault.line], [".mara/config.toml", PROGRAMS_LINE]);
+      assert.match(fault.message, /time limit of 1 s/);
+      assert.deepEqual(await workspace.export(), before);
+      server.answer("/package/souffle.wasm", null);
+      const validated = await workspace.request("project_validate");
+      assert.equal(validated.diagnostics.filter((d) => d.code === "as-error").length, 2, JSON.stringify(validated));
+      await workspace.sameFiles();
+    } finally {
+      server.answer("/package/souffle.wasm", null);
+      await fresh.close();
+    }
+  });
+
+  test("a Soufflé worker that cannot be started is a fault of each run; the workspace goes on", async () => {
+    // The workspace's worker may start no worker: its own policy forbids them.
+    server.answer("/package/worker.js", (response) => {
+      response.writeHead(200, {
+        "content-type": "text/javascript; charset=utf-8",
+        "content-security-policy": "worker-src 'none'",
+      });
+      response.end(readFileSync(join(process.env.MARA_BROWSER_PACKAGE, "worker.js")));
+    });
+    const fresh = await openPage(browser, server);
+    try {
+      const workspace = await Compared.create(fresh, "programs");
+      await edit(workspace);
+      await declare(workspace, admitted(""), bothSeverities("p.dl", "bad"));
+      const before = await workspace.export();
+      const fault = onlyFault(await workspace.browser("project_validate"));
+      assert.deepEqual([fault.path, fault.line], [".mara/config.toml", PROGRAMS_LINE]);
+      assert.match(fault.message, /Soufflé's worker/);
+      const failed = await workspace.browser("query_execute", { name: "as-query" });
+      assert.equal(failed.error?.code, "program-failed", JSON.stringify(failed));
+      assert.deepEqual(await workspace.export(), before);
+      await workspace.request("item_list");
+    } finally {
+      server.answer("/package/worker.js", null);
+      await fresh.close();
+    }
   });
 });

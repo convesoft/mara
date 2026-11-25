@@ -3,7 +3,7 @@
 //! the inputs a command line supplies (DES-REQUEST-INPUTS in `docs/rules/index.mara.md`), and the
 //! evaluation by the pinned Soufflé (DES-RULE-EXECUTION in `docs/rules/evaluation.mara.md`).
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 pub mod browser;
 mod consumer;
 mod explain;

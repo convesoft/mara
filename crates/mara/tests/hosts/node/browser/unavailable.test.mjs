@@ -19,7 +19,10 @@ implemented(m, p, l) :- code_link("implements", m, p, l, _, _).
 
 const CODE_ENTRIES =
   '\n[rules]\nprograms = [".mara/rules/*.dl"]\n\n[queries.implemented]\nprogram = ".mara/rules/code.dl"\n' +
-  'relation = "implemented"\ndescription = "d"\n\n[invariants.unimplemented]\nprogram = ".mara/rules/code.dl"\n' +
+  'relation = "implemented"\ndescription = "d"\n\n[views.implemented-view]\nprogram = ".mara/rules/code.dl"\n' +
+  'relation = "implemented"\ndescription = "d"\n\n[gates.implemented-gate]\nprogram = ".mara/rules/code.dl"\n' +
+  'description = "d"\nsubjects = ["implemented"]\nconditions = ["implemented"]\n\n' +
+  '[invariants.unimplemented]\nprogram = ".mara/rules/code.dl"\n' +
   'relation = "implemented"\nseverity = "warning"\nmessage = "implemented"\n';
 
 /**
@@ -124,6 +127,9 @@ describe("a browser workspace reports what it cannot do as unavailable", { timeo
     for (const [name, args] of [
       ["project_validate", {}],
       ["query_execute", { name: "implemented" }],
+      ["query_view", { name: "implemented-view" }],
+      ["query_gate", { name: "implemented-gate", id: ["REQ-LOGIN", "REQ-AUDIT"] }],
+      ["item_validate", { "id-or-mid": "REQ-LOGIN" }],
       ["query_report", { name: "unimplemented", id: "REQ-LOGIN" }],
     ]) {
       const expected = await workspace.request(name, args, grammarMessages);

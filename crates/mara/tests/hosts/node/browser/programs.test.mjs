@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 
-import { launchBrowser, openPage, requireSouffle, startServer } from "../support/hosts.mjs";
+import { cliStats, launchBrowser, openPage, requireSouffle, startServer } from "../support/hosts.mjs";
 import { PROGRAMS_LINE, admitted, bothSeverities, declare, invariant, mid } from "../support/programs.mjs";
 import { Compared } from "../support/workspace.mjs";
 
@@ -119,6 +119,22 @@ function nodes(proof) {
   return [proof, ...(proof.children ?? []).flatMap(nodes)];
 }
 
+/**
+ * `query report` with `args` in `workspace` and in CLI direct mode, between `project validate`,
+ * and `query gate` with `gate` where given, before and after it, which it must leave as they were
+ * (VER-EXPLANATIONS). Returns the report of CLI direct mode, which `normalize` made alike.
+ */
+async function report(workspace, args, { normalize, gate } = {}) {
+  const outcomes = async () => [
+    await workspace.request("project_validate"),
+    gate ? await workspace.request("query_gate", gate) : null,
+  ];
+  const before = await outcomes();
+  const reported = await workspace.request("query_report", args, normalize);
+  assert.deepEqual(await outcomes(), before, `the report of ${JSON.stringify(args)} changed them`);
+  return reported;
+}
+
 /** Every row of a report has a proof. */
 function explained(report) {
   assert.ok(report.rows.length > 0, JSON.stringify(report));
@@ -168,11 +184,10 @@ describe("programs in a browser workspace give the rows and proofs of CLI direct
   test("VER-EXPLANATIONS: rows of invariants and gates are explained with the proofs of CLI direct mode", async () => {
     const workspace = await Compared.create(page, "programs");
     await declare(workspace, JOIN, JOIN_ENTRIES);
-    explained(await workspace.request("query_report", { name: "joined", id: "REQ-A" }));
     const failing = { name: "release", id: "REQ-A", input: { result: [[mid(1), "fail"]] } };
-    explained(await workspace.request("query_report", failing));
-    await workspace.request("query_gate", { ...failing, id: ["REQ-A"] });
-    await workspace.request("project_validate");
+    const gate = { ...failing, id: ["REQ-A"] };
+    explained(await report(workspace, { name: "joined", id: "REQ-A" }, { gate }));
+    explained(await report(workspace, failing, { gate }));
 
     const entries = ["lonely", "unlinked", "placed", "component", "connected"];
     await declare(workspace, NEGATION, entries.map((name) => invariant(name, "p.dl", name, "warning")).join(""));
@@ -182,16 +197,19 @@ describe("programs in a browser workspace give the rows and proofs of CLI direct
       ["component", "NEED-ONE"],
       ["connected", "NEED-ONE"],
     ]) {
-      explained(await workspace.request("query_report", { name, id }));
+      explained(await report(workspace, { name, id }));
     }
-    // Soufflé's two builds number the record of this proof differently, #3 natively and #2 in
-    // WebAssembly, on the same files and commands: the number is masked until mara-ecnpg6
-    // decides.
+    // The same proofs but for the internal number of a record in a step's atom, which Soufflé's
+    // two builds give differently (VER-EXPLANATIONS, EVD-SOUFFLE-PROGRAM-REACH; mara-ecnpg6).
     const records = (value) => JSON.parse(JSON.stringify(value).replace(/record #\d+/g, "record #…"));
-    explained(await workspace.request("query_report", { name: "placed", id: "NEED-ONE" }, records));
+    explained(await report(workspace, { name: "placed", id: "NEED-ONE" }, { normalize: records }));
 
     await declare(workspace, `.include "mara.dl"\n.decl early(m: Mid)\nearly(m) :- item(m, _, i, _, _, _), i < "Z".\n`, invariant("early", "p.dl", "early", "warning"));
-    explained(await workspace.request("query_report", { name: "early", id: "REQ-A" }));
+    const early = await report(workspace, { name: "early", id: "REQ-A" });
+    explained(early);
+    // No constraint leaf: the proof's step has the one `item` atom of its rule.
+    const children = early.rows[0].proof.children;
+    assert.deepEqual(children.map((child) => child.relation), ["item"], JSON.stringify(early));
 
     const release =
       '\n[gates.release]\nprogram = ".mara/rules/p.dl"\ndescription = "d"\n' +
@@ -204,19 +222,20 @@ describe("programs in a browser workspace give the rows and proofs of CLI direct
       [mid(1), "plain"],
     ];
     const input = { result: results, score: [[mid(1), -1]] };
-    const unwritable = await workspace.request("query_report", { name: "release", id: "REQ-A", input });
+    const scored = { name: "release", id: ["REQ-A"], input };
+    const unwritable = await report(workspace, { name: "release", id: "REQ-A", input }, { gate: scored });
     assert.equal(unwritable.rows.filter((row) => row.proof).length, 1, JSON.stringify(unwritable));
     const document = workspace.supplied.files.get("docs/a.mara.md").toString("utf8");
     await workspace.write("docs/a.mara.md", document.replace("### Héllo", '### Say "hi"'));
-    const quoted = await workspace.request("query_report", { name: "titled", id: "REQ-B" });
+    const quoted = await report(workspace, { name: "titled", id: "REQ-B" }, { gate: scored });
     assert.match(quoted.rows[0].unexplained, /quote/);
     await workspace.write("docs/a.mara.md", document);
 
     const aggregates = invariant("counted", "p.dl", "counted", "warning") + invariant("crowded", "p.dl", "crowded", "warning");
     await declare(workspace, AGGREGATE, aggregates);
     for (const name of ["counted", "crowded"]) {
-      const report = await workspace.request("query_report", { name, id: "NEED-ONE" });
-      assert.ok(report.rows.length > 0 && report.rows.every((row) => row.unexplained), JSON.stringify(report));
+      const counted = await report(workspace, { name, id: "NEED-ONE" });
+      assert.ok(counted.rows.length > 0 && counted.rows.every((row) => row.unexplained), JSON.stringify(counted));
     }
   });
 
@@ -298,6 +317,23 @@ deep(a, b) :- above(a, b), item(a, _, "C0", _, _, _), item(b, _, "C8", _, _, _).
     assert.equal(lenient.diagnostics.length, 4, JSON.stringify(lenient));
     await workspace.request("query_execute", { name: "as-query" });
     await workspace.request("query_gate", { name: "as-gate", id: ["REQ-A", "NEED-ONE"] });
+  });
+
+  test("two declared programs with the same text are two runs, as in CLI direct mode", async () => {
+    const workspace = await Compared.create(page, "programs");
+    for (const name of ["a.dl", "b.dl"]) {
+      await workspace.write(`.mara/rules/${name}`, ".decl ready(n: number)\nready(1).\n");
+    }
+    await workspace.request("project_validate");
+    const ours = await workspace.browser("project_validate", {}, { debugStats: true });
+    assert.equal(ours.stats.program_runs, 0, "the second validation reads the kept outcomes");
+    const fresh = await Compared.create(page, "programs");
+    for (const name of ["a.dl", "b.dl"]) {
+      await fresh.write(`.mara/rules/${name}`, ".decl ready(n: number)\nready(1).\n");
+    }
+    const first = await fresh.browser("project_validate", {}, { debugStats: true });
+    assert.equal(first.stats.program_runs, 2, JSON.stringify(first));
+    assert.equal(cliStats(fresh.root, "project_validate").program_runs, 2);
   });
 
   test("VER-PROGRAM-REACH-CASES: integer arithmetic at the limits of 32 bits gives the rows of CLI direct mode", async () => {

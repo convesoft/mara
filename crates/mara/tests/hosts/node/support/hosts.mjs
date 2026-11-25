@@ -3,7 +3,7 @@
 // the test's directory, and a page that holds a browser workspace. `hosts/node.rs` starts each
 // module with the environment that `env` reads.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, relative, sep } from "node:path";
@@ -154,6 +154,21 @@ export function cli(root, name, args = {}) {
     ({ stdout, status } = error);
   }
   return { status, json: JSON.parse(stdout) };
+}
+
+/**
+ * The stats line of the MCP tool call `name` with `args` run as `mara --no-daemon --debug-stats`
+ * in `root`, in the environment of [`cli`] (DES-PERFORMANCE-HARNESS).
+ */
+export function cliStats(root, name, args = {}) {
+  const argv = ["--no-daemon", "--debug-stats", "--format", "json", ...cliArguments(name, args)];
+  const ran = spawnSync(maraBin, argv, {
+    cwd: root,
+    env: { MARA_NO_DAEMON: "1", HOME: join(testDir, "home"), XDG_RUNTIME_DIR: join(testDir, "run") },
+    encoding: "utf8",
+  });
+  const line = ran.stderr.trim().split("\n").at(-1);
+  return JSON.parse(line);
 }
 
 /** The MID of each anchor line, by `<path>:<line>`. */

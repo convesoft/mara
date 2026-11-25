@@ -78,39 +78,66 @@ function endSouffle() {
 }
 
 // Makes `run`, one of the runs the module waits for, with its files' bytes in `bytes`, in
-// Soufflé's worker; resolves with what it left. A module that could not be loaded is a fault of
-// each run, and so is a worker that failed; another run starts another worker.
-async function make(run, bytes) {
+// Soufflé's worker; resolves with what it left. The time limit counts from here, so that a worker
+// that cannot load its module in time is terminated too. A worker that cannot be started, a
+// module that could not be loaded and a worker that failed are each a fault of the run; another
+// run starts another worker.
+function make(run, bytes) {
   const part = ({ at, length }) => bytes.slice(at, at + length);
-  souffle ??= startSouffle();
-  const { worker, loaded } = souffle;
-  const state = await loaded;
-  if (state.failed) {
-    endSouffle();
-    return { id: run.id, fault: state.failed };
-  }
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
+    let settled = false;
+    let timer;
+    const settle = (made) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(made);
+      }
+    };
+    const fault = (message) => {
+      if (!settled) {
+        endSouffle();
+        settle({ id: run.id, fault: message });
+      }
+    };
+    timer = setTimeout(() => {
       endSouffle();
-      resolve({ id: run.id, limit: "time" });
+      settle({ id: run.id, limit: "time" });
     }, run.time_limit_ms);
-    worker.onmessage = ({ data }) => {
-      clearTimeout(timer);
-      resolve(data.fault ? { id: run.id, fault: data.fault } : { id: run.id, ...data.ran });
-    };
-    worker.onerror = (event) => {
-      event.preventDefault();
-      clearTimeout(timer);
-      endSouffle();
-      resolve({ id: run.id, fault: `Soufflé's worker failed: ${event.message}` });
-    };
-    worker.postMessage({
-      arguments: run.arguments,
-      files: run.files.map((file) => ({ path: file.path, contents: part(file) })),
-      stdin: run.stdin === null ? null : part(run.stdin),
-      output_bytes: run.output_bytes,
-      stdout_bytes: run.stdout_bytes,
-      stderr_bytes: run.stderr_bytes,
+    try {
+      souffle ??= startSouffle();
+    } catch (error) {
+      fault(`cannot start Soufflé's worker ${souffleWorkerUrl}: ${error.message}`);
+      return;
+    }
+    const { worker, loaded } = souffle;
+    loaded.then((state) => {
+      if (settled) {
+        return;
+      }
+      if (state.failed) {
+        fault(state.failed);
+        return;
+      }
+      worker.onmessage = ({ data }) => {
+        settle(data.fault ? { id: run.id, fault: data.fault } : { id: run.id, ...data.ran });
+      };
+      worker.onerror = (event) => {
+        event.preventDefault();
+        fault(`Soufflé's worker failed: ${event.message}`);
+      };
+      try {
+        worker.postMessage({
+          arguments: run.arguments,
+          files: run.files.map((file) => ({ path: file.path, contents: part(file) })),
+          stdin: run.stdin === null ? null : part(run.stdin),
+          output_bytes: run.output_bytes,
+          stdout_bytes: run.stdout_bytes,
+          stderr_bytes: run.stderr_bytes,
+        });
+      } catch (error) {
+        fault(`cannot send the run to Soufflé's worker: ${error.message}`);
+      }
     });
   });
 }

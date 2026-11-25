@@ -15,11 +15,13 @@
 //! command so far and `exit`, and the console reads its replies from the start: Soufflé
 //! evaluates a program alike each time. A round that wants another command asks for the next
 //! round. A round stopped at the time limit printed nothing that the worker kept: the round
-//! before it, which ended on `exit`, holds every reply but the one it waited for.
+//! before it, which ended on `exit`, holds every reply but the one it waited for. So a run keeps
+//! its last two rounds and drops older ones, whose outputs may be large.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io;
+use std::rc::Rc;
 
 use mara_engine::evaluation::explain::{EXIT, START, Target};
 use mara_engine::evaluation::{self, Exit, Fault, Limit, Limits, Rows};
@@ -77,13 +79,17 @@ pub struct Ran {
 }
 
 /// A supplied run, with the commands its standard input held in provenance mode.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct Round {
     ran: Ran,
     commands: Vec<String>,
     /// Whether a pass counted it as a program run: each pass reads it again.
-    counted: bool,
+    counted: Cell<bool>,
 }
+
+/// How many supplied rounds a run keeps: the last, and the one before it for a last round
+/// stopped at the time limit.
+const KEPT_ROUNDS: usize = 2;
 
 #[derive(Default)]
 struct State {
@@ -92,8 +98,8 @@ struct State {
     /// The commands of each run recorded in provenance mode, for its supplied outcome.
     commands: HashMap<Hash, Vec<String>>,
     /// The supplied runs of the request by their identity, in order: in provenance mode one per
-    /// round.
-    rounds: HashMap<Hash, Vec<Round>>,
+    /// round, at most [`KEPT_ROUNDS`].
+    rounds: HashMap<Hash, VecDeque<Rc<Round>>>,
 }
 
 thread_local! {
@@ -111,12 +117,16 @@ pub fn supply(id: Hash, ran: Ran) {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         let commands = state.commands.get(&id).cloned().unwrap_or_default();
-        let round = Round {
+        let round = Rc::new(Round {
             ran,
             commands,
-            counted: false,
-        };
-        state.rounds.entry(id).or_default().push(round);
+            counted: Cell::new(false),
+        });
+        let rounds = state.rounds.entry(id).or_default();
+        rounds.push_back(round);
+        while rounds.len() > KEPT_ROUNDS {
+            rounds.pop_front();
+        }
     });
 }
 
@@ -131,14 +141,20 @@ fn waiting() -> Fault {
     Fault::Host("the evaluation waits for Soufflé's worker".to_owned())
 }
 
-/// The identity of a run: its mode, its private directory's files and its limits.
-fn identity(provenance: bool, files: &[(String, Vec<u8>)], limits: Limits) -> Hash {
+/// The identity of a run of `run`: its mode, the project path of each file of its program, as
+/// an evaluation's key holds them, so that two declared programs alike are two runs, its private
+/// directory's files and its limits.
+fn identity(provenance: bool, run: &Run, files: &[(String, Vec<u8>)]) -> Hash {
+    let limits = run.limits;
     let mut bytes = Vec::new();
     let mut add = |part: &[u8]| {
         bytes.extend_from_slice(&(part.len() as u64).to_le_bytes());
         bytes.extend_from_slice(part);
     };
     add(&[u8::from(provenance)]);
+    for path in &run.program.files {
+        add(path.as_bytes());
+    }
     for (name, contents) in files {
         add(name.as_bytes());
         add(contents);
@@ -180,19 +196,19 @@ fn record(id: Hash, files: Vec<(String, Vec<u8>)>, commands: Option<Vec<String>>
     });
 }
 
-/// The supplied rounds of the run `id`, counting the last one as a program run unless a pass
-/// already did: every run the worker made counts once.
-fn rounds(id: Hash, work: &mut WorkCounts) -> Vec<Round> {
+/// The kept rounds of the run `id`, oldest first, counting the last one as a program run unless
+/// a pass already did: every run the worker made counts once.
+fn rounds(id: Hash, work: &mut WorkCounts) -> Vec<Rc<Round>> {
     STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let Some(rounds) = state.rounds.get_mut(&id) else {
+        let state = state.borrow();
+        let Some(rounds) = state.rounds.get(&id) else {
             return Vec::new();
         };
-        if let Some(last) = rounds.last_mut().filter(|last| !last.counted) {
-            last.counted = true;
+        if let Some(last) = rounds.back().filter(|last| !last.counted.get()) {
+            last.counted.set(true);
             work.program_runs += 1;
         }
-        rounds.clone()
+        rounds.iter().cloned().collect()
     })
 }
 
@@ -241,7 +257,7 @@ impl Left for Supplied<'_> {
 /// run for the run made.
 pub fn evaluate(run: &Run, work: &mut WorkCounts) -> Result<Rows, Fault> {
     let files = files(run);
-    let id = identity(false, &files, run.limits);
+    let id = identity(false, run, &files);
     let Some(round) = rounds(id, work).pop() else {
         record(id, files, None, run.limits);
         return Err(waiting());
@@ -278,7 +294,7 @@ pub fn explain(
     work: &mut WorkCounts,
 ) -> Result<Explained, Fault> {
     let files = files(run);
-    let id = identity(true, &files, run.limits);
+    let id = identity(true, run, &files);
     let rounds = rounds(id, work);
     let Some(last) = rounds.last() else {
         record(id, files, Some(vec![START.to_owned()]), run.limits);
@@ -362,4 +378,33 @@ fn replay(console: &mut dyn Console, round: &Round) -> Stop {
         }
     }
     Stop::Done
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A run keeps only its last two rounds, however many were supplied, and counts the last one
+    /// once.
+    #[test]
+    fn a_run_keeps_at_most_its_last_two_rounds() {
+        end();
+        let id = Hash::of_bytes(b"a run");
+        for round in 0..5u8 {
+            let ran = Ran {
+                stdout: vec![round; 1 << 10],
+                ..Ran::default()
+            };
+            supply(id, ran);
+        }
+        let kept = STATE.with(|state| state.borrow().rounds[&id].len());
+        assert_eq!(kept, KEPT_ROUNDS);
+        let mut work = WorkCounts::default();
+        let rounds = rounds(id, &mut work);
+        let firsts: Vec<u8> = rounds.iter().map(|round| round.ran.stdout[0]).collect();
+        assert_eq!(firsts, [3, 4]);
+        let _ = super::rounds(id, &mut work);
+        assert_eq!(work.program_runs, 1);
+        end();
+    }
 }

@@ -4,6 +4,7 @@ status: todo
 type: task
 tags:
   - maintainer
+  - question
 discovered_from: mara-xsm8w6
 created_at: 2026-11-25T13:04:26Z
 ---
@@ -18,3 +19,5 @@ Options:
 - [ ] A (recommended): accept the difference. VER-EXPLANATIONS's browser row reads "the same proofs, but for the internal number that Soufflé prints for a record in a step's atom", and EVD-SOUFFLE-PROGRAM-REACH gets the row. No output changes.
 - [ ] B: Mara prints a record in a proof's atoms without its number (`at(record)`) on every host. The proofs are then the same; native output changes, and two records in one atom read alike.
 - [ ] C: the browser explains no row whose proof passes a record ("cannot explain"). Loses explanations the CLI gives.
+
+Adopted provisionally by the orchestrator on 2026-11-25 in the review of mara-xsm8w6: Option A. VER-EXPLANATIONS's browser row reads "The same proofs, except for the internal record number that Soufflé prints for a record in a step's atom", EVD-SOUFFLE-PROGRAM-REACH has the row, and the browser test masks only that number. It stays open for the maintainer; switching to Option B means printing a record without its number in `crates/mara/src/rules/explain.rs` (the proof's atoms) and dropping the mask. mara-xsm8w6 does not wait for it.
