@@ -5,6 +5,10 @@
 //                                           by default dist/npm of the workspace
 //   verify-install.mjs --registry <version> @convesoft/mara@<version> from the npm registry
 //
+// Both compare the installed dispatcher's `docs/` with the files that Git tracks under `docs/` at the
+// checkout's HEAD, so they run from a checkout of the packed commit whose `docs/` Git reports clean:
+// with --registry, the commit of that version.
+//
 // It prints one line per case and exits 1 if any fails, naming the command and its output.
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -25,9 +29,10 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import {
-  dispatcherFiles,
+  dispatcherContents,
   dispatcherName,
   hostPlatform,
+  installedDocsProblems,
   minimumGlibc,
   nativeFiles,
   root,
@@ -531,13 +536,44 @@ async function main() {
     }
   }
 
+  // The dispatcher's `docs/` against the files that Git tracks under `docs/` at the checkout's HEAD,
+  // which in the release workflow's Build and Registry check jobs is the recorded commit.
+  let dispatcher;
+  await verifyCase("the installed dispatcher's docs/ equals the checkout's", () => {
+    dispatcher = dispatcherContents();
+    const docs = path.join(installed, "node_modules", ...dispatcherName.split("/"));
+    const problems = installedDocsProblems(docs, dispatcher.blobs);
+    // With --registry, a checkout at another version is the likely cause. Its version is read only
+    // now, and a failure to read it leaves the hint out.
+    if (problems.length > 0 && options.registry !== undefined) {
+      let checkout;
+      try {
+        checkout = workspace().version;
+      } catch {
+        // No hint.
+      }
+      if (checkout !== undefined && checkout !== version) {
+        problems.push(
+          `the checkout is at version ${checkout}, not ${version}: run from a checkout of ${version}'s commit`,
+        );
+      }
+    }
+    return {
+      problem: problems.length > 0 ? problems.join("; ") : undefined,
+      details: `  compared: ${path.join(docs, "docs")} with docs/ at HEAD of ${root}\n`,
+    };
+  });
+
   if (options.registry === undefined) {
-    for (const [tarball, files] of [
-      [tarballs.dispatcher, dispatcherFiles],
+    for (const [tarball, files, blobs] of [
+      [tarballs.dispatcher, dispatcher?.files, dispatcher?.blobs],
       [tarballs.native, nativeFiles],
     ]) {
       await verifyCase(`the file list of ${path.basename(tarball)}`, () => {
-        const { problems, command, output } = tarballProblems(tarball, files);
+        if (files === undefined) {
+          throw new Error("the checkout's docs/ could not be read; see the case above");
+        }
+        const { problems, command, output } = tarballProblems(tarball, files, blobs);
         return {
           problem: problems.length > 0 ? problems.join("; ") : undefined,
           details: `  command: ${command}\n  stdout:\n${indent(output)}`,

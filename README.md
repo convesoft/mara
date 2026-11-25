@@ -13,6 +13,8 @@ npx -y @convesoft/mara@next --version                       # mara 0.4.0-rc.1
 npm install --save-dev --save-exact @convesoft/mara@next    # in a project; then npx mara …
 ```
 
+From `0.4.0-rc.2`, the package carries the documentation of its own version: `node_modules/@convesoft/mara/docs/`, starting at `docs/index.mara.md`.
+
 ## First steps
 
 `mara` below is either launcher above; a `mara` on `PATH` may still be 0.3.0.
