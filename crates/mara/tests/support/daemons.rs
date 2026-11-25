@@ -3,6 +3,7 @@
 //! as `XDG_RUNTIME_DIR`. Dropping [`Daemons`] kills those that still run, and only those, also
 //! when the test panics. Linux only: it reads `/proc`.
 
+use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -14,6 +15,19 @@ pub struct Daemons {
     base: PathBuf,
     /// A directory whose executables are copies of the binary under test, if any.
     copies: Option<PathBuf>,
+    /// Set by [`Daemons::kill_once`], so that dropping them does not wait again.
+    finished: bool,
+}
+
+thread_local! {
+    /// The waits of [`Daemons::kill`] on this thread, which a test of a helper counts.
+    static WAITS: Cell<u32> = const { Cell::new(0) };
+}
+
+/// How often [`Daemons::kill`] has waited on this thread.
+#[allow(dead_code, reason = "only the code tests count the waits")]
+pub fn waits() -> u32 {
+    WAITS.get()
 }
 
 impl Daemons {
@@ -21,6 +35,7 @@ impl Daemons {
         Daemons {
             base: base.to_owned(),
             copies: copies.map(Path::to_owned),
+            finished: false,
         }
     }
 
@@ -60,6 +75,7 @@ impl Daemons {
     /// Kills those that run with SIGKILL, until none has run for 500 ms, at most for 10 s: a
     /// `daemon start` that a client of the test launched may show only after a first look.
     pub fn kill(&self) {
+        WAITS.set(WAITS.get() + 1);
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut quiet_since: Option<Instant> = None;
         loop {
@@ -85,8 +101,24 @@ impl Daemons {
     }
 }
 
-impl Drop for Daemons {
-    fn drop(&mut self) {
+impl Daemons {
+    /// Kills them as [`Daemons::kill`] does, for a caller that is finished with them: dropping
+    /// them then does not wait a second time.
+    #[allow(
+        dead_code,
+        reason = "only the code tests are finished with their daemons early"
+    )]
+    pub fn kill_once(mut self) {
         self.kill();
+        self.finished = true;
+    }
+}
+
+impl Drop for Daemons {
+    /// Kills them unless [`Daemons::kill_once`] has.
+    fn drop(&mut self) {
+        if !self.finished {
+            self.kill();
+        }
     }
 }
