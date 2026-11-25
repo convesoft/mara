@@ -18,6 +18,11 @@ pub use memory as fs;
 #[cfg(not(target_arch = "wasm32"))]
 pub use std::fs;
 
+/// Whether reading a file's contents counts as a file read (DES-PERFORMANCE-HARNESS): not in a
+/// browser workspace, whose contents the caller supplied or wrote and the host holds in memory
+/// (VER-WORK-COUNTERS).
+pub const COUNTS_FILE_READS: bool = cfg!(not(target_arch = "wasm32"));
+
 /// The current time.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn now() -> SystemTime {

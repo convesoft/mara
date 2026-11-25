@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime};
 use mara_engine::hash::Hash;
 use mara_engine::work::WorkCounts;
 
-use crate::system::{fs, fs::Metadata};
+use crate::system::{self, fs, fs::Metadata};
 
 /// A check less than this long after a file's last change does not settle its contents: an edit
 /// in the same timestamp tick would leave its stat unchanged.
@@ -212,10 +212,11 @@ impl Reads {
 
 // @mara implements REQ-NEVER-STALE
 /// Checks the regular file at `path`, whose metadata without following links is `metadata`, in
-/// a request that began at `now`. Reads and hashes it, counting one file read and one hash in
-/// `work`, unless the stat is unchanged and `previous` was settled or `reads` keeps it
-/// ([`Keep`]), or `reads` holds the same file read in this request. With `share`, what it reads joins `reads`. Contents that hash as
-/// before keep the previous value.
+/// a request that began at `now`. Reads and hashes it, counting one file read
+/// ([`system::COUNTS_FILE_READS`]) and one hash in `work`, unless the stat is unchanged and
+/// `previous` was settled or `reads` keeps it ([`Keep`]), or `reads` holds the same file read in
+/// this request. With `share`, what it reads joins `reads`. Contents that hash as before keep the
+/// previous value.
 pub(crate) fn check<T>(
     path: &Path,
     metadata: &Metadata,
@@ -242,7 +243,9 @@ pub(crate) fn check<T>(
         Some((read, hash, contents)) if *read == stat => (*hash, contents.to_vec()),
         _ => {
             let contents = fs::read(path)?;
-            work.file_reads += 1;
+            if system::COUNTS_FILE_READS {
+                work.file_reads += 1;
+            }
             let hash = Hash::of_file(&contents, work);
             if share {
                 let shared = (stat, hash, Arc::from(contents.as_slice()));

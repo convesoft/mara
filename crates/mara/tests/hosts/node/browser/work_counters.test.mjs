@@ -72,13 +72,8 @@ describe("a browser workspace does only the work that a change calls for", { tim
     await stats("item_list");
     const edited = Buffer.concat([corpus.files.get(document), Buffer.from("\nEdited by the caller.\n")]);
     assert.deepEqual(await page.harness("write", document, edited.toString("base64")), {});
-    // The row bounds the hashes, parses and snapshot builds; the read of the written contents
-    // from the memory counts as a file read, as a read from disk does.
-    const { file_reads, ...counted } = await stats("item_list");
-    assert.equal(file_reads, 1);
-    const { file_reads: none, ...expected } = { ...NONE, hashes: 1, parses: 1, snapshot_builds: 1 };
-    assert.equal(none, 0);
-    assert.deepEqual(counted, expected);
+    // Written contents are hashed by the engine and are no file reads.
+    assert.deepEqual(await stats("item_list"), { ...NONE, hashes: 1, parses: 1, snapshot_builds: 1 });
   });
 
   test("after a write of Mara's, the same read request again does no work", async () => {
