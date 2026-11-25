@@ -193,6 +193,170 @@ pub fn legacy(host: &Host) {
     }
 }
 
+/// The `n`th MID of the programs' and facts' fixtures, as `tests/programs` and `tests/facts`
+/// number them.
+fn mid(n: u32) -> String {
+    format!("01M7D8DZ2663WP3A03000000{n:02}")
+}
+
+/// An item of those fixtures: its anchor, heading, metadata table and body.
+fn item(
+    n: u32,
+    kind: &str,
+    id: &str,
+    status: &str,
+    title: &str,
+    rows: &[(&str, String)],
+) -> String {
+    let mut text = format!(
+        "<a id=\"{}\"></a>\n\n### {title}\n\n| Type | {kind} |\n| --- | --- |\n| ID | {id} |\n\
+         | Status | {status} |\n",
+        mid(n)
+    );
+    for (key, value) in rows {
+        text.push_str(&format!("| {key} | {value} |\n"));
+    }
+    text.push_str("\nThe body.\n");
+    text
+}
+
+/// The project of the rules Verification items' tests (`tests/programs`, VER-PROGRAM-CONSUMERS):
+/// documents below `docs/`, programs below `.mara/rules/`, and in `docs/a.mara.md` `REQ-A`
+/// (MID 1, accepted, owner `abc`, satisfying `NEED-ONE`), `REQ-B` (MID 2, draft, titled
+/// `Héllo`) and `NEED-ONE` (MID 3, accepted). The browser cases write their programs and
+/// entries into it.
+pub fn programs(host: &Host) {
+    let root = host.fixture("programs");
+    write(&root, ".mara/schema.toml", PROGRAMS_SCHEMA);
+    write(&root, ".mara/config.toml", &programs_config(""));
+    let items = [
+        item(
+            1,
+            "Requirement",
+            "REQ-A",
+            "Accepted",
+            "Alpha",
+            &[
+                ("Owner", "abc".to_owned()),
+                ("Satisfies", format!("[NEED-ONE](#{})", mid(3))),
+            ],
+        ),
+        item(2, "Requirement", "REQ-B", "Draft", "Héllo", &[]),
+        item(3, "Need", "NEED-ONE", "Accepted", "One", &[]),
+    ];
+    let text = format!("# A\n\n---\n\n{}", items.join("\n---\n\n"));
+    write(&root, "docs/a.mara.md", &text);
+    host.hash("programs");
+}
+
+/// The schema of [`programs`].
+const PROGRAMS_SCHEMA: &str = r#"format_version = 1
+statuses = ["draft", "accepted"]
+
+[types.requirement]
+id_prefix = "REQ-"
+description = "An obligation."
+
+[types.requirement.fields.owner]
+kind = "text"
+
+[types.need]
+id_prefix = "NEED-"
+description = "A need."
+
+[relations.satisfies]
+inverse = "satisfied_by"
+description = "The source fulfils the target."
+targets = { requirement = ["need"] }
+"#;
+
+/// The configuration of [`programs`] followed by `entries`.
+fn programs_config(entries: &str) -> String {
+    format!(
+        "format_version = 1\nschema = \".mara/schema.toml\"\n\n[documents]\nformat_version = 1\n\
+         include = [\"docs/**/*.mara.md\"]\n\n[rules]\nprograms = [\".mara/rules/**/*.dl\"]\n\
+         {entries}"
+    )
+}
+
+/// The project of VER-FACT-ROWS (`tests/facts`): two requirements with fields and relation rows
+/// in `docs/a.mara.md`, a title `ÉCOLE` with a combining accent and a title and a field value
+/// with a tab, a quote, a backslash and non-ASCII text; a need and a requirement without fields
+/// in `docs/b.mara.md`.
+pub fn facts(host: &Host) {
+    let root = host.fixture("facts");
+    let config = "format_version = 1\nschema = \".mara/schema.toml\"\n\n[documents]\n\
+                  format_version = 1\ninclude = [\"**/*.mara.md\"]\n";
+    write(&root, ".mara/config.toml", config);
+    write(&root, ".mara/schema.toml", FACTS_SCHEMA);
+    let link = |path: &str, n: u32| format!("[x]({path}#{})", mid(n));
+    let mentioned = |text: String| {
+        text.replace(
+            "\nThe body.\n",
+            &format!("\nMentions [one](b.mara.md#{}).\n", mid(3)),
+        )
+    };
+    let a = [
+        item(
+            1,
+            "Requirement",
+            "REQ-A",
+            "Accepted",
+            "E\u{301}COLE",
+            &[
+                ("Priority", "Very High".to_owned()),
+                ("Owner", "a\tb \"q\" back\\slash \u{fc}".to_owned()),
+                ("Satisfies", link("b.mara.md", 3)),
+            ],
+        ),
+        item(
+            2,
+            "Requirement",
+            "REQ-B",
+            "Draft",
+            "Tab\there \"q\" back\\\\slash \u{fc}",
+            &[("Owner", "Ann".to_owned()), ("Refines", link("", 1))],
+        ),
+    ];
+    let b = [
+        item(3, "Need", "NEED-ONE", "Accepted", "One", &[]),
+        item(4, "Requirement", "REQ-C", "Draft", "Without result", &[]),
+    ];
+    write(&root, "docs/a.mara.md", &a.map(mentioned).join("\n---\n\n"));
+    write(&root, "docs/b.mara.md", &b.map(mentioned).join("\n---\n\n"));
+    host.hash("facts");
+}
+
+const FACTS_SCHEMA: &str = r#"format_version = 1
+statuses = ["draft", "accepted"]
+
+[types.requirement]
+id_prefix = "REQ-"
+description = "An obligation."
+
+[types.requirement.fields.priority]
+kind = "enum"
+values = ["very_high", "low"]
+
+[types.requirement.fields.owner]
+kind = "text"
+repeatable = true
+
+[types.need]
+id_prefix = "NEED-"
+description = "A need."
+
+[relations.satisfies]
+inverse = "satisfied_by"
+description = "The source fulfils the target."
+targets = { requirement = ["need"] }
+
+[relations.refines]
+inverse = "refined_by"
+description = "The source details the target."
+targets = { requirement = ["requirement"] }
+"#;
+
 /// Copies the files below `from` to `to`.
 pub fn copy(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();

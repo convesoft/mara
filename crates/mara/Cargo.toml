@@ -53,14 +53,15 @@ signal-hook = { version = "0.3.18", default-features = false }
 # hooks read, `TMPDIR`, under which the daemon tests derive socket paths of
 # limited length, the mode and bytes of the pinned Soufflé that `scripts/build-souffle.sh` builds
 # beside the artifact directory, and the tag `v0.3.0` that the conversion tests archive. The host
-# tests (`tests/hosts`) also read the browser package's files, its WebAssembly module, which
-# `mara-browser:build` copies there, Playwright's library and the Chromium they launch, found
-# through `PLAYWRIGHT_BROWSERS_PATH` or the per-user cache and keyed by the path, size and
-# modification time that `tests/hosts/node/support/browser.mjs` prints, and the `node` on `PATH`.
+# tests (`tests/hosts`) also read the browser package's files, its WebAssembly module and
+# Soufflé's (`souffle.js`, `souffle.wasm`), which `mara-browser:build` copies there, Playwright's
+# library and the Chromium they launch, found through `PLAYWRIGHT_BROWSERS_PATH` or the per-user
+# cache and keyed by the path, size and modification time that
+# `tests/hosts/node/support/browser.mjs` prints, and the `node` on `PATH`.
 [package.metadata.nx.targets.test]
 inputs = [
   "{workspaceRoot}/packages/mara-browser/**/*",
-  { dependentTasksOutputFiles = "**/*.wasm" },
+  { dependentTasksOutputFiles = "**/*.{wasm,js}" },
   { env = "PLAYWRIGHT_BROWSERS_PATH" },
   { runtime = "node --version 2>&1; node crates/mara/tests/hosts/node/support/browser.mjs 2>&1; true" },
   "...",

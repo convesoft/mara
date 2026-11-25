@@ -1,0 +1,14 @@
+Soufflé 2.5 does not build with Emscripten's Clang without this line
+(DES-SOUFFLE-BUILD in docs/distribution.mara.md); upstream master no longer has it.
+
+--- a/src/interpreter/Index.h
++++ b/src/interpreter/Index.h
+@@ -420,7 +420,7 @@ public:
+     }
+ 
+     void insert(const Index& src) {
+-        data = src.data;
++        data = src.data.load();
+     }
+ 
+     bool contains(const Tuple& /* t */) const {

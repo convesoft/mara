@@ -78,8 +78,8 @@ From 0.4.0-alpha.6, warm rows also run in a browser workspace on the 1× corpus,
 | --- | --- |
 | The same read request again, nothing written (mara-jptfbq) | 0 file reads, 0 hashes, 0 parses, 0 snapshot builds, 0 check steps, 0 program runs |
 | One document written by the caller, then a read (mara-jptfbq) | 1 hash, of that document; 1 parse; 1 snapshot build |
-| `query view` after `project validate`, nothing written (mara-xsm8w6) | 0 program runs |
-| One program written by the caller, then `project validate` (mara-xsm8w6) | 1 program run, of that program; 0 parses, 0 snapshot builds |
+| A query of a program that an invariant uses, after `project validate`, nothing written (mara-xsm8w6) | 0 program runs; a view of a program that no invariant uses, which validation compiled against empty facts ([DES-RULE-EXECUTION](rules/evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)), 1 program run, and 0 when repeated |
+| One program that no other program includes written by the caller, then `project validate` (mara-xsm8w6) | 1 program run, of that program; 0 parses, 0 snapshot builds |
 
 ---
 

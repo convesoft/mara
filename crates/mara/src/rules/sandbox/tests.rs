@@ -145,7 +145,7 @@ fn evaluate_planted(souffle: &Path, abi: Option<i32>, planted: &str) -> Result<R
         limits: limits(),
     };
     let dir = tempfile::Builder::new().prefix("p").tempdir().unwrap();
-    prepare(dir.path(), &run, &[], &[]).unwrap();
+    prepare(dir.path(), &run).unwrap();
     let wrapper = dir.path().join(mara_engine::evaluation::WRAPPER);
     let text = fs::read_to_string(&wrapper).unwrap();
     fs::write(&wrapper, format!("{text}{planted}")).unwrap();
@@ -232,7 +232,7 @@ fn planted_outputs_are_written_only_in_out() {
     };
     for abi in ABIS {
         let dir = tempfile::Builder::new().prefix("p").tempdir().unwrap();
-        prepare(dir.path(), &run, &[], &[]).unwrap();
+        prepare(dir.path(), &run).unwrap();
         let wrapper = dir.path().join(mara_engine::evaluation::WRAPPER);
         let text = fs::read_to_string(&wrapper).unwrap();
         let planted = ".decl w(x: symbol)\nw(\"x\").\n\

@@ -16,14 +16,14 @@ Until this issue starts:
 
 - The rc.1 epic adds CI and the release workflow (DES-CI-WORKFLOW, DES-RELEASE-WORKFLOW in docs/distribution.mara.md); no nightly workflow exists.
 - Every check that an issue or a Verification item assigns to a nightly run is run locally: by the worker before it hands over its branch, and again before the branch is integrated.
-- Soufflé is built natively only (`scripts/build-souffle.sh`), locally, in CI and in the release workflow.
+- Soufflé is built natively (`scripts/build-souffle.sh`) locally, in CI and in the release workflow, and with Emscripten (`scripts/build-souffle-wasm.sh`) locally and in CI (mara-xsm8w6).
 - Time budgets are not measured. REQ-TIME-BUDGETS and VER-TIME-BUDGETS stay Draft.
 
 Tasks:
 
 Moved to mara-1avrq4 (rc.1 epic): the workflows for format, lint, tests, the `wasm32` build of the engine crate and `mara project validate` on `docs/`, and the native Linux builds of Soufflé.
 - [ ] The 64× run of the counter test (`--ignored`) nightly (VER-WORK-COUNTERS, DES-PERFORMANCE-HARNESS); the counter and scaling tests already run in CI (DES-CI-WORKFLOW)
-- [ ] The pinned Soufflé built in CI with Emscripten (DES-SOUFFLE-BUILD; moved from mara-vt2ktq and mara-xsm8w6)
+Moved to mara-xsm8w6 (orchestrator's decision for the rc.2 slice, 2026-11-25): the pinned Soufflé built in CI with Emscripten (DES-SOUFFLE-BUILD, DES-CI-WORKFLOW).
 - [ ] Nightly `hyperfine` run on a reference machine, which the maintainer names, including a read during a long validation (VER-TIME-BUDGETS; moved from mara-p27z9t)
 - [ ] Budgets set from the first measurements; REQ-TIME-BUDGETS and VER-TIME-BUDGETS moved to Accepted
 Moved: changelog and publishing are in mara-a3aq0n for prereleases (rc.1 epic) and in mara-chjvk9 for 0.4.0.

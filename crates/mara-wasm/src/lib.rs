@@ -13,7 +13,8 @@
 //! | Call | Header | Answer |
 //! | --- | --- | --- |
 //! | Create | `{"call": "create", "files": [{"path", "at", "length"}]}` | `{"failed": false}` |
-//! | Run | `{"call": "run", "name", "arguments"}` | `{"failed", "status", "stats", "reply"}` |
+//! | Run | `{"call": "run", "name", "arguments"}` | `{"failed", "status", "stats", "reply"}`, or `{"pending": [run]}` |
+//! | Ran | `{"call": "ran", "runs": [ran]}` | As a run's |
 //! | Write | `{"call": "write", "path", "at", "length"}` | `{"failed": false}` |
 //! | Remove | `{"call": "remove", "path"}` | `{"failed": false}` |
 //! | Export | `{"call": "export"}` | `{"failed": false, "changes": [{"path", "base", "at", "length"}]}` |
@@ -22,6 +23,16 @@
 //! line (DES-PERFORMANCE-HARNESS). A refused call answers `{"failed": true, "status", "reply"}`
 //! with the failure's object. A removed file's change has `at` and `length` null. The instance
 //! holds one workspace for its life: a second `create` is refused.
+//!
+//! A run whose request evaluates programs answers the runs of Soufflé that it waits for instead
+//! ([`mara::rules::browser`]), each `{"id", "arguments", "files": [{"path", "at", "length"}],
+//! "stdin": {"at", "length"} or null, "time_limit_ms", "output_bytes", "stdout_bytes",
+//! "stderr_bytes"}`. The worker makes them and answers with `ran`, one per run: `{"id", "status",
+//! "limit", "fault", "stdout": {"at", "length"}, "stdout_length", "stderr": {"at", "length"},
+//! "stderr_at_stdout", "outputs": [{"path", "at", "length"}]}`, `status` the exit status of
+//! `main` or null, `limit` `"time"`, `"memory"`, `"output"` or null, `fault` a message or null.
+//! The module then runs the same request again, until it answers its result, whose stats count
+//! the work of every pass. Any other call forgets a request that waits.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -31,6 +42,9 @@ use std::fmt::Write as _;
 use mara::cli::workspace::Workspace;
 use mara::cli::{Failure, Reply};
 use mara::debug_stats;
+use mara::rules::browser::{self, Pending, Ran};
+use mara_engine::evaluation::Limit;
+use mara_engine::hash::Hash;
 use mara_engine::work::WorkCounts;
 use serde_json::{Map, Value, json};
 
@@ -39,6 +53,8 @@ thread_local! {
     static WORKSPACE: RefCell<Option<Workspace>> = const { RefCell::new(None) };
     /// The answer of the last call.
     static ANSWER: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    /// The request that waits for runs of Soufflé, with the work of its passes so far.
+    static WAITING: RefCell<Option<(String, Value, WorkCounts)>> = const { RefCell::new(None) };
 }
 
 /// `length` bytes for the worker to write a call's frame into: a boxed slice of exactly that
@@ -121,6 +137,11 @@ fn answer(header: &Map<String, Value>, files: &[u8]) -> Vec<u8> {
             _ => Err("a file's bytes lie outside the call's frame".to_owned()),
         }
     };
+    // Any call but `ran` forgets a request that waits for runs.
+    if text("call") != Some("ran") {
+        WAITING.with(|waiting| waiting.borrow_mut().take());
+        browser::end();
+    }
     let outcome: Result<Vec<u8>, Failure> = match text("call") {
         Some("create") => (|| {
             let listed = header.get("files").and_then(Value::as_array);
@@ -140,10 +161,26 @@ fn answer(header: &Map<String, Value>, files: &[u8]) -> Vec<u8> {
         })(),
         Some("run") => with_workspace(|workspace| {
             let name = text("name").ok_or_else(|| rejected("`name` is no string".to_owned()))?;
-            let arguments = header.get("arguments").unwrap_or(&Value::Null);
-            let mut work = WorkCounts::default();
-            let reply = workspace.run(name, arguments, &mut work);
-            Ok(ran(&reply, &work))
+            let arguments = header.get("arguments").cloned().unwrap_or(Value::Null);
+            Ok(pass(
+                workspace,
+                name.to_owned(),
+                arguments,
+                WorkCounts::default(),
+            ))
+        }),
+        Some("ran") => with_workspace(|workspace| {
+            let waiting = WAITING.with(|waiting| waiting.borrow_mut().take());
+            let Some((name, arguments, work)) = waiting else {
+                return Err(rejected("no request waits for runs of Soufflé".to_owned()));
+            };
+            let runs = header.get("runs").and_then(Value::as_array);
+            let runs = runs.ok_or_else(|| rejected("`runs` is no list".to_owned()))?;
+            for run in runs {
+                let (id, ran) = supplied(run, &bytes).map_err(rejected)?;
+                browser::supply(id, ran);
+            }
+            Ok(pass(workspace, name, arguments, work))
         }),
         Some("write") => with_workspace(|workspace| {
             let path = text("path").ok_or_else(|| rejected("`path` is no string".to_owned()))?;
@@ -169,6 +206,108 @@ fn with_workspace(
         Some(workspace) => call(workspace),
         None => Err(rejected("no workspace was created".to_owned())),
     })
+}
+
+/// One pass of the request `name` with `arguments` ([`browser`]), `work` the work of its passes
+/// before: its answer, or the runs of Soufflé that it waits for.
+fn pass(
+    workspace: &mut Workspace,
+    name: String,
+    arguments: Value,
+    mut work: WorkCounts,
+) -> Vec<u8> {
+    let reply = workspace.run(&name, &arguments, &mut work);
+    let pending = browser::pending();
+    if pending.is_empty() {
+        browser::end();
+        return ran(&reply, &work);
+    }
+    WAITING.with(|waiting| *waiting.borrow_mut() = Some((name, arguments, work)));
+    waits(&pending)
+}
+
+/// The answer that lists the runs `pending`, with their files after the header.
+fn waits(pending: &[Pending]) -> Vec<u8> {
+    let mut files = Vec::new();
+    let mut place = |bytes: &[u8]| {
+        let at = files.len();
+        files.extend_from_slice(bytes);
+        json!({"at": at, "length": bytes.len()})
+    };
+    let runs: Vec<Value> = (pending.iter())
+        .map(|run| {
+            let listed: Vec<Value> = (run.files.iter())
+                .map(|(path, contents)| {
+                    let mut file = place(contents);
+                    file["path"] = json!(path);
+                    file
+                })
+                .collect();
+            json!({
+                "id": run.id.to_string(),
+                "arguments": run.arguments,
+                "files": listed,
+                "stdin": run.stdin.as_deref().map(&mut place),
+                "time_limit_ms": u64::from(run.limits.time_seconds) * 1000,
+                "output_bytes": run.limits.output_bytes,
+                "stdout_bytes": run.stdout_bytes,
+                "stderr_bytes": browser::PRINTED_BYTES,
+            })
+        })
+        .collect();
+    frame(&json!({ "pending": runs }).to_string(), &files)
+}
+
+/// Takes the bytes that a JSON object names by `at` and `length` from a call's frame.
+type Bytes<'a> = dyn Fn(&Map<String, Value>) -> Result<Vec<u8>, String> + 'a;
+
+/// The run that one entry of `ran` names, and what it left; `bytes` takes a file's bytes from
+/// the call's frame.
+fn supplied(run: &Value, bytes: &Bytes) -> Result<(Hash, Ran), String> {
+    let run = run.as_object().ok_or("a run is no object")?;
+    let id = run
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(Hash::from_hex);
+    let id = id.ok_or("a run has no `id`")?;
+    let number = |name: &str| {
+        let number = run.get(name).and_then(Value::as_u64);
+        number.and_then(|number| usize::try_from(number).ok())
+    };
+    let part = |name: &str| match run.get(name) {
+        Some(Value::Object(at)) => bytes(at),
+        _ => Ok(Vec::new()),
+    };
+    let mut outputs = std::collections::BTreeMap::new();
+    for output in run
+        .get("outputs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let output = output.as_object().ok_or("an output is no object")?;
+        let path = output.get("path").and_then(Value::as_str);
+        let path = path.ok_or("an output has no `path`")?;
+        outputs.insert(path.to_owned(), bytes(output)?);
+    }
+    let stdout = part("stdout")?;
+    let stderr = part("stderr")?;
+    let ran = Ran {
+        status: (run.get("status").and_then(Value::as_i64)).and_then(|s| i32::try_from(s).ok()),
+        limit: match run.get("limit").and_then(Value::as_str) {
+            Some("time") => Some(Limit::Time),
+            Some("memory") => Some(Limit::Memory),
+            Some("output") => Some(Limit::Output),
+            _ => None,
+        },
+        fault: run.get("fault").and_then(Value::as_str).map(str::to_owned),
+        stdout_length: number("stdout_length").unwrap_or(stdout.len()),
+        stderr_at_stdout: number("stderr_at_stdout").unwrap_or(stderr.len()),
+        stdout,
+        stderr,
+        outputs,
+    };
+    Ok((id, ran))
 }
 
 fn done() -> Vec<u8> {

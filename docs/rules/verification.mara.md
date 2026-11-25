@@ -108,7 +108,7 @@ In the setup of [VER-PROGRAM-CONSUMERS](#01M7HZYK9DYQDY8XFKWZES1ZB6), `query rep
 | A row whose proof passes an aggregate | Test | Cannot explain |
 | Each case | Test | `project validate` and the gate return the same result as without the report |
 | The check that a returned proof is for the requested row, and the handling of a reply that is not JSON and of an aborted provenance run | Inspection | Review of mara-jm5ecb finds each; no admitted program is known to reach them ([EVD-SOUFFLE-PROGRAM-REACH](evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)) |
-| From 0.4.0-alpha.6 (mara-xsm8w6), the test cases in the browser | Test | The same proofs |
+| From 0.4.0-alpha.6 (mara-xsm8w6), the test cases in the browser | Test | The same proofs, except for the internal record number that Soufflé prints for a record in a step's atom ([EVD-SOUFFLE-PROGRAM-REACH](evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)) |
 
 ---
 

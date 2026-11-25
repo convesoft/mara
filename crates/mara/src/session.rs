@@ -10,6 +10,7 @@
 //! of its evaluations by key ([`Evaluated`]), so a request finds what an earlier one ran.
 
 use std::collections::{HashMap, VecDeque};
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -313,12 +314,25 @@ struct Build {
 
 impl Build {
     /// The identity of the executable at `path`, `None` when it cannot be read.
+    #[cfg(not(target_arch = "wasm32"))]
     fn of(path: &Path) -> Option<Build> {
         let metadata = fs::metadata(path).ok()?;
         Some(Build {
             path: path.to_owned(),
             size: metadata.len(),
             modified: metadata.modified().ok(),
+        })
+    }
+
+    /// The Soufflé module of a browser workspace, which the package's worker loads: one
+    /// identity, its name ([`rules::souffle`]). A fault of the host, such as a module that
+    /// could not be loaded or a run the worker has yet to make, is not kept ([`fault_bytes`]).
+    #[cfg(target_arch = "wasm32")]
+    fn of(path: &Path) -> Option<Build> {
+        Some(Build {
+            path: path.to_owned(),
+            size: 0,
+            modified: None,
         })
     }
 }

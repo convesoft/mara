@@ -5,17 +5,24 @@
     "build": {
       "command": "node packages/mara-browser/copy-module.mjs",
       "cache": true,
-      "dependsOn": [{ "projects": ["mara-wasm"], "target": "build" }],
+      "dependsOn": [
+        { "projects": ["mara-wasm"], "target": "build" },
+        { "projects": ["cargo-workspace"], "target": "souffle-wasm" }
+      ],
       "inputs": [
         "{projectRoot}/copy-module.mjs",
-        { "dependentTasksOutputFiles": "**/*.wasm" },
+        { "dependentTasksOutputFiles": "**/*.{wasm,js}" },
         "{workspaceRoot}/.cargo/config.toml",
         "{workspaceRoot}/.cargo/config",
         "{workspaceRoot}/rust-toolchain.toml",
         { "env": "CARGO_TARGET_DIR" },
         { "env": "CARGO_BUILD_TARGET_DIR" }
       ],
-      "outputs": ["{projectRoot}/mara.wasm"]
+      "outputs": [
+        "{projectRoot}/mara.wasm",
+        "{projectRoot}/souffle.js",
+        "{projectRoot}/souffle.wasm"
+      ]
     }
   }
 }

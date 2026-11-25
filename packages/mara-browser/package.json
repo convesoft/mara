@@ -7,6 +7,8 @@
     "index.js",
     "index.d.ts",
     "worker.js",
+    "souffle-worker.js",
+    "output-limit.js",
     "mara.wasm"
   ],
   "type": "module",

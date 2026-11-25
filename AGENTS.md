@@ -66,7 +66,8 @@ One orchestrator starts a worker for each ready issue and integrates its branch.
 
 The local checks are `pnpm run checks`; while working, `pnpm run checks:fast` leaves out `mara:test:performance`, `mara-engine:build:wasm32` and `mara-wasm:lint:wasm32`. Each check is an Nx target, and [ADR-NX-RUST-TASKS](docs/decisions.mara.md#01M8094G2DV9JZ35C8VRMFPWYV) names the command each runs. Run them from the repository root; each must exit 0.
 
-- Once in a fresh worktree: `pnpm install --frozen-lockfile`. The checks build Soufflé when it is missing.
+- Once in a fresh worktree: `pnpm install --frozen-lockfile`. The checks build Soufflé and its WebAssembly module when they are missing.
+- Once on each machine: the Emscripten SDK of the version that `scripts/build-souffle-wasm.sh` pins, installed with emsdk outside the checkout (on this machine under `$TMPDIR`), with its `upstream/emscripten` on `PATH` while the module is built ([DES-SOUFFLE-BUILD](docs/distribution.mara.md#01M7BF6GX9WNFK70C6H1RBQJ5R)).
 - Once on each machine: `cargo run --quiet --bin mara -- --no-daemon code add rust`, because `mara:validate` needs this repository's pinned grammar in the per-user cache ([DES-GRAMMAR-ASSETS](docs/code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
 - `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins.
 - Once on each machine: `pnpm exec playwright install chromium`, the browser that the host tests drive ([VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9)), at the revision that the pinned Playwright names, into Playwright's per-user cache. They need Node 24 or later.

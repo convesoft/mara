@@ -16,5 +16,7 @@
 /.nx/self-healing
 /.nx/migrate-runs
 
-# The browser package's WebAssembly module, which `nx run mara-browser:build` copies there
+# The browser package's WebAssembly modules, which `nx run mara-browser:build` copies there
 /packages/mara-browser/mara.wasm
+/packages/mara-browser/souffle.js
+/packages/mara-browser/souffle.wasm

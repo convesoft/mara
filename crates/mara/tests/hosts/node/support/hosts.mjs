@@ -3,8 +3,8 @@
 // the test's directory, and a page that holds a browser workspace. `hosts/node.rs` starts each
 // module with the environment that `env` reads.
 
-import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, relative, sep } from "node:path";
 
@@ -85,6 +85,28 @@ const POSITIONAL = {
   query_report: ["name"],
 };
 
+let inputFiles = 0;
+
+/**
+ * The CLI's `--input` arguments for the `input` object of a `query` tool call: a string value
+ * inline, rows as a JSON file of the test's directory, outside every project.
+ */
+function inputArguments(input) {
+  const out = [];
+  for (const [name, value] of Object.entries(input)) {
+    if (typeof value === "string") {
+      out.push("--input", `${name}=${value}`);
+      continue;
+    }
+    const directory = join(testDir, "inputs");
+    mkdirSync(directory, { recursive: true });
+    const file = join(directory, `${inputFiles++}.json`);
+    writeFileSync(file, JSON.stringify(value));
+    out.push("--input", `${name}=@${file}`);
+  }
+  return out;
+}
+
 /** The CLI's arguments for the MCP tool call `name` with `args`. */
 export function cliArguments(name, args = {}) {
   const words = name === "search" || name === "get" ? [name] : name.split("_");
@@ -92,6 +114,10 @@ export function cliArguments(name, args = {}) {
   const out = [...words, ...positional.map((argument) => String(args[argument]))];
   for (const [option, value] of Object.entries(args)) {
     if (positional.includes(option) || value === null || value === undefined) {
+      continue;
+    }
+    if (option === "input" && typeof value === "object" && !Array.isArray(value)) {
+      out.push(...inputArguments(value));
       continue;
     }
     for (const one of Array.isArray(value) ? value : [value]) {
@@ -128,6 +154,21 @@ export function cli(root, name, args = {}) {
     ({ stdout, status } = error);
   }
   return { status, json: JSON.parse(stdout) };
+}
+
+/**
+ * The stats line of the MCP tool call `name` with `args` run as `mara --no-daemon --debug-stats`
+ * in `root`, in the environment of [`cli`] (DES-PERFORMANCE-HARNESS).
+ */
+export function cliStats(root, name, args = {}) {
+  const argv = ["--no-daemon", "--debug-stats", "--format", "json", ...cliArguments(name, args)];
+  const ran = spawnSync(maraBin, argv, {
+    cwd: root,
+    env: { MARA_NO_DAEMON: "1", HOME: join(testDir, "home"), XDG_RUNTIME_DIR: join(testDir, "run") },
+    encoding: "utf8",
+  });
+  const line = ran.stderr.trim().split("\n").at(-1);
+  return JSON.parse(line);
 }
 
 /** The MID of each anchor line, by `<path>:<line>`. */
@@ -223,13 +264,36 @@ const TYPES = {
   ".wasm": "application/wasm",
 };
 
-/** The files of the browser package that its manifest lists. */
-const packageFiles = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")).files;
+/**
+ * The files of the browser package: those its manifest lists, and Soufflé's module, which
+ * `mara-browser:build` copies there and mara-865a2e packs.
+ */
+const SOUFFLE_MODULE = ["souffle.js", "souffle.wasm"];
+const packageFiles = [
+  ...JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")).files,
+  ...SOUFFLE_MODULE,
+];
+
+/**
+ * Checks that the package holds Soufflé's module, which every case that runs a program needs
+ * (VER-HOST-COMPARISON); without it each evaluation would be a fault.
+ */
+export function requireSouffle() {
+  for (const name of SOUFFLE_MODULE) {
+    if (!existsSync(join(packageDir, name))) {
+      throw new Error(
+        `the browser package has no ${name} of Soufflé's module: build it with ` +
+          "scripts/build-souffle-wasm.sh, which `nx run mara-browser:build` runs and copies",
+      );
+    }
+  }
+}
 
 /**
  * An HTTP server on a loopback port that the operating system assigns: `/` is the test's page,
  * and `/package/<file>` each file of the browser package. `requests` holds the path of every
- * request it received; `answer(path, handler)` makes `handler(response)` answer `path`.
+ * request it received; `answer(path, handler)` makes `handler(response)` answer `path`, and
+ * `answer(path, null)` serves it again.
  */
 export async function startServer() {
   const requests = [];
@@ -272,7 +336,7 @@ export async function startServer() {
   return {
     url: `http://127.0.0.1:${port}`,
     requests,
-    answer: (path, handler) => handlers.set(path, handler),
+    answer: (path, handler) => (handler ? handlers.set(path, handler) : handlers.delete(path)),
     close: () =>
       new Promise((resolve) => {
         for (const socket of sockets) {
@@ -292,14 +356,23 @@ export function isPackageFile(path) {
  * A page of the test, in a new context of `browser`, that loads the browser package from
  * `server` after it wrapped `WebAssembly`'s compiling and instantiating functions to count their
  * calls. `harness(name, ...args)` calls a function of the page's harness. `workers` and
- * `requests` hold what Playwright reports.
+ * `requests` hold what Playwright reports; `souffleWorkers()` each Soufflé worker that a
+ * workspace started, `{ closed }`, in order.
  */
 export async function openPage(browser, server) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const workers = [];
+  const states = [];
   const requests = [];
-  page.on("worker", (worker) => workers.push(worker.url()));
+  page.on("worker", (worker) => {
+    workers.push(worker.url());
+    const state = { url: worker.url(), closed: false };
+    states.push(state);
+    worker.on("close", () => {
+      state.closed = true;
+    });
+  });
   context.on("request", (request) => requests.push(request.url()));
   await page.goto(server.url);
   await page.waitForFunction(() => window.harness !== undefined || window.harnessError !== undefined);
@@ -310,6 +383,7 @@ export async function openPage(browser, server) {
   return {
     page,
     workers,
+    souffleWorkers: () => states.filter((state) => state.url.endsWith("/package/souffle-worker.js")),
     requests,
     harness: (name, ...args) => page.evaluate(([name, args]) => window.harness[name](...args), [name, args]),
     close: () => context.close(),
