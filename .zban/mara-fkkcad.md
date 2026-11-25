@@ -1,6 +1,6 @@
 ---
 title: Daemon loopback HTTP for browsers
-status: todo
+status: in-progress
 type: feature
 parent: mara-xzfeyj
 created_at: 2026-11-13T22:10:06Z
