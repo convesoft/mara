@@ -70,6 +70,30 @@ impl Parity {
         assert_eq!(json["error"]["code"], code, "{args:?}: {json}");
     }
 
+    /// A required option left out (DES-MCP-SERVER): the CLI's operation rejects it with exit
+    /// status 2, and `mara mcp` before the operation runs, in a message that names the tool's
+    /// parameter, `missing`. Neither changes a file.
+    fn missing(&mut self, args: &[&str], missing: &str) {
+        let before = self.dir.files();
+        let run = cli(&self.dir.root(), args);
+        assert_eq!(run.status, 2, "{args:?}: {run:#?}");
+        assert_eq!(run.json()["error"]["code"], "invalid-argument", "{args:?}");
+        assert_eq!(self.dir.files(), before, "{args:?}");
+        let (tool, arguments) = mcp_request(&self.usages, &self.tools, args, &self.dir.root());
+        let call = self.server.call(&tool, arguments);
+        assert!(call.is_error, "{args:?}: {call:?}");
+        assert_eq!(
+            call.json()["error"],
+            json!({
+                "code": "invalid-argument",
+                "message": format!("`{tool}` needs `{missing}`"),
+                "diagnostics": [],
+            }),
+            "{args:?}"
+        );
+        assert_eq!(self.dir.files(), before, "{args:?}");
+    }
+
     /// Arguments that the operation rejects: exit status 2 on the CLI.
     fn rejected(&mut self, args: &[&str]) {
         let json = self.expect(args, 2);
@@ -256,16 +280,19 @@ fn an_agent_works_through_mcp_as_through_the_cli() {
     p.refused(&["get", "docs/none.mara.md:3"], "unknown-node");
     p.refused(&["schema", "get", "nothing"], "unknown-declaration");
     p.refused(&["item", "delete", "NEED-FAST-ANSWERS"], "targeted-item");
-    p.rejected(&[
-        "item",
-        "create",
-        "requirement",
-        "docs/x.mara.md",
-        "--title",
-        "No body",
-        "--field",
-        "status=draft",
-    ]);
+    p.missing(
+        &[
+            "item",
+            "create",
+            "requirement",
+            "docs/x.mara.md",
+            "--title",
+            "No body",
+            "--field",
+            "status=draft",
+        ],
+        "body",
+    );
     p.rejected(&["item", "update", "REQ-WARM-READ"]);
     p.refused(
         &[
@@ -497,6 +524,12 @@ fn undeclared_or_malformed_arguments_are_rejected_before_anything_runs() {
         ("item_create", create(json!({"field": ["type=need"]}))),
         ("item_create", create(json!({"title": 5}))),
         ("item_validate", json!({})),
+        (
+            "item_create",
+            json!({"type": "requirement", "path": "docs/reqs.mara.md", "body": "Text."}),
+        ),
+        ("query_gate", json!({"name": "verified", "id": []})),
+        ("query_report", json!({"name": "verified"})),
         ("item_list", json!({"limit": 0})),
         ("item_list", json!({"cursor": "x"})),
         ("item_list", json!({"type": "need"})),
@@ -696,7 +729,7 @@ fn the_query_operations_through_mcp_as_through_the_cli() {
         broken["diagnostics"][0]["code"], "program-error",
         "{broken}"
     );
-    p.rejected(&["query", "gate", "passed"]);
+    p.missing(&["query", "gate", "passed"], "id");
 
     // `query report` explains the failed item's row; `--complete` gave the leaf of
     // `source_complete`, the candidate the leaf of `candidate`.
@@ -740,6 +773,6 @@ fn the_query_operations_through_mcp_as_through_the_cli() {
         &["query", "report", "listed", "--id", "REQ-COLD-READ-TIME"],
         "unknown-entry",
     );
-    p.rejected(&["query", "report", "passed"]);
+    p.missing(&["query", "report", "passed"], "id");
     p.finish();
 }

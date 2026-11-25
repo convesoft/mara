@@ -67,8 +67,8 @@ In a browser the engine runs as WASM in a worker over supplied file contents. Ed
 | Mode | Host | Input access |
 | --- | --- | --- |
 | CLI, direct | In-process | Filesystem |
-| Daemon | One per OS user and Mara version; serves CLI, MCP and Node over native IPC, browsers over loopback HTTP | Filesystem |
-| Node library | Embedded through the native addon ([DES-PACKAGES](../distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8)), or through the daemon | Filesystem |
+| Daemon | One per OS user and Mara build; serves CLI, MCP and Node over native IPC, browsers over loopback HTTP | Filesystem |
+| Node library | Embedded through the native addon ([DES-NODE-LIBRARY](#01M89K1J6C11NRR3S3X1KXQ5AF)), or through the daemon | Filesystem |
 | Browser through daemon | Loopback HTTP ([REQ-BROWSER-ACCESS-AUTHORIZED](../daemon/index.mara.md#01M7BF6GR0N9J4C8Z5QQ4CSCB7)) | Daemon's filesystem |
 | Browser, local | Engine as WASM in a worker | Supplied file contents |
 
@@ -148,7 +148,7 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 - `tools/list` returns one tool per document operation of [DES-OPERATIONS](#01M7BF6H124JRJAQSYVQ21Q2JS) on one page. Its description is the operation's summary.
 - A positional argument is a required string parameter. An option is a string parameter, an integer for a whole number (`limit`, `line`), an array of them when it repeats; `title` and `body` of `item create` and `id` of `query gate` and `query report` are required. `input` of the `query` tools is an object ([DES-REQUEST-INPUTS](../rules/index.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)). A parameter set to `null` counts as left out.
 - A server started without `--project` adds a `project` parameter to every tool: the project root, absolute or relative to the server's working directory. Without it, the project is found from the server's working directory upward, as the CLI finds it from its own. A server started with `--project` lists no `project` parameter, and a call that gives one is rejected.
-- A call's result is one text content block holding the JSON object that `--format json` prints, with `isError` true for a failure; there is no structured content. An undeclared, missing or mistyped parameter is rejected with `invalid-argument` before the operation runs, in a message that names the parameter. An unknown tool is a JSON-RPC error.
+- A call's result is one text content block holding the JSON object that `--format json` prints, with `isError` true for a failure; there is no structured content. An undeclared, missing or mistyped parameter is rejected with `invalid-argument` before the operation runs, in a message that names the parameter; a required parameter is missing when it is left out, `null`, or an empty array. An unknown tool is a JSON-RPC error.
 - Calls run on the runtime's blocking pool, several at once if the client sends them so. Each is a request of a client of the daemon, from the server's working directory ([DES-DAEMON-LIFECYCLE](../daemon/index.mara.md#01M7BF6GR80WA207P4BBFWW671)): the daemon of the build serves it, or the server serves it in-process when none runs and starts one. The server keeps nothing between calls. Writes wait for the write lock ([REQ-WRITERS-SERIALIZED](../authoring/writes.mara.md#01M7CXC2N8EZYVHGY7T2GPPB3X)). A call that the client cancels still runs to its end; only its response is dropped.
 - Its `instructions` are the agent guide ([DES-AGENT-GUIDE](../agents.mara.md#01M7BGRHWQHQJJHC6XCXVDWDM8)).
 - With `--debug-stats`, the server prints one stats line when it exits: the work of all its calls.
@@ -183,6 +183,37 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 | `workspace.write(path, contents)`, `workspace.remove(path)` | The caller's write and removal |
 | `workspace.export()` | Resolves with the change set in path order, each change `{path, contents, base}`: `contents` a `Uint8Array`, or `null` for a removed file, and `base` a string, or `null` for a file that was not supplied |
 | `workspace.close()` | Ends the worker; every later call rejects |
+
+---
+
+<a id="01M89K1J6C11NRR3S3X1KXQ5AF"></a>
+
+### Node library and typed clients
+
+| Type | Design |
+| --- | --- |
+| ID | DES-NODE-LIBRARY |
+| Status | Accepted |
+| Satisfies | [REQ-NODE-LIBRARY](#01M7BF6H09NQCQTEZA4WEZAXEZ) |
+
+- `@convesoft/mara` is the Node library, an ES module with its TypeScript declarations, provisional until mara-2c6hfk: `lib/index.js`, `lib/index.d.ts` and `lib/operations.d.ts`, exported as the package's `.`, with `"type": "module"`. mara-865a2e packs them and the addon.
+- The addon is `bin/mara.node` of the native package that the dispatcher runs `bin/mara` of: the package for `process.platform` and `process.arch`, installed for the dispatcher at its version ([DES-PACKAGES](../distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8)). It loads once per process, on the first call. A call that finds no such package rejects with an `Error` holding the dispatcher's message; one whose addon Node cannot load, with Node's error, which names the `.node` file.
+- The addon is the `mara` library built as an N-API library ([ADR-NAPI-RS-ADDON](#01M89K1EVRVANHY87X8RPYHT5B)). It exports one function, `call(name, arguments, project, cwd, noDaemon)`, which runs on a thread of libuv's pool, so the event loop never waits for an operation. A call runs as a tool call of `mara mcp` does ([DES-MCP-SERVER](#01M7J0N6KRQ3NNE4Z6SPZ1VYRK)): through the daemon of the addon's build, or in-process, which then starts one, or in-process only in direct mode: `noDaemon`, or `CI` or `MARA_NO_DAEMON=1` in the calling thread's `process.env`, which a worker thread holds apart from the process's environment, or in the process's.
+- `cwd` is Node's working directory when `run` is called: a later change of it reaches no call already made.
+- The addon is a host embedded in Node: its build is the file `mara` in the addon's own folder, as the dynamic loader names it, which it reaches as its daemon, starts with `daemon start` and finds Soufflé beside ([DES-DAEMON-LIFECYCLE](../daemon/index.mara.md#01M7BF6GR80WA207P4BBFWW671)). The build is that file's version, path, size and modification time when the addon first needs it, kept for the addon's life, as a process keeps its image: a file that later replaces it is another build, whose daemon the addon neither reaches nor starts. In direct mode it needs no `mara` file.
+- The addon changes no state of the Node process. It leaves the process's signals to Node ([DES-RULE-EXECUTION](../rules/evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)). It never sets the umask: a request to the daemon carries the umask from `Umask:` of `/proc/self/status`, and where that file does not tell it, as on macOS or in a chroot without `/proc`, the call runs in-process, where the process's own umask applies.
+- `lib/operations.d.ts` types every client: each document operation by its tool name, its arguments as its MCP tool takes them, a required one required, and its result as `--format json` prints it, no type holding `any`. `mara-browser:build` copies it into the browser package, whose workspace and daemon client implement its `Client`.
+- A client holds one project, so a `project` argument is refused with `invalid-argument`, as in a browser workspace.
+- `run`, the one method of each client, takes the tool's name and arguments and resolves with the result, or with `{result, stats}` when `options.debugStats` is true; a failure rejects with a `MaraError` holding `code`, `message`, `diagnostics`, `reply` and, with debug stats, `stats` ([DES-PERFORMANCE-HARNESS](../performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)), all zero for a failure that ran nothing, such as arguments that the client or the listener refuses. It throws nothing.
+
+| Call | Package | Does |
+| --- | --- | --- |
+| `createClient({project, noDaemon})` | `@convesoft/mara` | A client of `project`, resolved from the working directory when the client is created, or of the project found upward from `cwd` of each call; `noDaemon` is the direct-mode flag |
+| `connectDaemon({url, token, project})` | The browser package | A client of `project`, an absolute path that the daemon allows, through its listener at `url`, `http://127.0.0.1:<port>`, with the token that `daemon start --http` printed ([DES-BROWSER-PROTOCOL](../daemon/index.mara.md#01M893WC9SH24JB13G0RNC0XVR)) |
+| `createWorkspace(files)` | The browser package | A browser workspace ([DES-BROWSER-WORKSPACE](#01M7JQJKGBJ7KQFM9PJV8RK8H7)) |
+
+- The daemon client sends a tool's positional arguments, options and inputs in the request of the listener, by a table of each tool's parameters that a test compares with the tool list of `mara mcp`. As every client, it checks the arguments before it sends them ([DES-OPERATIONS](#01M7BF6H124JRJAQSYVQ21Q2JS)): their names, presence, the required options included, and types, in the order given, as `mara mcp` does, with its messages; a whole number is one whose JSON text is digits within 64 bits, as `mara mcp` reads it. It sends `project_init` and `project_convert` without their arguments, which the listener answers as unavailable before it reads any.
+- The listener checks the values. Its `malformed-request` refusal of a value, whose message is `` `<option>`: <reason> ``, rejects as `invalid-argument` with that message, which is `mara mcp`'s. Every other refusal, such as of a body past the listener's limit, rejects with its code and message, and a request that the browser refuses, such as one without the listener's CORS headers, with `fetch`'s error. Where `mara mcp` would refuse a value before a later parameter's name or type, the client names the later parameter: it checks values only through the listener.
 
 ---
 
@@ -253,3 +284,20 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 - Chosen during the rewrite on 2026-11-25 (mara-jptfbq): the crate `mara-wasm`, a `cdylib` that Cargo builds for `wasm32-unknown-unknown`, exports `mara_alloc`, `mara_call`, `mara_answer` and `mara_answer_length` and imports `now` and `random` from the module `mara`. A call and its answer are frames in the module's memory: a JSON header's length as a 32-bit little-endian number, the header, then the bytes of the files that the header names by `at` and `length`. The package's worker writes and reads them itself. No tool but the `wasm32-unknown-unknown` target that `rust-toolchain.toml` pins builds the module.
 - Rejected: `wasm-bindgen` through nx-rust's `wasm-build` target. Its command-line tool must match the crate's version and be installed in every worktree and on CI, and it generates glue that the package would carry, for an interface of four functions.
 - Rejected: `wasm-pack`, whose organisation was sunset in 2025, and Emscripten, a second toolchain for the Rust code.
+
+---
+
+<a id="01M89K1EVRVANHY87X8RPYHT5B"></a>
+
+### Build the Node addon with napi-rs and Cargo
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-NAPI-RS-ADDON |
+| Status | Accepted |
+| Justifies | [DES-NODE-LIBRARY](#01M89K1J6C11NRR3S3X1KXQ5AF) |
+
+- Chosen during the rewrite on 2026-11-25 (mara-vfkgbs): the crate `mara-node`, a `cdylib` over the `mara` library, with `napi` and `napi-derive` of napi-rs, built by nx-rust's plain `build` (`artifacts = []`), whose outputs are the library files; the tests copy `libmara_node.so` into the package they install as `bin/mara.node`. The addon exports one function; the library's JavaScript and declarations are written by hand.
+- Rejected: nx-rust's `napi-build` target. It needs `@napi-rs/cli` and generates a loader and declarations for `#[napi]` items, which the library does not use: its types are those of the operations' JSON, not of the addon's one function.
+- Rejected: N-API's C functions declared by hand. Mara would keep the binding of every N-API call it makes, which napi-rs keeps.
+- Rejected: the JavaScript passing the executable's path to the addon. The addon finds `mara` beside its own file, as `mara` finds Soufflé beside itself, so a loaded addon has one build.

@@ -55,29 +55,31 @@ function compareVersions(left, right) {
   return 0;
 }
 
-// The `bin/mara` of the native package for this platform, or undefined after reporting why none
-// can run.
-function nativeBinary() {
+// The folder of the native package for this platform, installed for this dispatcher at its
+// version; throws an error whose message says why none can run. The Node library loads its addon
+// from the same folder (DES-NODE-LIBRARY).
+function nativePackage() {
   const platform = platforms.find(
     (candidate) => candidate.os === process.platform && candidate.cpu === process.arch,
   );
   if (platform === undefined) {
-    fail(`Mara has no native package for ${process.platform} ${process.arch}. ${supported()}`);
-    return undefined;
+    throw new Error(
+      `Mara has no native package for ${process.platform} ${process.arch}. ${supported()}`,
+    );
   }
 
   if (platform.libc === "glibc") {
     const found = process.report.getReport().header.glibcVersionRuntime;
     if (typeof found !== "string") {
-      fail(
+      throw new Error(
         `Mara requires glibc ${minimumGlibc} or later, and Node reports no glibc on this system, ` +
           `as on musl. ${supported()}`,
       );
-      return undefined;
     }
     if (!/^\d+(\.\d+)*$/.test(found) || compareVersions(found, minimumGlibc) < 0) {
-      fail(`Mara requires glibc ${minimumGlibc} or later; this system has glibc ${found}.`);
-      return undefined;
+      throw new Error(
+        `Mara requires glibc ${minimumGlibc} or later; this system has glibc ${found}.`,
+      );
     }
   }
 
@@ -89,20 +91,31 @@ function nativeBinary() {
     "(without --omit=optional or --no-optional).";
   const directory = installedPackage(platform.name);
   if (directory === undefined) {
-    fail(`The native package ${platform.name}@${version} is not installed. ${reinstall}`);
-    return undefined;
+    throw new Error(
+      `The native package ${platform.name}@${version} is not installed. ${reinstall}`,
+    );
   }
   const installed = JSON.parse(
     fs.readFileSync(path.join(directory, "package.json"), "utf8"),
   ).version;
   if (installed !== version) {
-    fail(
+    throw new Error(
       `The native package ${platform.name} at ${directory} has version ${installed}, and ` +
         `@convesoft/mara ${version} needs exactly ${version}. ${reinstall}`,
     );
+  }
+  return directory;
+}
+
+// The `bin/mara` of the native package for this platform, or undefined after reporting why none
+// can run.
+function nativeBinary() {
+  try {
+    return path.join(nativePackage(), "bin", "mara");
+  } catch (error) {
+    fail(error.message);
     return undefined;
   }
-  return path.join(directory, "bin", "mara");
 }
 
 // The folder of the package `name` installed for this dispatcher, links resolved: the first
@@ -167,5 +180,5 @@ if (require.main === module) {
     run(binary);
   }
 } else {
-  module.exports = { minimumGlibc, platforms };
+  module.exports = { minimumGlibc, platforms, nativePackage };
 }

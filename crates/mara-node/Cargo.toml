@@ -1,0 +1,30 @@
+[package]
+name = "mara-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# The Node addon (REQ-NODE-LIBRARY, ADR-NODE-NATIVE-ADDON and DES-NODE-LIBRARY in
+# `docs/hosts/index.mara.md`): the `mara` library's document operations as one asynchronous
+# N-API function. The library `libmara_node.so` is the native package's `bin/mara.node`.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+mara = { path = "../mara" }
+mara-engine = { path = "../mara-engine" }
+serde_json = "1.0.154"
+# N-API through napi-rs (ADR-NAPI-RS-ADDON): its default features load Node's N-API functions
+# from the process at run time.
+napi = "3.16.3"
+napi-derive = "3.7.2"
+# `dladdr`, which finds the addon's own file, beside which its `mara` lies.
+libc = "0.2.191"
+
+# The addon is built by `build`, a plain Cargo build whose outputs are the library files, and
+# copied by the tests into the package layout they install; nx-rust's `napi-build`, which
+# generates a loader and declarations with `@napi-rs/cli`, is not used (ADR-NAPI-RS-ADDON).
+[package.metadata.nx]
+artifacts = []

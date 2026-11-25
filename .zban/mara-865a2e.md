@@ -28,3 +28,9 @@ Limits:
 
 - macOS arm64 stays in mara-ag4ees.
 - Nothing is published: the publication of rc.2 is the maintainer's.
+
+Context from mara-vfkgbs (DES-NODE-LIBRARY, ADR-NAPI-RS-ADDON in docs/hosts/index.mara.md):
+
+- The library is `packages/mara-npm/lib/` (`index.js`, `index.d.ts`, `operations.d.ts`). `libraryFiles` and `libraryManifest` in `packages/mara-npm/scripts/packages.mjs` name its files and the dispatcher manifest's `type` and `exports`; `packDispatcher` does not pack them yet. The host tests install them with `crates/mara/tests/hosts/node/support/library.mjs`.
+- The addon is the `cdylib` of the crate `mara-node`, `target/<profile>/libmara_node.so` from `nx run mara-node:build`; the library loads it as `bin/mara.node` of the native package and runs the `mara` beside it as its daemon.
+- The browser package gained `daemon.js` and `errors.js` in its `files`, and `operations.d.ts`, which `mara-browser:build` copies from the library (gitignored, like `mara.wasm`).

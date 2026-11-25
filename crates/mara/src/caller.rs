@@ -39,6 +39,28 @@ impl Caller {
     }
 }
 
+/// The values of this process, read without changing anything of it, as a host embedded in
+/// another program reads them (DES-NODE-LIBRARY): never by setting the umask, which would change
+/// it for the program's other threads. `None` where only setting it would tell the umask: no
+/// `Umask:` in `/proc/self/status`, or macOS.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn unchanged_caller() -> Option<Caller> {
+    #[cfg(target_os = "linux")]
+    let umask = caller_umask(fs::read("/proc/self/status").ok().as_deref());
+    #[cfg(not(target_os = "linux"))]
+    let umask = None;
+    Some(Caller {
+        umask: umask?,
+        temp_dir: std::env::temp_dir(),
+    })
+}
+
+/// The umask that `status`, the contents of `/proc/self/status` if they could be read, reports.
+#[cfg(target_os = "linux")]
+fn caller_umask(status: Option<&[u8]>) -> Option<u32> {
+    umask_in(status?)
+}
+
 /// This process's umask, read without changing it from `Umask:` of `/proc/self/status` (Linux
 /// 4.7 and later).
 #[cfg(target_os = "linux")]
@@ -242,6 +264,21 @@ mod tests {
         let status = b"Name:\tmara\xff\xfe\nUmask:\t0027\nState:\tR (running)\n";
         assert_eq!(umask_in(status), Some(0o027));
         assert_eq!(umask_in(b"Name:\tmara\nState:\tR\n"), None);
+    }
+
+    /// An embedded host reads the umask only from the status: one that holds none, or that
+    /// cannot be read, gives none, where `of_this_process` would set the umask to learn it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_embedded_host_reads_the_umask_only_from_the_status() {
+        assert_eq!(
+            caller_umask(Some(b"Name:\tnode\nUmask:\t0022\n")),
+            Some(0o022)
+        );
+        assert_eq!(caller_umask(Some(b"Name:\tnode\nState:\tR\n")), None);
+        assert_eq!(caller_umask(None), None);
+        let before = Caller::of_this_process().umask;
+        assert_eq!(unchanged_caller().map(|caller| caller.umask), Some(before));
     }
 
     #[test]

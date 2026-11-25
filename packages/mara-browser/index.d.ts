@@ -1,74 +1,10 @@
-// The types of a browser workspace (DES-BROWSER-WORKSPACE). Operation names, arguments and
-// results are those of the MCP tools and of `--format json` (DES-OPERATIONS, DES-MCP-SERVER).
+// The types of the browser package (DES-BROWSER-WORKSPACE, DES-NODE-LIBRARY): a workspace and a
+// client of the daemon's listener, each a client whose operations are typed in
+// `operations.d.ts`, which `nx run mara-browser:build` copies from the Node library.
 
-/** The MCP tool name of each document operation. */
-export type OperationName =
-  | "project_validate"
-  | "project_init"
-  | "project_fix"
-  | "project_convert"
-  | "item_validate"
-  | "schema_validate"
-  | "search"
-  | "get"
-  | "relation_list"
-  | "item_list"
-  | "schema_list"
-  | "schema_get"
-  | "item_move"
-  | "item_rename"
-  | "item_create"
-  | "item_update"
-  | "item_delete"
-  | "relation_add"
-  | "relation_remove"
-  | "query_list"
-  | "query_execute"
-  | "query_view"
-  | "query_gate"
-  | "query_report";
+import type { Client, Diagnostic, FailureReply, Stats } from "./operations.js";
 
-/** An operation's arguments, as its MCP tool takes them; `null` stands for one left out. */
-export interface Arguments {
-  [name: string]:
-    | string
-    | number
-    | string[]
-    | number[]
-    | { [input: string]: string | unknown[][] }
-    | null
-    | undefined;
-}
-
-/** A diagnostic of a result or failure (DES-DIAGNOSTICS). */
-export interface Diagnostic {
-  [member: string]: unknown;
-}
-
-/** The JSON object that `--format json` prints for a result. */
-export interface Result {
-  format_version: 1;
-  [member: string]: unknown;
-}
-
-/** The JSON object that `--format json` prints for a failure. */
-export interface FailureReply {
-  format_version: 1;
-  error: { code: string; message: string; diagnostics: Diagnostic[] };
-}
-
-/** The work of one call, as the stats line of `--debug-stats` holds it (DES-PERFORMANCE-HARNESS). */
-export interface Stats {
-  format_version: 1;
-  file_reads: number;
-  hashes: number;
-  parses: number;
-  snapshot_builds: number;
-  code_scans: number;
-  subprocess_spawns: number;
-  check_steps: number;
-  program_runs: number;
-}
+export type * from "./operations.js";
 
 /** A file supplied to a workspace: its path relative to the project root, and its bytes. */
 export interface SuppliedFile {
@@ -93,13 +29,9 @@ export declare class MaraError extends Error {
   readonly stats?: Stats;
 }
 
-export declare class Workspace {
-  run(name: OperationName, args?: Arguments, options?: { debugStats?: false }): Promise<Result>;
-  run(
-    name: OperationName,
-    args: Arguments | undefined,
-    options: { debugStats: true },
-  ): Promise<{ result: Result; stats: Stats }>;
+export declare class Workspace implements Client {
+  /** `project_init` and `project_convert` fail with `unavailable-operation`. */
+  run: Client["run"];
   write(path: string, contents: Uint8Array | ArrayBuffer): Promise<void>;
   remove(path: string): Promise<void>;
   export(): Promise<Change[]>;
@@ -109,3 +41,23 @@ export declare class Workspace {
 
 /** Starts a workspace of `files` in a dedicated worker of its own. */
 export declare function createWorkspace(files: Iterable<SuppliedFile>): Promise<Workspace>;
+
+/** The options of a client of the daemon's listener. */
+export interface DaemonOptions {
+  /** The listener's origin, such as `http://127.0.0.1:<port>` with the port that `mara daemon start --http` printed. */
+  url: string;
+  /** The token that `mara daemon start --http` printed. */
+  token: string;
+  /** The project root, an absolute path that the daemon allows. */
+  project: string;
+}
+
+/** A client of one project through the daemon's listener. */
+export declare class DaemonClient implements Client {
+  constructor(options: DaemonOptions);
+  /** `project_init` and `project_convert` fail with `unavailable-operation`. */
+  run: Client["run"];
+}
+
+/** A client of `options.project` through the daemon's listener. */
+export declare function connectDaemon(options: DaemonOptions): DaemonClient;

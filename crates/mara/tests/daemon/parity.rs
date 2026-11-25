@@ -94,15 +94,20 @@ impl<'a> Comparison<'a> {
     /// those of direct mode at the same path and line. The daemon answered each when `served`,
     /// and neither otherwise. Leaves the project as direct mode left it: the direct run's output.
     fn request(&mut self, args: &[&str], served: bool) -> Run {
+        self.request_as(args, served, served)
+    }
+
+    /// [`Comparison::request`] whose CLI request the daemon answers when `cli_served`, and whose
+    /// MCP call when `mcp_served`.
+    fn request_as(&mut self, args: &[&str], cli_served: bool, mcp_served: bool) -> Run {
+        let served = mcp_served;
         let cli: Vec<&str> = ["--format", "json"].iter().chain(args).copied().collect();
         let before = files(&self.root);
         let direct = self.test.direct(&self.root, &cli);
         let expected = files(&self.root);
-        let count = u64::from(served);
-
         restore(&self.root, &before);
         let daemon = self.test.run_in(&self.root, &cli, &[]);
-        self.answered(args, count);
+        self.answered(args, u64::from(cli_served));
         let (stdout, after) =
             pair_mids(args, &before, &expected, &daemon.stdout, files(&self.root));
         assert_eq!(
@@ -119,7 +124,7 @@ impl<'a> Comparison<'a> {
         restore(&self.root, &before);
         let (tool, arguments) = mcp_request(&self.usages, &self.tools, args, &self.root);
         let (text, is_error) = self.server.call_tool(&tool, arguments.clone());
-        self.answered(args, count);
+        self.answered(args, u64::from(mcp_served));
         let (text, after) = pair_mids(args, &before, &expected, &text, files(&self.root));
         let direct_text = match served {
             true => direct.stdout.clone(),
@@ -161,6 +166,14 @@ impl<'a> Comparison<'a> {
     fn rejected(&mut self, args: &[&str]) {
         let json = self.expect(args, 2);
         assert_eq!(json["error"]["code"], "invalid-argument", "{args:?}");
+    }
+
+    /// A required option left out: the CLI's operation rejects it in the daemon, and `mara mcp`
+    /// before it sends the call, naming the parameter (DES-MCP-SERVER).
+    fn rejected_by_mcp(&mut self, args: &[&str]) {
+        let run = self.request_as(args, true, false);
+        assert_eq!(run.status.code(), Some(2), "{args:?}: {run:?}");
+        assert_eq!(run.json()["error"]["code"], "invalid-argument", "{args:?}");
     }
 
     /// Arguments that the client rejects before it sends the request: a value that the option
@@ -719,7 +732,7 @@ fn the_daemon_answers_each_document_operation_as_direct_mode() {
         1,
     );
     assert_eq!(broken["gate"]["outcome"], "unavailable", "{broken}");
-    c.rejected(&["query", "gate", "passed"]);
+    c.rejected_by_mcp(&["query", "gate", "passed"]);
     let report = c.expect(
         &[
             "query",

@@ -79,12 +79,12 @@ pub fn supplied_input(
 }
 
 /// The pinned Soufflé (DES-SOUFFLE-BUILD in `docs/distribution.mara.md`): `souffle` beside the
-/// `mara` binary, as a package installs them, else `../souffle-2.5/souffle` from it, where
-/// `scripts/build-souffle.sh` puts it for a binary that Cargo built in the same `target/`.
-/// Never a `souffle` on `PATH`, which could be another version.
+/// host's `mara` binary ([`crate::system::executable`]), as a package installs them, else
+/// `../souffle-2.5/souffle` from it, where `scripts/build-souffle.sh` puts it for a binary that
+/// Cargo built in the same `target/`. Never a `souffle` on `PATH`, which could be another version.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn souffle() -> Result<PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|error| {
+    let exe = crate::system::executable().map_err(|error| {
         format!("cannot find the `mara` binary to find Soufflé beside it: {error}")
     })?;
     let dir = exe.parent().unwrap_or(Path::new("/"));
@@ -606,18 +606,28 @@ mod interrupt {
         })
     }
 
-    /// Defers the signals while it lives; dropping it acts on one received meanwhile.
-    pub(super) struct Deferred;
+    /// Defers the signals while it lives; dropping it acts on one received meanwhile. A host
+    /// embedded in another program, such as Node, registers no handler and defers nothing: the
+    /// program owns its signals (DES-RULE-EXECUTION).
+    pub(super) struct Deferred {
+        active: bool,
+    }
 
     impl Deferred {
         pub(super) fn begin() -> Deferred {
-            state().idle.store(false, Ordering::SeqCst);
-            Deferred
+            let active = !crate::system::embedded();
+            if active {
+                state().idle.store(false, Ordering::SeqCst);
+            }
+            Deferred { active }
         }
     }
 
     impl Drop for Deferred {
         fn drop(&mut self) {
+            if !self.active {
+                return;
+            }
             let state = state();
             state.idle.store(true, Ordering::SeqCst);
             let signal = state.signal.swap(0, Ordering::SeqCst);
@@ -627,9 +637,10 @@ mod interrupt {
         }
     }
 
-    /// Whether a signal arrived during the evaluation.
+    /// Whether a signal arrived during the evaluation; never in an embedded host, which
+    /// registers no handler.
     pub(super) fn pending() -> bool {
-        state().signal.load(Ordering::SeqCst) != 0
+        !crate::system::embedded() && state().signal.load(Ordering::SeqCst) != 0
     }
 }
 

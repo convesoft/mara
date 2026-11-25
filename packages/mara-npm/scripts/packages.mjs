@@ -22,6 +22,19 @@ export const dispatcherFiles = {
   "LICENSE-MIT": 0o644,
   "LICENSE-APACHE": 0o644,
 };
+// The Node library in the dispatcher (DES-NODE-LIBRARY), with the members of the dispatcher's
+// manifest that let an application import it by the package's name. The library loads the
+// native package's addon, `bin/mara.node`. mara-865a2e packs them; until then the host tests install them
+// (`crates/mara/tests/hosts/node/support/library.mjs`).
+export const libraryFiles = {
+  "lib/index.js": 0o644,
+  "lib/index.d.ts": 0o644,
+  "lib/operations.d.ts": 0o644,
+};
+export const libraryManifest = {
+  type: "module",
+  exports: { ".": { types: "./lib/index.d.ts", default: "./lib/index.js" } },
+};
 export const nativeFiles = {
   "package.json": 0o644,
   "bin/mara": 0o755,

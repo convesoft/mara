@@ -75,6 +75,35 @@ pub fn create_new(path: &Path) -> io::Result<fs::File> {
     return fs::File::create_new(path);
 }
 
+/// The `mara` executable of a host embedded in another program, which [`embed`] set.
+#[cfg(not(target_arch = "wasm32"))]
+static EMBEDDED: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Makes this process a host embedded in another program, the Node addon (DES-NODE-LIBRARY in
+/// `docs/hosts/index.mara.md`), whose build is the `mara` executable `executable`: the daemon it
+/// reaches and starts, and the Soufflé beside it ([`executable`]). The host then leaves the
+/// process's signals to the program ([`embedded`]). The first call wins; a later one returns
+/// false and changes nothing.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn embed(executable: std::path::PathBuf) -> bool {
+    EMBEDDED.set(executable).is_ok()
+}
+
+/// Whether the host runs embedded in another program ([`embed`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn embedded() -> bool {
+    EMBEDDED.get().is_some()
+}
+
+/// The `mara` executable of this host: the one that [`embed`] named, else the running one.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn executable() -> io::Result<std::path::PathBuf> {
+    match EMBEDDED.get() {
+        Some(executable) => Ok(executable.clone()),
+        None => std::env::current_exe(),
+    }
+}
+
 /// This process's ID; 0 in a browser workspace, which is no process.
 pub fn process_id() -> u32 {
     #[cfg(not(target_arch = "wasm32"))]
