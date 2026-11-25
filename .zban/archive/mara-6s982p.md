@@ -53,6 +53,8 @@ Each run must have written the pin, and the server must count exactly 2 connecti
 
 **Checks at 85d0b93**: `NX_DAEMON=false NX_USE_LOCAL=true berth --exclusive -- pnpm run checks` with a fresh `NX_CACHE_DIRECTORY` exited 0. Workspace: 843 tests run, 843 passed, 14 skipped. `project validate`: 0 errors, 0 warnings. `mara-engine:build:wasm32` built. Performance: 32 tests run, 32 passed, 2 skipped.
 
+**Checks after the review round, merged with `origin/main` at `361f00b`**: `pnpm run checks` exited 0. Workspace: 843 tests run, 843 passed, 14 skipped. `mara-npm:test` (`node --test`): 84 passed. `project validate`: 0 errors, 0 warnings. `mara-engine:build:wasm32` built. Performance: 32 tests run, 32 passed, 2 skipped.
+
 ## Decisions made
 
 - VER-CODE-WORK-COUNTERS's `code add` row gives the configuration's read and hash counts for two states that the test sets itself, independent of the runner's speed: last changed at least 2 s before the run (1), and a modification time an hour ahead of the request's clock, which keeps the record unsettled at each check (3). A past mtime cannot settle a file, because setting it makes the ctime now. A configuration that settles between the first read and step 2 gives 2. The row says so in a note, and no test asserts it.
