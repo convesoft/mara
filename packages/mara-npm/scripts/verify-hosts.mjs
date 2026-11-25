@@ -7,11 +7,18 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { dispatcherName } from "./packages.mjs";
 
+// The pathname of a line of `/proc/self/maps`, after its five fixed columns and the whitespace that
+// follows them, as the kernel writes it: spaces in the name are kept. Empty for an anonymous mapping.
+export function mappedPath(line) {
+  return line.match(/^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+(.*)$/)?.[1] ?? "";
+}
+
 // A module of the installation that imports the Node library by the package's name, runs
 // `project validate` of the project in its argument in this process (`noDaemon`), and prints the
 // result or the failure with the stats, and the `.node` files that the process has mapped.
 export const embeddedScript = `import { readFileSync } from "node:fs";
 import { createClient } from "${dispatcherName}";
+${mappedPath}
 const client = createClient({ project: process.argv[2], noDaemon: true });
 let answer;
 try {
@@ -21,7 +28,7 @@ try {
 }
 answer.mapped = readFileSync("/proc/self/maps", "utf8")
   .split("\\n")
-  .map((line) => line.split(/\\s+/).slice(5).join(" "))
+  .map(mappedPath)
   .filter((file) => file.endsWith(".node"));
 process.stdout.write(JSON.stringify(answer));
 `;

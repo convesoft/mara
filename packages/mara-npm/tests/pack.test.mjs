@@ -216,6 +216,19 @@ for (const [name, contents, problem] of [
   });
 }
 
+test("the packaging script refuses a Cargo target directory other than target/ and writes no tarball", async (t) => {
+  const fixture = workspace(t);
+  // Cargo would write the module there, while Nx restores mara-wasm:build's module to target/.
+  const redirected = path.join(fixture.repo, "target", "custom");
+  const moved = path.join(redirected, "wasm32-unknown-unknown", "release", "mara_wasm.wasm");
+  fs.mkdirSync(path.dirname(moved), { recursive: true });
+  fs.copyFileSync(path.join(fixture.repo, engine), moved);
+  const result = await pack({ ...fixture, env: { ...fixture.env, CARGO_TARGET_DIR: redirected } });
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /Cargo writes to .*target\/custom, not .*target, .*mara-6z7bjs/);
+  assert.equal(fs.existsSync(result.tarball), false);
+});
+
 // `pack.mjs native` on stand-ins of `release/mara`, which prints the version, of the addon
 // `release/libmara_node.so` and of Soufflé.
 async function packNative(fixture, { addon = true } = {}) {

@@ -19,6 +19,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -139,9 +140,29 @@ function built(file, what, target) {
   return file;
 }
 
+// A path with its symbolic links resolved, or as it is where it does not exist.
+function real(file) {
+  try {
+    return realpathSync(file);
+  } catch {
+    return path.resolve(file);
+  }
+}
+
 // The engine's WebAssembly module, which must export the functions that the browser's worker calls
-// (ADR-RAW-WASM-MODULE).
+// (ADR-RAW-WASM-MODULE). `mara-wasm:build` declares the module at `target/` of the workspace, where
+// Nx restores a cached build, so the module is read only where Cargo writes there too: elsewhere,
+// through `CARGO_TARGET_DIR` or `build.target-dir`, the module in Cargo's directory may be older than
+// the build that Nx restored (mara-6z7bjs), as `packages/mara-browser/copy-module.mjs` refuses too.
 function engineModule() {
+  const expected = path.join(root, "target");
+  if (real(targetDirectory) !== real(expected)) {
+    throw new Error(
+      `Cargo writes to ${targetDirectory}, not ${expected}, where mara-wasm:build leaves the ` +
+        "module that Nx stores, so the package could get a module that this build did not write. " +
+        "Pack the dispatcher without CARGO_TARGET_DIR or build.target-dir (mara-6z7bjs).",
+    );
+  }
   const file = built(
     path.join(targetDirectory, "wasm32-unknown-unknown", "release", "mara_wasm.wasm"),
     "release build of mara-wasm for wasm32-unknown-unknown",

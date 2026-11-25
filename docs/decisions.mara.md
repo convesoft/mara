@@ -116,7 +116,7 @@
 | Status | Accepted |
 | Justifies | [DES-PACKAGES](distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8) |
 
-- Chosen by the maintainer on 2026-11-25 (mara-2c6hfk): `@convesoft/mara` carries every part that is the same on every platform, as 0.3.0 did: the dispatcher, the Node library at `.`, the browser workspace, the daemon's client and both WebAssembly modules at `./browser`, `docs/` and the licences. The native packages carry the addon. A version publishes the same three packages as `0.4.0-rc.1`.
+- Chosen by the maintainer on 2026-11-25 (mara-2c6hfk): `@convesoft/mara` carries every part that is the same on every platform, as 0.3.0 did: the dispatcher, the Node library at `.`, the browser workspace, the daemon's client and both WebAssembly modules at `./browser`, `docs/` and the licences. The native packages carry the addon. `0.4.0-rc.2` publishes the same three packages as `0.4.0-rc.1`; `@convesoft/mara-darwin-arm64` joins before `0.4.0` (mara-ag4ees).
 - Rejected: a separate browser package, `@convesoft/mara-browser` or `@convesoft/mara-wasm`. A second name to publish, to give a Trusted Publisher entry and to keep at the version.
 - Rejected: a package of its own for the Node library. A second name to install and to keep at the version.
 - Known limit: every installation of the CLI downloads the WebAssembly modules. On 2026-11-25 the dispatcher grows from 36 files, about 174 kB packed, to 52 files, about 2.8 MB packed and 11.4 MB unpacked.
