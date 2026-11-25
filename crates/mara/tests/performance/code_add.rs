@@ -4,6 +4,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use mara_engine::work::WorkCounts;
 use serde_json::{Map, Value, json};
@@ -12,7 +13,7 @@ use crate::cli::Code;
 use crate::corpus::Corpus;
 use crate::grammar_server::{GrammarServer, fixture};
 use crate::restore::Written;
-use crate::{PULL_REQUEST_SIZES, SEED, cli, mcp, scaling};
+use crate::{PULL_REQUEST_SIZES, SEED, cli, mcp, restore, scaling};
 
 /// A server with the fixture Rust grammar, and its `code add` arguments.
 fn repository() -> (GrammarServer, Vec<String>) {
@@ -38,24 +39,133 @@ fn temporary(prefix: &str) -> tempfile::TempDir {
         .expect("create a temporary directory")
 }
 
+/// The configuration at `root`, as the corpus generator wrote it.
+fn configuration(root: &Path) -> PathBuf {
+    root.join(".mara/config.toml")
+}
+
+/// Runs `code add` with `args` in `root` and a new `HOME`, requires that it pinned the grammar
+/// in the configuration, which held `original`, and returns its counts.
+fn pinned_by(root: &Path, args: &[String], original: &[u8], env: &[(&str, &Path)]) -> WorkCounts {
+    let home = temporary("mara-home-");
+    let mut env = env.to_vec();
+    env.push(("HOME", home.path()));
+    let run = cli::run_with(root, args, &env, 0);
+    let config = fs::read(configuration(root)).unwrap();
+    assert_ne!(config, original, "code add wrote no pin");
+    run.work
+}
+
+/// The configuration read and hashed for the edit, then checked at step 2 and again before its
+/// rename (DES-WRITE-PROCEDURE), each check reading it again only when DES-INPUTS-AND-KEYS would.
+/// The test fixes the configuration's last change for each count, whatever the runner's speed:
+/// at least 2 s before the run, so neither check reads it; after every check of the run, so both
+/// do; and, in a debug build, less than 2 s before the first read but 2 s or more before step 2,
+/// held there by the pause point (ADR-DEBUG-PAUSE-POINT), so step 2 reads it and settles it for
+/// the check before the rename. No document or code file is read, parsed or scanned.
 #[test]
 fn code_add_counts() {
     let (server, args) = repository();
-    for size in PULL_REQUEST_SIZES {
-        let corpus = Corpus::generate(size, SEED);
-        let home = temporary("mara-home-");
-        let run = cli::run_with(corpus.root(), &args, &[("HOME", home.path())], 0);
-        // The configuration: read and hashed for the edit, then checked at step 2 and again
-        // before its rename (DES-WRITE-PROCEDURE). No document or code file is read, parsed or
-        // scanned.
-        let expected = WorkCounts {
-            file_reads: 3,
-            hashes: 3,
-            ..WorkCounts::default()
-        };
-        assert_eq!(run.work, expected, "mara code add at {size}×");
+    let corpora: Vec<(usize, Corpus, Vec<u8>)> = PULL_REQUEST_SIZES
+        .iter()
+        .map(|&size| {
+            let corpus = Corpus::generate(size, SEED);
+            let original = fs::read(configuration(corpus.root())).unwrap();
+            (size, corpus, original)
+        })
+        .collect();
+    let counts = |reads| WorkCounts {
+        file_reads: reads,
+        hashes: reads,
+        ..WorkCounts::default()
+    };
+    let mut runs = 0;
+
+    // Settled: the write row of VER-WORK-COUNTERS, a cold request's one read and nothing more.
+    restore::settle(SystemTime::now());
+    for (size, corpus, original) in &corpora {
+        let work = pinned_by(corpus.root(), &args, original, &[]);
+        assert_eq!(work, counts(1), "mara code add at {size}×, settled");
+        runs += 1;
     }
-    assert_eq!(server.connections(), 2 * PULL_REQUEST_SIZES.len());
+
+    // Unsettled at every check: its last change an hour ahead of the run's clock.
+    for (size, corpus, original) in &corpora {
+        let path = configuration(corpus.root());
+        fs::write(&path, original).unwrap();
+        let ahead = SystemTime::now() + Duration::from_secs(3600);
+        fs::File::open(&path).unwrap().set_modified(ahead).unwrap();
+        let work = pinned_by(corpus.root(), &args, original, &[]);
+        assert_eq!(work, counts(3), "mara code add at {size}×, unsettled");
+        runs += 1;
+    }
+
+    // Settled between the first read and step 2.
+    #[cfg(debug_assertions)]
+    for (size, corpus, original) in &corpora {
+        let (work, attempts) = settled_at_step_2(corpus.root(), &args, original);
+        assert_eq!(
+            work,
+            counts(2),
+            "mara code add at {size}×, settled at step 2"
+        );
+        runs += attempts;
+    }
+
+    assert_eq!(server.connections(), 2 * runs);
+}
+
+/// The counts of a `code add` whose configuration, written anew, settles while the writer waits
+/// at its pause point before step 2: the first read came less than 2 s after that write, step 2
+/// comes 2 s or more after it. A run whose pause came 2 s or more after the write, so that the
+/// first read may have settled it too, is repeated, three times at most. Also returns the number
+/// of runs.
+#[cfg(debug_assertions)]
+fn settled_at_step_2(root: &Path, args: &[String], original: &[u8]) -> (WorkCounts, usize) {
+    let path = configuration(root);
+    let mut late = Vec::new();
+    for attempt in 1..=3 {
+        fs::write(&path, original).unwrap();
+        let metadata = fs::symlink_metadata(&path).unwrap();
+        let changed = {
+            use std::os::unix::fs::MetadataExt;
+            let time = |seconds: i64, nanos: i64| {
+                SystemTime::UNIX_EPOCH
+                    + Duration::new(seconds.cast_unsigned(), u32::try_from(nanos).unwrap())
+            };
+            let modified = time(metadata.mtime(), metadata.mtime_nsec());
+            modified.max(time(metadata.ctime(), metadata.ctime_nsec()))
+        };
+        let pauses = temporary("mara-pauses-");
+        let paused = pauses.path().join("paused");
+        let (work, first) = std::thread::scope(|scope| {
+            let env = [("MARA_TEST_PAUSE", pauses.path())];
+            let run = scope.spawn(move || pinned_by(root, args, original, &env));
+            // The contents of `paused` once the writer stopped, and when the test saw it.
+            let stop = |run: &std::thread::ScopedJoinHandle<_>| loop {
+                if let Ok(contents) = fs::read(&paused) {
+                    return (contents, SystemTime::now());
+                }
+                assert!(!run.is_finished(), "code add ended without its pause");
+                std::thread::sleep(Duration::from_millis(5));
+            };
+            // Empty: the stop before step 2, after the first read.
+            let (contents, first) = stop(&run);
+            assert!(contents.is_empty(), "the first pause is before step 2");
+            restore::settle(changed);
+            fs::remove_file(&paused).unwrap();
+            // The stop of step 3, before the check that precedes the rename.
+            let (contents, _) = stop(&run);
+            assert_eq!(contents, b".mara/config.toml");
+            fs::remove_file(&paused).unwrap();
+            (run.join().unwrap(), first)
+        });
+        if first < changed + Duration::from_secs(2) {
+            return (work, attempt);
+        }
+        late.push(first.duration_since(changed).unwrap());
+    }
+    panic!("every first read may have come 2 s or more after the write: {late:?}");
 }
 
 /// Times `code add` alone: the configuration it pinned is restored before each run, outside the
