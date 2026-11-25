@@ -28,6 +28,9 @@ tree-sitter = { version = "0.27.0", features = ["wasm"] }
 ureq = { version = "3.5.0", default-features = false, features = ["rustls"] }
 # The private directory of an evaluation (DES-RULE-EXECUTION), removed when it ends.
 tempfile = "3.27"
+# The head of a request to the daemon's listener for browsers (ADR-HTTPARSE-LISTENER), the
+# parser that `ureq` already builds.
+httparse = "1.10.1"
 
 # The limits of the `souffle` child process (DES-RULE-EXECUTION); the daemon's user ID, peer
 # credentials, `fork`, `setsid` and signals (DES-DAEMON-LIFECYCLE); and the CPU time of the

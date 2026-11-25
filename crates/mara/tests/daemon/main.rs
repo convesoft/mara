@@ -3,7 +3,7 @@
 //! through `mara daemon start`, and the daemon's idle exit (DES-DAEMON-LIFECYCLE,
 //! ADR-TEST-IDLE-PERIOD in `docs/daemon/index.mara.md`); the CLI and MCP clients in [`client`]
 //! and [`mcp`]; VER-NEVER-STALE in [`fresh`]; VER-DAEMON-WRITES in [`writes`]; the client's deadlines in
-//! [`deadlines`].
+//! [`deadlines`]; VER-BROWSER-ACCESS in [`browser`].
 //!
 //! Every test has a runtime directory of its own, set as `XDG_RUNTIME_DIR`. A daemon of the
 //! test is a process of a binary under test whose environment holds that directory; a test
@@ -35,6 +35,7 @@ mod derived;
 #[path = "../support/daemons.rs"]
 mod support;
 
+mod browser;
 mod caller;
 mod client;
 mod deadlines;

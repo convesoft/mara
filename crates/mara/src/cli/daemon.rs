@@ -5,18 +5,24 @@
 //! sends one request per frame: a JSON object with `version`, the client's `build` key and
 //! `request`, the request's name. The daemon answers each with one frame: a JSON object with
 //! its `pid`, and `error` with `message` when it refuses the request ([`server`]).
+//!
+//! `daemon start --http` also starts the daemon's listener for browsers (DES-BROWSER-LISTENER),
+//! whose port and token `start` and `status` print.
 
 mod server;
 
+use std::collections::BTreeSet;
+use std::fs;
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
+use mara::caller::Caller;
 use mara::daemon::{self, Build, PROTOCOL_VERSION, Runtime, Unavailable};
 use mara_engine::json::Object;
 use serde_json::{Value, json};
 
-use super::{Args, Context, FORMAT_VERSION, Failure, Operation, Response, Run, SUCCESS};
+use super::{Args, Context, FORMAT_VERSION, Failure, Kind, Operation, Opt, Response, Run, SUCCESS};
 
 pub const STATUS: Operation = Operation {
     words: &["daemon", "status"],
@@ -29,11 +35,116 @@ pub const STATUS: Operation = Operation {
 
 pub const START: Operation = Operation {
     words: &["daemon", "start"],
-    summary: "Starts the daemon of this build in the background unless it runs.",
+    summary: "Starts the daemon of this build in the background unless it runs; with `--http`, \
+              one that also serves browsers of the allowed origins on the allowed projects.",
     arguments: &[],
-    options: &[],
+    options: &[HTTP, ALLOW_ORIGIN, ALLOW_PROJECT],
     run: Run::Command(start),
 };
+
+/// `--http`: the daemon listens for browsers (DES-BROWSER-LISTENER).
+const HTTP: Opt = Opt {
+    name: "http",
+    value: "",
+    help: "Listens for browsers on a loopback port, until `mara daemon stop`.",
+    repeatable: false,
+    required: false,
+    kind: Kind::Flag,
+    check: |_| Ok(()),
+};
+
+/// `--allow-origin <origin>`: an origin whose pages may reach the listener. Repeatable.
+const ALLOW_ORIGIN: Opt = Opt {
+    name: "allow-origin",
+    value: "origin",
+    help: "An origin whose pages may reach the listener, as a browser sends it: \
+           `http://127.0.0.1:5173`.",
+    repeatable: true,
+    required: false,
+    kind: Kind::Text,
+    check: origin,
+};
+
+/// `--allow-project <dir>`: a project root that browsers may reach. Repeatable.
+const ALLOW_PROJECT: Opt = Opt {
+    name: "allow-project",
+    value: "dir",
+    help: "A project root that browsers may reach, absolute or relative to the working \
+           directory.",
+    repeatable: true,
+    required: false,
+    kind: Kind::Text,
+    check: |_| Ok(()),
+};
+
+// @mara implements REQ-BROWSER-ACCESS-AUTHORIZED
+/// Checks that `value` is an origin as a browser sends it in `Origin`: `http` or `https`, `://`,
+/// a host in lowercase and an optional port other than the scheme's default, with no path, no
+/// trailing `/`, no user and no `*`. `null` is refused.
+fn origin(value: &str) -> Result<(), String> {
+    let refuse = || {
+        Err(format!(
+            "`{value}` is no origin as a browser sends it: write `http://` or `https://`, a host \
+             and an optional port, such as `http://127.0.0.1:5173`, with no path, no `/` at the \
+             end and no `*`"
+        ))
+    };
+    let (rest, default) = match (
+        value.strip_prefix("http://"),
+        value.strip_prefix("https://"),
+    ) {
+        (Some(rest), _) => (rest, "80"),
+        (_, Some(rest)) => (rest, "443"),
+        _ => return refuse(),
+    };
+    let (host, port) = match rest.strip_prefix('[') {
+        // An IPv6 address.
+        Some(inner) => match inner.split_once(']') {
+            Some((address, after)) if !address.is_empty() => {
+                if !address
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() || b":.".contains(&byte))
+                    || address.bytes().any(|byte| byte.is_ascii_uppercase())
+                {
+                    return refuse();
+                }
+                match after {
+                    "" => ("[]", None),
+                    after => match after.strip_prefix(':') {
+                        Some(port) => ("[]", Some(port)),
+                        None => return refuse(),
+                    },
+                }
+            }
+            _ => return refuse(),
+        },
+        None => match rest.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (rest, None),
+        },
+    };
+    let label = |label: &str| {
+        !label.is_empty()
+            && (label.bytes())
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    };
+    if host != "[]" && !host.split('.').all(label) {
+        return refuse();
+    }
+    match port {
+        None => Ok(()),
+        Some(port)
+            if !port.is_empty()
+                && !port.starts_with('0')
+                && port.bytes().all(|byte| byte.is_ascii_digit())
+                && port.parse::<u16>().is_ok()
+                && port != default =>
+        {
+            Ok(())
+        }
+        Some(_) => refuse(),
+    }
+}
 
 pub const STOP: Operation = Operation {
     words: &["daemon", "stop"],
@@ -56,6 +167,42 @@ struct Running {
     sessions: Vec<String>,
     /// Operation requests it has run and answered.
     served: u64,
+    /// Its listener for browsers, if it has one.
+    http: Option<Listening>,
+}
+
+/// A listener for browsers: what it was started with and what it serves on.
+#[derive(Debug, PartialEq, Eq)]
+struct Listening {
+    port: u64,
+    token: String,
+    origins: BTreeSet<String>,
+    /// Canonical roots.
+    projects: BTreeSet<String>,
+}
+
+impl Listening {
+    fn of(http: &Value) -> Option<Listening> {
+        let strings = |name: &str| -> BTreeSet<String> {
+            (http[name].as_array().into_iter().flatten())
+                .filter_map(|value| value.as_str().map(str::to_owned))
+                .collect()
+        };
+        Some(Listening {
+            port: http["port"].as_u64()?,
+            token: http["token"].as_str()?.to_owned(),
+            origins: strings("origins"),
+            projects: strings("projects"),
+        })
+    }
+
+    /// The human form's line that names it.
+    fn line(&self) -> String {
+        format!(
+            "It listens for browsers at http://127.0.0.1:{} with the token {}.\n",
+            self.port, self.token
+        )
+    }
 }
 
 /// This build, and its runtime directory or why it has none.
@@ -117,6 +264,7 @@ fn running(runtime: &Runtime, build: &Build) -> io::Result<Option<Running>> {
         pid: answer["pid"].as_u64().unwrap_or_default(),
         sessions,
         served: answer["served"].as_u64().unwrap_or_default(),
+        http: Listening::of(&answer["http"]),
     }))
 }
 
@@ -160,6 +308,9 @@ fn status(_: &mut Context, _: &Args) -> Result<Response, Failure> {
                  requests.\n",
                 running.pid, running.served
             );
+            if let Some(http) = &running.http {
+                text.push_str(&http.line());
+            }
             if running.sessions.is_empty() {
                 text.push_str("Sessions: none\n");
             } else {
@@ -200,6 +351,8 @@ fn status(_: &mut Context, _: &Args) -> Result<Response, Failure> {
         "served",
         found.as_ref().map(|running| running.served),
     );
+    let http = found.as_ref().and_then(|running| running.http.as_ref());
+    listener_fields(&mut object, http);
     object.optional_string("socket", paths.as_ref().map(|paths| paths.0.as_str()));
     object.optional_string("lock", paths.as_ref().map(|paths| paths.1.as_str()));
     object.optional_string(
@@ -217,10 +370,61 @@ fn status(_: &mut Context, _: &Args) -> Result<Response, Failure> {
     })
 }
 
+/// `port` and `token` of a listener, or null for each.
+fn listener_fields(object: &mut Object, http: Option<&Listening>) {
+    null_or_number(object, "port", http.map(|http| http.port));
+    object.optional_string("token", http.map(|http| http.token.as_str()));
+}
+
+/// The origins and the canonical roots of the projects of a listener for browsers.
+type Allowed = (BTreeSet<String>, BTreeSet<String>);
+
+/// The listener that `daemon start` asks for, if any: its origins and the canonical roots of its
+/// projects, which `--allow-project` names from the working directory.
+fn wanted(context: &Context, args: &Args) -> Result<Option<Allowed>, Failure> {
+    let http = args.value(HTTP.name).is_some();
+    let origins: BTreeSet<String> = args.values(ALLOW_ORIGIN.name).map(str::to_owned).collect();
+    let paths: Vec<&str> = args.values(ALLOW_PROJECT.name).collect();
+    match (http, origins.is_empty(), paths.is_empty()) {
+        (false, true, true) => return Ok(None),
+        (false, _, _) => {
+            return Err(Failure::rejected(
+                "`--allow-origin` and `--allow-project` need `--http`".to_owned(),
+            ));
+        }
+        (true, false, false) => {}
+        (true, _, _) => {
+            return Err(Failure::rejected(
+                "`--http` needs `--allow-origin <origin>` and `--allow-project <dir>`, each at \
+                 least once"
+                    .to_owned(),
+            ));
+        }
+    }
+    let cwd = context.cwd()?;
+    let mut projects = BTreeSet::new();
+    for path in paths {
+        let refuse = |why: String| Failure::rejected(format!("`--allow-project`: `{path}` {why}"));
+        let root = fs::canonicalize(cwd.join(path))
+            .map_err(|error| refuse(format!("cannot be resolved: {error}")))?;
+        if !root.is_dir() {
+            return Err(refuse("names no directory".to_owned()));
+        }
+        let root = root
+            .to_str()
+            .ok_or_else(|| refuse("is not UTF-8".to_owned()))?;
+        projects.insert(root.to_owned());
+    }
+    Ok(Some((origins, projects)))
+}
+
 /// Starts the daemon unless one of this build runs. When another process holds the lock, as a
 /// daemon does while it starts, waits until a daemon answers. The daemon opens the session of
-/// the project that `--project` names or that holds the working directory, if any.
-fn start(context: &mut Context, _: &Args) -> Result<Response, Failure> {
+/// the project that `--project` names or that holds the working directory, if any. With `--http`
+/// it also listens for browsers; a daemon that runs already must listen with the same origins
+/// and projects.
+fn start(context: &mut Context, args: &Args) -> Result<Response, Failure> {
+    let wanted = wanted(context, args)?;
     let (build, runtime) = target()?;
     // Before the fork: the daemon runs in `/`.
     let project = context.root().ok();
@@ -233,14 +437,37 @@ fn start(context: &mut Context, _: &Args) -> Result<Response, Failure> {
     runtime.create().map_err(io_failure)?;
     let lock = runtime.open_lock().map_err(io_failure)?;
     let deadline = Instant::now() + START_TIMEOUT;
-    let (started, pid) = loop {
+    let (started, pid, http) = loop {
         if let Some(running) = running(&runtime, &build).map_err(io_failure)? {
-            break (false, running.pid);
+            break (false, running.pid, running.http);
         }
         if daemon::try_lock(&lock).map_err(io_failure)? {
-            let pid = server::launch(&runtime, &build, lock, project.clone())
+            let browsers = match &wanted {
+                Some((origins, projects)) => {
+                    let caller = Caller {
+                        // A relative `TMPDIR` names a directory of the caller's.
+                        temp_dir: context.cwd()?.join(&context.caller.temp_dir),
+                        ..context.caller.clone()
+                    };
+                    let projects = projects.iter().map(Into::into).collect();
+                    let origins = origins.iter().cloned().collect();
+                    Some(server::bind(origins, projects, caller).map_err(|error| {
+                        Failure::new("io-error", format!("cannot listen for browsers: {error}"))
+                    })?)
+                }
+                None => None,
+            };
+            let http = browsers.as_ref().map(|browsers| Listening {
+                port: u64::from(browsers.access.port),
+                token: browsers.access.token.clone(),
+                origins: browsers.access.origins.iter().cloned().collect(),
+                projects: (browsers.access.projects.iter())
+                    .map(|root| root.to_string_lossy().into_owned())
+                    .collect(),
+            });
+            let pid = server::launch(&runtime, &build, lock, project.clone(), browsers)
                 .map_err(|message| Failure::new("io-error", message))?;
-            break (true, u64::from(pid));
+            break (true, u64::from(pid), http);
         }
         if Instant::now() >= deadline {
             let holder = match runtime.lock_holder() {
@@ -260,16 +487,38 @@ fn start(context: &mut Context, _: &Args) -> Result<Response, Failure> {
         }
         std::thread::sleep(START_POLL);
     };
-    let human = if started {
+    if let Some((origins, projects)) = &wanted
+        && !started
+    {
+        let other = match &http {
+            None => "does not listen for browsers",
+            Some(http) if (&http.origins, &http.projects) == (origins, projects) => "",
+            Some(_) => "listens for browsers with other origins or projects",
+        };
+        if !other.is_empty() {
+            return Err(Failure::new(
+                "daemon-running",
+                format!(
+                    "the daemon of this build already runs as process {pid} and {other}; it is \
+                     left as it is: stop it with `mara daemon stop` first"
+                ),
+            ));
+        }
+    }
+    let mut human = if started {
         format!("Started the daemon of this build as process {pid}.\n")
     } else {
         format!("The daemon of this build already runs as process {pid}.\n")
     };
+    if let Some(http) = &http {
+        human.push_str(&http.line());
+    }
     let mut json = String::new();
     let mut object = Object::new(&mut json);
     object.number("format_version", FORMAT_VERSION);
     object.bool("started", started);
     object.number("pid", pid);
+    listener_fields(&mut object, http.as_ref());
     object.end();
     Ok(Response {
         json,
@@ -335,4 +584,48 @@ fn stop_daemon(runtime: &Runtime, build: &Build) -> io::Result<Option<Option<u64
         }
     }
     Ok(Some(answer["pid"].as_u64()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::origin;
+
+    #[test]
+    fn accepts_origins_only_as_browsers_send_them() {
+        for good in [
+            "http://127.0.0.1:5173",
+            "https://example.com",
+            "http://localhost",
+            "http://[::1]:8080",
+            "https://a-b.example.com:8443",
+        ] {
+            assert_eq!(origin(good), Ok(()), "{good}");
+        }
+        for bad in [
+            "*",
+            "null",
+            "",
+            "file:///",
+            "127.0.0.1:5173",
+            "http://*.example.com",
+            "http://127.0.0.1:5173/",
+            "http://127.0.0.1:5173/path",
+            "http://Example.com",
+            "HTTP://example.com",
+            "http://user@example.com",
+            "http://example.com:80",
+            "https://example.com:443",
+            "http://example.com:",
+            "http://example.com:08080",
+            "http://example.com:65536",
+            "http://example..com",
+            "http://",
+            "http://[::1",
+            "http://[]:80",
+            "http://[::1]x",
+            "ws://example.com",
+        ] {
+            assert!(origin(bad).is_err(), "{bad}");
+        }
+    }
 }
