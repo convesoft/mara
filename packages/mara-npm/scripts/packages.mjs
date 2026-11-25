@@ -75,6 +75,20 @@ export function tarballName(name, version) {
   return `${name.replace(/^@/, "").replace("/", "-")}-${version}.tgz`;
 }
 
+// The packages for any platform, which one job packs: the dispatcher last, because the release
+// publishes them in this order after every native package, and the dispatcher's optional
+// dependencies name the native packages.
+export const anyPlatformPackages = [dispatcherName];
+
+// Every package of a version, in the release workflow's order (DES-RELEASE-WORKFLOW): the native
+// packages of `platforms`, which a Build job each packs, then `anyPlatformPackages`.
+export function releasePackages(version) {
+  return [
+    ...platforms.map((platform) => ({ name: platform.name, native: true })),
+    ...anyPlatformPackages.map((name) => ({ name, native: false })),
+  ].map((entry) => ({ ...entry, tarball: tarballName(entry.name, version) }));
+}
+
 // The problems of a tarball's file list against `files`: a missing, unexpected or repeated file,
 // or a file of another mode or type. `command` and `output` are the listing that was checked.
 // `tar -tzf` gives each member's name on a line of its own, spaces included; `tar -tvzf` lists the
