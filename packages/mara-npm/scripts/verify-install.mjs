@@ -5,6 +5,10 @@
 //                                           by default dist/npm of the workspace
 //   verify-install.mjs --registry <version> @convesoft/mara@<version> from the npm registry
 //
+// Both compare the installed dispatcher's `docs/` with the files that Git tracks under `docs/` at the
+// checkout's HEAD, so they run from a checkout of the packed commit whose `docs/` Git reports clean:
+// with --registry, the commit of that version.
+//
 // It prints one line per case and exits 1 if any fails, naming the command and its output.
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -539,6 +543,12 @@ async function main() {
     dispatcher = dispatcherContents();
     const docs = path.join(installed, "node_modules", ...dispatcherName.split("/"));
     const problems = installedDocsProblems(docs, dispatcher.blobs);
+    const checkout = workspace().version;
+    if (problems.length > 0 && checkout !== version) {
+      problems.push(
+        `the checkout is at version ${checkout}, not ${version}: run from a checkout of ${version}'s commit`,
+      );
+    }
     return {
       problem: problems.length > 0 ? problems.join("; ") : undefined,
       details: `  compared: ${path.join(docs, "docs")} with docs/ at HEAD of ${root}\n`,

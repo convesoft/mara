@@ -72,6 +72,18 @@ export function hostPlatform() {
   return platform;
 }
 
+// The parts of `buffer` between the bytes `separator`, without empty ones.
+function split(buffer, separator) {
+  const parts = [];
+  let start = 0;
+  for (let end = buffer.indexOf(separator); end !== -1; end = buffer.indexOf(separator, start)) {
+    parts.push(buffer.subarray(start, end));
+    start = end + 1;
+  }
+  parts.push(buffer.subarray(start));
+  return parts.filter((part) => part.length > 0);
+}
+
 function git(repository, args, options = {}) {
   return execFileSync("git", ["-C", repository, ...args], {
     maxBuffer: 256 * 1024 * 1024,
@@ -82,19 +94,20 @@ function git(repository, args, options = {}) {
 
 // The files that Git tracks under `docs/` at HEAD of `repository`, the packed commit (ADR-BUNDLED-
 // DOCS): a map from each path to its blob's object ID. Fails when a tracked entry is not a regular
-// file, such as a symbolic link, or when the working tree's `docs/` differs from HEAD by a
-// modified, staged, deleted, untracked or ignored file.
+// file, such as a symbolic link, or its name is not UTF-8 or holds a line break, and when Git
+// reports the working tree's `docs/` as different from HEAD by a modified, staged, deleted,
+// untracked or ignored file; files that a sparse checkout leaves out are not compared, and what is
+// packed always comes from the commit.
 export function trackedDocs(repository = root) {
   const docs = new Map();
   const others = [];
-  for (const entry of git(repository, ["ls-tree", "-r", "-z", "HEAD", "--", "docs"], {
-    encoding: "utf8",
-  })
-    .split("\0")
-    .filter(Boolean)) {
+  const listing = git(repository, ["ls-tree", "-r", "-z", "HEAD", "--", "docs"]);
+  for (const bytes of split(listing, 0)) {
+    const entry = bytes.toString("utf8");
     const [, mode, type, id, file] = entry.match(/^(\d+) (\w+) (\S+)\t(.*)$/s);
-    // tar and `git hash-object --stdin-paths` list one name per line.
-    if (file.includes("\n")) {
+    // The names are compared as UTF-8 text, and tar and `git hash-object --stdin-paths` list one
+    // name per line.
+    if (!Buffer.from(entry, "utf8").equals(bytes) || file.includes("\n")) {
       others.push(JSON.stringify(file));
     } else if (type === "blob" && (mode === "100644" || mode === "100755")) {
       docs.set(file, id);
@@ -104,7 +117,7 @@ export function trackedDocs(repository = root) {
   }
   if (others.length > 0) {
     throw new Error(
-      `docs/ at HEAD holds entries that are not regular files or whose name holds a line break: ${others.join(", ")}`,
+      `docs/ at HEAD holds entries that are not regular files, or whose name is not UTF-8 or holds a line break: ${others.join(", ")}`,
     );
   }
   if (docs.size === 0) {
@@ -216,6 +229,16 @@ export function installedDocsProblems(directory, blobs, repository = root) {
   return docsProblems(docs, blobs, repository);
 }
 
+const tarEscapes = { a: "\x07", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v", "\\": "\\" };
+
+// A name as tar lists it in the C locale, decoded into the name's bytes and read as UTF-8.
+export function fromTarListing(listed) {
+  const bytes = listed.replace(/\\([0-7]{3}|[abfnrtv\\])/g, (_, escape) =>
+    escape.length === 3 ? String.fromCharCode(Number.parseInt(escape, 8)) : tarEscapes[escape],
+  );
+  return Buffer.from(bytes, "latin1").toString("utf8");
+}
+
 // The file name that `npm pack` gives a package's tarball.
 export function tarballName(name, version) {
   return `${name.replace(/^@/, "").replace("/", "-")}-${version}.tgz`;
@@ -238,13 +261,21 @@ export function releasePackages(version) {
 // The problems of a tarball's file list against `files`: a missing, unexpected or repeated file,
 // or a file of another mode or type. `command` and `output` are the listing that was checked.
 // `tar -tzf` gives each member's name on a line of its own, spaces included; `tar -tvzf` lists the
-// members in the same order and starts each line with the type and mode, on GNU and BSD tar.
+// members in the same order and starts each line with the type and mode, on GNU and BSD tar. Both
+// run in the C locale, where GNU tar and bsdtar write a backslash as `\\`, a control character as
+// a C escape and every other byte outside printable ASCII as `\ooo`; `fromTarListing` decodes that
+// into the name's UTF-8 text, so that the caller's locale changes nothing.
 // `blobs`, from `dispatcherContents`, adds the comparison of the tarball's `docs/` with the packed
 // commit, on a copy that tar extracts into a new temporary directory.
 export function tarballProblems(tarball, files, blobs = new Map()) {
   const list = (flags) =>
-    execFileSync("tar", [flags, tarball], { encoding: "utf8" }).split("\n").filter(Boolean);
-  const names = list("-tzf");
+    execFileSync("tar", [flags, tarball], {
+      encoding: "latin1",
+      env: { ...process.env, LC_ALL: "C" },
+    })
+      .split("\n")
+      .filter(Boolean);
+  const names = list("-tzf").map(fromTarListing);
   const verbose = list("-tvzf");
   const modes = verbose.map((line) => line.trim().split(/\s+/)[0]);
   const entries = names.map((name, index) => ({

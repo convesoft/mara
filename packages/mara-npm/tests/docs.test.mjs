@@ -127,6 +127,23 @@ test("packaging refuses a commit without docs/", (t) => {
   assert.throws(() => trackedDocs(repo), /Git tracks no file under docs\//);
 });
 
+// tar and `git hash-object --stdin-paths` list one name per line, and names compare as UTF-8.
+for (const [name, file] of [
+  ["a line break", Buffer.from("docs/two\nlines.md")],
+  [
+    "a byte that is not UTF-8",
+    Buffer.from([...Buffer.from("docs/latin"), 0xe9, ...Buffer.from(".md")]),
+  ],
+]) {
+  test(`packaging refuses a tracked page whose name holds ${name}`, (t) => {
+    const { repo, git } = repository(t);
+    fs.writeFileSync(Buffer.concat([Buffer.from(`${repo}/`), file]), "x");
+    git("add", "docs");
+    git("commit", "--quiet", "--message", "name");
+    assert.throws(() => trackedDocs(repo), /whose name is not UTF-8 or holds a line break/);
+  });
+}
+
 // A tarball as npm packs it: one member per file under `package/`, no directory members.
 function tarball(directory, name, files) {
   const stage = path.join(directory, `stage-${name}`);

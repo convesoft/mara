@@ -58,7 +58,8 @@ function baseManifest(name, description, license) {
 }
 
 // Stages `sources`, a map from each packed path but `package.json` to its source file or
-// `{ contents }`, with `manifest` as `package.json`; packs it with npm, offline and with an empty
+// `{ contents }`, with `manifest` as `package.json`, whose `files` lists the sources unless the
+// manifest names them itself; packs it with npm, offline and with an empty
 // cache of its own; checks the tarball against `files`, the package's paths and modes, and
 // against `blobs`, the contents of the dispatcher's `docs/` (`tarballProblems`); and only then
 // renames it over the tarball of the same name in `outDir`. A failure leaves that tarball as it
@@ -87,7 +88,7 @@ function pack(outDir, manifest, sources, files, blobs) {
     }
     writeFileSync(
       path.join(contents, "package.json"),
-      `${JSON.stringify({ ...manifest, files: Object.keys(sources) }, null, 2)}\n`,
+      `${JSON.stringify({ ...manifest, files: manifest.files ?? Object.keys(sources) }, null, 2)}\n`,
     );
 
     mkdirSync(outDir, { recursive: true });
@@ -131,6 +132,8 @@ function packDispatcher(outDir) {
     bin: { mara: "bin/mara.cjs" },
     engines: { node: ">=24" },
     optionalDependencies: Object.fromEntries(platforms.map((platform) => [platform.name, version])),
+    // The folder, not each page, which npm would read as a pattern (ADR-BUNDLED-DOCS).
+    files: ["bin/mara.cjs", "README.md", "LICENSE-MIT", "LICENSE-APACHE", "docs"],
   };
   // `docs/` as Git tracks it at HEAD, read from Git's objects (ADR-BUNDLED-DOCS).
   const { files, blobs } = dispatcherContents();
