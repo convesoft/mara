@@ -1,6 +1,6 @@
 ---
 title: The Node addon, Node library and browser assets are packed, verified and in the release
-status: todo
+status: in-progress
 type: feature
 parent: mara-xzfeyj
 blocked_by:
