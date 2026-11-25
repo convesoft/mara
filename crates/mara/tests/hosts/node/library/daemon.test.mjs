@@ -250,6 +250,33 @@ describe("the Node client is a client of its package's daemon", { timeout: 600_0
     assert.notEqual(other.pid, running.pid);
     assert.equal(status(installation.mara).pid, running.pid);
   });
+
+  test("a loaded addon starts no daemon of a mara that replaced its own", async () => {
+    const root = await project();
+    if (!status(installation.mara).running) {
+      daemon(installation.mara, ["start"]);
+    }
+    const client = startClient(installation, { cwd: root });
+    const original = `${installation.mara}.original`;
+    try {
+      // The first call takes the build of the package's `mara`, whose daemon serves it.
+      const before = status(installation.mara).served;
+      assert.ok((await client.run(...READ)).result);
+      assert.equal(status(installation.mara).served, before + 1);
+      await stopDaemons([installation.mara, copied.mara]);
+      // Another build at the same path, and no daemon of the test running.
+      renameSync(installation.mara, original);
+      copyFileSync(original, installation.mara);
+      chmodSync(installation.mara, 0o755);
+      const answer = await client.run(...READ, { debugStats: true });
+      assert.deepEqual(answer.result?.stats, cold(root), "served in-process");
+      await noneStarts();
+    } finally {
+      rmSync(installation.mara, { force: true });
+      renameSync(original, installation.mara);
+      await client.close();
+    }
+  });
 });
 
 /** A daemon of `installation` whose writer waits at each pause point, and its pauses' directory. */

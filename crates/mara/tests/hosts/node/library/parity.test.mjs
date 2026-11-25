@@ -9,8 +9,10 @@
 // first row of VER-UNAVAILABLE-NOT-PARTIAL through the daemon from Chromium.
 //
 // A case needs only what its host uses (VER-HOST-COMPARISON): the Node cases the addon, which
-// `node()` installs, and the browser cases Chromium and the browser package, which `page()`
-// opens. Each is made on the first case that needs it, so a missing one fails only those cases.
+// `node()` installs; the browser cases Chromium and the browser package, which `page()` opens,
+// those through the daemon also the listening daemon, which `listening()` starts, and the
+// workspace's case Soufflé's module. Each is made on the first case that needs it, so a missing
+// one fails only those cases.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -109,7 +111,9 @@ function servedBy(mara, pid, { nonExecutable = false } = {}) {
       return now.served;
     },
     after: (before, count, shown) => {
-      chmodSync(mara, 0o755);
+      if (nonExecutable) {
+        chmodSync(mara, 0o755);
+      }
       const now = status(mara);
       assert.equal(now.pid, pid);
       assert.equal(now.served - before, count, `${shown}: the requests the daemon answered`);
@@ -137,7 +141,6 @@ describe("the Node and browser hosts answer as CLI direct mode", { timeout: 1_80
 
   /** A page of `on`, a server of the test, in Chromium, which loads the browser package. */
   const open = async (on) => {
-    requireSouffle();
     browser ??= await launchBrowser();
     const page = await openPage(browser, on);
     pages.push(page);
@@ -146,17 +149,11 @@ describe("the Node and browser hosts answer as CLI direct mode", { timeout: 1_80
   const page = once(() => open(server));
   const url = () => `http://127.0.0.1:${listener.port}`;
 
-  before(async () => {
-    roots.node = copy(corpus.root);
-    roots.embedded = copy(corpus.root);
-    roots.daemon = copy(corpus.root);
-    roots.browser = copy(corpus.root);
-    roots.http = copy(corpus.root);
-    roots.legacy = copy(legacy.root);
-    server = await startServer();
-    other = await startServer();
-    // The listening daemon, of the build's `mara`, outside every project, for the first
-    // server's pages.
+  /**
+   * The listening daemon, of the build's `mara`, outside every project, for the first server's
+   * pages: started by the first browser case that needs it.
+   */
+  const listening = once(async () => {
     listener = daemon(maraBin, [
       "start",
       "--http",
@@ -168,6 +165,19 @@ describe("the Node and browser hosts answer as CLI direct mode", { timeout: 1_80
       roots.legacy,
     ]);
     assert.equal(typeof listener.token, "string", JSON.stringify(listener));
+    return listener;
+  });
+
+  before(async () => {
+    roots.node = copy(corpus.root);
+    roots.embedded = copy(corpus.root);
+    roots.daemon = copy(corpus.root);
+    roots.browser = copy(corpus.root);
+    roots.workspace = copy(corpus.root);
+    roots.http = copy(corpus.root);
+    roots.legacy = copy(legacy.root);
+    server = await startServer();
+    other = await startServer();
   });
 
   after(async () => {
@@ -189,6 +199,7 @@ describe("the Node and browser hosts answer as CLI direct mode", { timeout: 1_80
   });
 
   test("a page of another origin is refused, and one of the allowed origin is served", async () => {
+    await listening();
     // VER-BROWSER-ACCESS's Chromium case: the second page first, then the first.
     const second = await open(other);
     assert.deepEqual(await second.harness("connect", url(), listener.token, roots.http), {});
@@ -258,17 +269,15 @@ describe("the Node and browser hosts answer as CLI direct mode", { timeout: 1_80
     assert.ok(daemonsOfTest().includes(pid));
   });
 
-  test("the daemon case's requests give Chromium through the daemon and a workspace direct mode's results", async () => {
+  test("the daemon case's requests give Chromium through the daemon direct mode's results", async () => {
+    await listening();
     const browserPage = await page();
     const pid = status(maraBin).pid;
     assert.deepEqual(await browserPage.harness("connect", url(), listener.token, roots.http), {});
-    const supplied = filesOf(roots.browser);
-    assert.deepEqual(await browserPage.harness("create", encode(supplied)), {});
     const lockstep = new Lockstep(roots.browser, [
       diskHost("Chromium through the daemon", roots.http, (name, args) => browserPage.harness("daemonRun", name, args), {
         served: servedBy(maraBin, pid),
       }),
-      workspaceHost("a browser workspace", browserPage, supplied),
     ]);
     await agentWork(lockstep);
     printed ??= lockstep.printed;
@@ -276,6 +285,19 @@ describe("the Node and browser hosts answer as CLI direct mode", { timeout: 1_80
       .map((tool) => tool.name)
       .filter((name) => !IN_PROCESS.includes(name));
     assert.deepEqual([...lockstep.sent].sort(), documentOperations.sort(), "the operations sent");
+  });
+
+  test("the daemon case's requests give a browser workspace direct mode's results", async () => {
+    // The workspace runs the programs with Soufflé's module.
+    requireSouffle();
+    const browserPage = await page();
+    const supplied = filesOf(roots.workspace);
+    assert.deepEqual(await browserPage.harness("create", encode(supplied)), {});
+    const lockstep = new Lockstep(roots.workspace, [
+      workspaceHost("a browser workspace", browserPage, supplied),
+    ]);
+    await agentWork(lockstep);
+    printed ??= lockstep.printed;
   });
 
   test("the library's types hold what each request of the parity cases printed", async () => {
@@ -357,6 +379,7 @@ describe("the Node and browser hosts answer as CLI direct mode", { timeout: 1_80
   });
 
   test("Chromium through the daemon reports project init and convert as unavailable", async () => {
+    await listening();
     const browserPage = await page();
     const legacyBefore = filesOf(roots.legacy);
     const httpBefore = filesOf(roots.http);
@@ -398,6 +421,7 @@ describe("the Node and browser hosts answer as CLI direct mode", { timeout: 1_80
   });
 
   test("the browser's daemon client reports no work for a failure that ran nothing", async () => {
+    await listening();
     const browserPage = await page();
     assert.deepEqual(await browserPage.harness("connect", url(), listener.token, roots.legacy), {});
     const before = status(maraBin).served;
