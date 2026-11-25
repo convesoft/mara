@@ -108,3 +108,17 @@ test("an error on the first tries is retried", async (t) => {
   assert.equal(result.stdout, `${sha1(tarball)}\n`);
   assert.equal(registry.log.length, 3);
 });
+
+test("a failed mktemp is a failed try, and no request is made", async (t) => {
+  const directory = temporaryDirectory(t);
+  const registry = await startRegistry(t);
+  const env = environment(directory, {
+    NPM_REGISTRY: registry.url,
+    TMPDIR: `${directory}/missing`,
+  });
+  const result = await run("npm-registry.sh", ["shasum", name, version], { cwd: directory, env });
+  assert.equal(result.status, 1, result.output);
+  assert.match(result.stderr, /mktemp failed/);
+  assert.match(result.stderr, /try 5 of 5/);
+  assert.deepEqual(registry.log, []);
+});

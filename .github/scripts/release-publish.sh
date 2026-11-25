@@ -17,7 +17,8 @@
 # NPM_REGISTRY, for tests, names the registry that npm-registry.sh reads and `npm publish` is given.
 set -euo pipefail
 
-here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+script=$(readlink -f "${BASH_SOURCE[0]}")
+here=$(dirname "$script")
 registry="$here/npm-registry.sh"
 directory=$(readlink -f "$1")
 shift
@@ -26,7 +27,9 @@ poll=${RELEASE_POLL_SECONDS:-30}
 wait=${RELEASE_WAIT_SECONDS:-1800}
 
 npm_version=$(npm --version)
-if [ "$(printf '%s\n' 11.5.1 "$npm_version" | sort -V | head -n 1)" != 11.5.1 ]; then
+# `sed -n 1p` reads all of its input, so that `sort` never meets a closed pipe under pipefail.
+lowest=$(printf '%s\n' 11.5.1 "$npm_version" | sort -V | sed -n 1p)
+if [ "$lowest" != 11.5.1 ]; then
   echo "::error::npm $npm_version is older than 11.5.1, the first with Trusted Publishing"
   exit 1
 fi
@@ -48,9 +51,11 @@ publish() {
 }
 
 list=$(jq -r '.[] | select(.native) | "\(.name) \(.tarball)"' <<<"$PACKAGES")
-mapfile -t natives <<<"$list"
+natives=()
+[ -z "$list" ] || mapfile -t natives <<<"$list"
 list=$(jq -r '.[] | select(.native | not) | "\(.name) \(.tarball)"' <<<"$PACKAGES")
-mapfile -t others <<<"$list"
+others=()
+[ -z "$list" ] || mapfile -t others <<<"$list"
 for entry in "${natives[@]}"; do
   read -r name tarball <<<"$entry"
   publish "$name" "$tarball"

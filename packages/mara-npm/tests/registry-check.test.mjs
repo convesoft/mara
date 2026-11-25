@@ -198,3 +198,10 @@ test("npx that prints another version fails once the time is up", async (t) => {
     /printed: mara 0\.0\.0\n::error::npx did not run mara 0\.0\.1 from the registry within 0 seconds/,
   );
 });
+
+test("record of an empty selection writes {} and makes no request", async (t) => {
+  const { registry, result, file } = await distTags(t, "record", () => {}, { PACKAGES: "[]" });
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), {});
+  assert.deepEqual(registry.log, []);
+});

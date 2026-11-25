@@ -11,7 +11,8 @@
 # npm-registry.sh, and `origin` for the tag.
 set -euo pipefail
 
-here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+script=$(readlink -f "${BASH_SOURCE[0]}")
+here=$(dirname "$script")
 
 dist_tag=$DIST_TAG
 sha=$(git rev-parse HEAD)
@@ -53,7 +54,8 @@ if [ -n "$tagged" ]; then
 fi
 published=()
 list=$(jq -r '.[].name' <<<"$packages")
-mapfile -t names <<<"$list"
+names=()
+[ -z "$list" ] || mapfile -t names <<<"$list"
 for name in "${names[@]}"; do
   shasum=$("$here/npm-registry.sh" shasum "$name" "$version")
   if [ -n "$shasum" ]; then

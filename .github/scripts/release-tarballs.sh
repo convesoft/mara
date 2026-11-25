@@ -19,9 +19,11 @@ record() {
   local directory=$1 out=$2 label=$3 tarball list
   local -a any natives tarballs found=() unexpected=()
   list=$(jq -r '.[] | select(.native | not) | .tarball' <<<"$PACKAGES")
-  mapfile -t any <<<"$list"
+  any=()
+  [ -z "$list" ] || mapfile -t any <<<"$list"
   list=$(jq -r '.[] | select(.native) | .tarball' <<<"$PACKAGES")
-  mapfile -t natives <<<"$list"
+  natives=()
+  [ -z "$list" ] || mapfile -t natives <<<"$list"
   case $out in
     /*) ;;
     *) out="$PWD/$out" ;;
@@ -79,19 +81,23 @@ collect() {
       verified[$name]=$sum
     done <"$record"
   done
-  # Tag attaches every visible file of the directory, so it may hold nothing else.
+  # Tag attaches every visible file of the directory, so it may hold nothing else, and no hidden
+  # entry, which neither this check nor Tag would see otherwise.
+  shopt -s dotglob
   for name in *; do
     case $name in
-      *.tgz | verified-*.sha256) ;;
+      [!.]*.tgz | verified-*.sha256) ;;
       *)
         echo "::error::$directory holds $name, which is neither a tarball nor a Build job's record"
         exit 1
         ;;
     esac
   done
+  shopt -u dotglob
   local list sorted recorded present
   list=$(jq -r '.[].tarball' <<<"$PACKAGES")
-  mapfile -t expected <<<"$list"
+  expected=()
+  [ -z "$list" ] || mapfile -t expected <<<"$list"
   sorted=$(printf '%s\n' "${expected[@]}" | sort)
   recorded=$(printf '%s\n' "${!verified[@]}" | sort)
   present=$(printf '%s\n' *.tgz | sort)

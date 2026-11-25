@@ -261,3 +261,21 @@ test("collect fails on a file that is neither a tarball nor a record, which Tag 
   );
   assert.equal(outputs(env).directory, undefined);
 });
+
+test("record takes a table without packages for any platform, and one native tarball", async (t) => {
+  const directory = temporaryDirectory(t);
+  const dist = distribution(directory, "n", [natives[0]], [], natives);
+  const { result, out } = await record(directory, dist, "n", natives);
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(fs.readdirSync(out).sort(), [natives[0].tarball, "verified-n.sha256"].sort());
+});
+
+test("collect fails on a hidden entry, which neither it nor Tag would otherwise see", async (t) => {
+  const directory = temporaryDirectory(t);
+  const merged = await artifacts(directory);
+  fs.writeFileSync(path.join(merged, ".stray"), "hidden");
+  const { result, env } = await collect(directory, merged);
+  assert.equal(result.status, 1, result.output);
+  assert.match(result.stdout, /holds \.stray, which is neither a tarball nor a Build job's record/);
+  assert.equal(outputs(env).directory, undefined);
+});

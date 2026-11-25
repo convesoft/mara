@@ -20,7 +20,11 @@ pause=${NPM_REGISTRY_RETRY_SECONDS:-10}
 # with a reason on stderr.
 answer() {
   local command=$1 package=$2 version=${3:-} body status
-  body=$(mktemp)
+  # Checked explicitly: errexit is off inside the caller's `if`.
+  body=$(mktemp) || {
+    echo "mktemp failed" >&2
+    return 1
+  }
   trap 'rm -f "$body"' RETURN
   status=$(curl -sS --connect-timeout 10 --max-time 30 -o "$body" -w '%{http_code}' \
     -H 'Accept: application/vnd.npm.install-v1+json' -H 'Cache-Control: no-cache' \

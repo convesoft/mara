@@ -15,7 +15,8 @@
 # `check`; NPM_REGISTRY, for tests, as npm-registry.sh reads it.
 set -euo pipefail
 
-here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+script=$(readlink -f "${BASH_SOURCE[0]}")
+here=$(dirname "$script")
 registry="$here/npm-registry.sh"
 
 record() {
@@ -26,7 +27,8 @@ record() {
     return
   fi
   list=$(jq -r '.[].name' <<<"$PACKAGES")
-  mapfile -t names <<<"$list"
+  names=()
+  [ -z "$list" ] || mapfile -t names <<<"$list"
   for name in "${names[@]}"; do
     value=$("$registry" dist-tags "$name")
     tags=$(jq -c --arg name "$name" --argjson value "$value" '.[$name] = $value' <<<"$tags")
@@ -41,7 +43,8 @@ check() {
   before_all=$(cat "$1")
   deadline=$((SECONDS + ${RELEASE_WAIT_SECONDS:-1800}))
   list=$(jq -r '.[].name' <<<"$PACKAGES")
-  mapfile -t names <<<"$list"
+  names=()
+  [ -z "$list" ] || mapfile -t names <<<"$list"
   for name in "${names[@]}"; do
     while :; do
       tags=$("$registry" dist-tags "$name")

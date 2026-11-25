@@ -182,3 +182,12 @@ test("npm older than 11.5.1 fails before the registry is read", async (t) => {
   assert.match(result.stdout, /::error::npm 11\.5\.0 is older than 11\.5\.1/);
   assert.deepEqual(registry.log, []);
 });
+
+test("a table without packages for any platform publishes the native packages alone", async (t) => {
+  const { registry, result } = await publish(t, () => {}, {
+    env: { PACKAGES: JSON.stringify(natives) },
+  });
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(registry.puts(), names(natives));
+  assert.ok(!registry.log.includes("GET "), registry.log.join("\n"));
+});

@@ -12,13 +12,15 @@
 # npm-registry.sh reads and `npm publish` is given.
 set -euo pipefail
 
-here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+script=$(readlink -f "${BASH_SOURCE[0]}")
+here=$(dirname "$script")
 registry="$here/npm-registry.sh"
 
 cd "$1"
 npm --version
 list=$(jq -r '.[] | "\(.name) \(.tarball)"' <<<"$PACKAGES")
-mapfile -t entries <<<"$list"
+entries=()
+[ -z "$list" ] || mapfile -t entries <<<"$list"
 for entry in "${entries[@]}"; do
   read -r name tarball <<<"$entry"
   published=$("$registry" shasum "$name" "$VERSION")
