@@ -20,10 +20,10 @@ Context: found by the architecture audit after 0.4.0-alpha.5 (Gemini, at `368fad
 ## Summary of Changes
 
 - `crates/mara/tests/code/main.rs`: `Project.daemon`, its initialiser, `impl Drop for Project` and the `RefCell` import are `#[cfg(target_os = "linux")]`. Every item of `tests/code/` that names a Linux-only type (`Daemon`, `daemons::Daemons`, `restore`, `through_daemon`, the new test) is now Linux-only; `add.rs`, `edits.rs`, `facts.rs`, `grammar.rs`, `markers.rs` name none.
-- `crates/mara/tests/support/daemons.rs`: `Daemons` remembers that `kill()` waited, and its `Drop` waits only if no `kill()` did; a per-thread count of waits (`waits()`).
-- New test `a_stopped_daemon_is_waited_for_once`: drops a project whose daemon served `project validate` and asserts one wait. With the `Drop` guard removed it fails with 2 against 1.
+- `crates/mara/tests/support/daemons.rs`: a consuming `kill_once(self)` kills as `kill()` does and sets a flag that only it sets, so `Drop` does not wait again; `kill()` and `Drop` are otherwise unchanged, so the daemon and performance tests keep their deliberate second pass. `Daemon::stop` uses `kill_once`. A per-thread count of waits (`waits()`).
+- New test `a_stopped_daemon_is_waited_for_once`: drops a project whose daemon served `project validate` and asserts one wait. With `Daemon::stop` back on `kill()` it fails with 2 against 1.
 - Checks: `cargo check --tests --target aarch64-apple-darwin -p mara` stops in `ring`'s C build (no Apple SDK), so the gating was checked by reading. Full `pnpm run checks`: 863 passed, 0 failed, 16 skipped (831/14 workspace, 32/2 performance); `project validate` 0 errors, 0 warnings.
 
 ## Decisions made
 
-- The single wait is enforced in `Daemons` (drop skips after an explicit `kill()`), not by removing the call in `Daemon::stop`, so the daemon tests' `Drop` (`tests/daemon/main.rs`, which also calls `kill()` before dropping) wait once too, without editing their file.
+- `kill_once` uses a flag rather than `std::mem::forget(self)`: `Daemons` owns two `PathBuf`s, which `forget` would leak, and a flag keeps `Drop` the one place that decides.

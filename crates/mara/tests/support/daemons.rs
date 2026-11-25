@@ -15,8 +15,8 @@ pub struct Daemons {
     base: PathBuf,
     /// A directory whose executables are copies of the binary under test, if any.
     copies: Option<PathBuf>,
-    /// Whether [`Daemons::kill`] has waited, so that dropping them does not wait again.
-    waited: Cell<bool>,
+    /// Set by [`Daemons::kill_once`], so that dropping them does not wait again.
+    finished: bool,
 }
 
 thread_local! {
@@ -35,7 +35,7 @@ impl Daemons {
         Daemons {
             base: base.to_owned(),
             copies: copies.map(Path::to_owned),
-            waited: Cell::new(false),
+            finished: false,
         }
     }
 
@@ -75,7 +75,6 @@ impl Daemons {
     /// Kills those that run with SIGKILL, until none has run for 500 ms, at most for 10 s: a
     /// `daemon start` that a client of the test launched may show only after a first look.
     pub fn kill(&self) {
-        self.waited.set(true);
         WAITS.set(WAITS.get() + 1);
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut quiet_since: Option<Instant> = None;
@@ -102,10 +101,23 @@ impl Daemons {
     }
 }
 
+impl Daemons {
+    /// Kills them as [`Daemons::kill`] does, for a caller that is finished with them: dropping
+    /// them then does not wait a second time.
+    #[allow(
+        dead_code,
+        reason = "only the code tests are finished with their daemons early"
+    )]
+    pub fn kill_once(mut self) {
+        self.kill();
+        self.finished = true;
+    }
+}
+
 impl Drop for Daemons {
-    /// Kills them unless [`Daemons::kill`] has already waited for them to stop.
+    /// Kills them unless [`Daemons::kill_once`] has.
     fn drop(&mut self) {
-        if !self.waited.get() {
+        if !self.finished {
             self.kill();
         }
     }

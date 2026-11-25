@@ -486,7 +486,7 @@ impl Daemon {
     /// Stops the daemon, which then removes its socket, and waits once until none runs.
     fn stop(self, root: &Path, home: &Path) {
         let _ = self.run(root, home, &["daemon", "stop"]);
-        self.daemons.kill();
+        self.daemons.kill_once();
     }
 }
 
