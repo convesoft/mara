@@ -177,7 +177,7 @@
 - Chosen by the worker of mara-a3aq0n: the registry is read with `curl` from its abbreviated package document.
 - Rejected: `npm view`, which exits 1 both for a missing version and for a failed request (npm 12.2.1), to be told apart only by its message.
 - Chosen by the worker of mara-a3aq0n: a dry run leaves out `npm publish --dry-run` for a version that npm has by then, with a warning.
-- Rejected: running it anyway. npm 11.5.1 and later refuse a dry run of a published version (`lib/commands/publish.js`), so a dry run that meets a version published after Prepare's check would fail.
+- Rejected: running it anyway. npm 11.5.1 and later refuse a dry run of a published version (`lib/commands/publish.js`; npm 12.2.1 only of one without a prerelease part, as its version check leaves prereleases out), so a dry run that meets a version published after Prepare's check would fail.
 - Chosen by the worker of mara-a3aq0n: runs of a ref wait in order with `queue: max`.
 - Rejected: GitHub's default queue, which cancels a waiting run when a newer one of the ref arrives: a second dispatch would cancel a dispatched publication that waits.
 - Chosen by the worker of mara-a3aq0n on 2026-11-23, after review: the registry helper is a command, not a file the steps source, so that it changes no shell option of the step.
@@ -185,6 +185,14 @@
 - Rejected: a job output, which a re-run of Publish replaces with a snapshot taken after the earlier attempt published.
 - Chosen by the worker of mara-a3aq0n: Tag reads the release's assets through the REST API and attaches again an asset not in the state `uploaded`. GitHub's upload API "may leave an empty asset with a state of starter" after a 502 (https://docs.github.com/en/rest/releases/assets#upload-a-release-asset).
 - Rejected: telling a missing release by the text of `gh release view`, which is not a stable interface.
+- Chosen by the worker of mara-23j2h9 on 2026-11-25: the steps call Bash scripts of `.github/scripts`, moved from the workflow, which `mara-npm:test` runs against loopback stubs; no dry run runs Publish, Registry check or Tag.
+- Rejected: the shell inline in the workflow, as zban's and nx-rust's releases keep it, where no test can run it. Rejected: rewriting it in Node, which would change the shell that the rc.1 reviews read.
+- Chosen by the worker of mara-23j2h9: Publish passes `--provenance` to the publish script, which passes it to `npm publish`.
+- Rejected: the flag inside the script. npm refuses it without a CI provider's OIDC token, so no test could publish to the stub.
+- Chosen by the worker of mara-23j2h9: the packages come from `releasePackages` in `packages/mara-npm/scripts/packages.mjs`, the native packages of the dispatcher's table and then `anyPlatformPackages`.
+- Rejected: a list of packages in the workflow or a file of its own, a second table beside the dispatcher's. Rejected: the matrices of Build and Registry check from the table, which would add each platform's build image to the dispatcher.
+- Chosen by the worker of mara-23j2h9: the tests reach GitHub's API as `gh` reaches its host `github.localhost`, at `http://api.github.localhost`, through the stub as their HTTP proxy.
+- Rejected: an HTTPS stub for `GH_HOST=127.0.0.1:<port>`, which needs a certificate made at test time and `SSL_CERT_FILE`. Rejected: replacing `gh` with `curl`, which re-implements its upload.
 
 ---
 
@@ -439,6 +447,7 @@
 | `mara-engine:build:wasm32` | `cargo build -p '<package ID of mara-engine>' --target wasm32-unknown-unknown --locked`, as the configuration `wasm32` of the inferred `build`, with `targetTriple = "wasm32-unknown-unknown"` | Yes | The plugin's inputs; the configuration is in the key |
 | `cargo-workspace:zban-check` | `zban check` | Yes | `.zban/`, archive included; the `zban` that the command runs, the devDependency in `node_modules/.bin`, which Nx puts first on the command's `PATH`, else the one on `PATH`: its `--version` output, which is the dispatcher's error where its native package is missing, and the SHA-256 of the file it starts from |
 | `mara-npm:lint`, `mara-browser:lint` | Oxlint on `packages/mara-npm` and on `packages/mara-browser` | Yes | Inputs inferred by `@nx/oxlint` |
+| `mara-npm:test` | `node --test "packages/mara-npm/tests/*.test.mjs"`, the tests of the release workflow's scripts ([DES-RELEASE-WORKFLOW](distribution.mara.md#01M82C8WTK3M2A69XWRGNNQ0SF)) | No: they run the machine's `npm`, `git`, `curl`, `gh`, `jq` and `cargo`, whose versions decide the result | None |
 
 - `mara:test` also depends on `souffle`, and on `mara-browser:build` for the host tests. Nx keys a task with a `dependentTasksOutputFiles` input only after its dependencies have run: the plugin gives `mara:test` one, and `mara:validate` declares one, so both key the Soufflé that `souffle` built in the same run.
 - `souffle` is not cached: what it builds depends on the host's C++ toolchain and a download, and with the binary present it only checks it, in about a second.
