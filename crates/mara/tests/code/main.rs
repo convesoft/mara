@@ -20,6 +20,7 @@ mod grammar;
 mod grammar_server;
 mod markers;
 
+#[cfg(target_os = "linux")]
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
@@ -88,9 +89,11 @@ pub struct Project {
     home: TempDir,
     /// The daemon of the project, started by the first request that [`Project::json`] sends to
     /// one.
+    #[cfg(target_os = "linux")]
     daemon: RefCell<Option<Daemon>>,
 }
 
+#[cfg(target_os = "linux")]
 impl Drop for Project {
     fn drop(&mut self) {
         if let Some(daemon) = self.daemon.get_mut().take() {
@@ -135,6 +138,7 @@ impl Project {
         Project {
             dir: temporary("mara-code-"),
             home: temporary("mara-home-"),
+            #[cfg(target_os = "linux")]
             daemon: RefCell::new(None),
         }
     }
@@ -479,11 +483,23 @@ impl Daemon {
         restore(&root, &after, &expected);
     }
 
-    /// Stops the daemon, which then removes its socket.
+    /// Stops the daemon, which then removes its socket, and waits once until none runs.
     fn stop(self, root: &Path, home: &Path) {
         let _ = self.run(root, home, &["daemon", "stop"]);
-        self.daemons.kill();
+        self.daemons.kill_once();
     }
+}
+
+/// Dropping a project whose daemon served a request waits once for the daemon to stop.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_stopped_daemon_is_waited_for_once() {
+    let project = Project::new();
+    project.json(&["project", "validate"], 0);
+    assert!(project.daemon.borrow().is_some(), "no daemon served it");
+    let before = daemons::waits();
+    drop(project);
+    assert_eq!(daemons::waits() - before, 1);
 }
 
 /// Makes the files below `root`, which are `now`, hold the bytes and modes of `wanted`: writes
