@@ -166,13 +166,10 @@ function tarball(directory, name, files) {
 }
 
 function packedFiles(repo, docs) {
-  const files = {
-    "package.json": { contents: "{}" },
-    "bin/mara.cjs": { contents: "", mode: 0o755 },
-    "README.md": { contents: "" },
-    "LICENSE-MIT": { contents: "" },
-    "LICENSE-APACHE": { contents: "" },
-  };
+  // Every file of the dispatcher but `docs/`, empty, with its mode.
+  const files = Object.fromEntries(
+    Object.entries(dispatcherFiles).map(([file, mode]) => [file, { contents: "", mode }]),
+  );
   for (const page of pages) {
     files[page] = { contents: fs.readFileSync(path.join(repo, page)) };
   }

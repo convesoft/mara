@@ -14,31 +14,57 @@ export const dispatcherScript = path.join(project, "bin", "mara.cjs");
 export const { minimumGlibc, platforms } = createRequire(import.meta.url)(dispatcherScript);
 export const dispatcherName = "@convesoft/mara";
 
-// Each packed path with its mode; the dispatcher also holds `docs/`, from `dispatcherContents`.
-export const dispatcherFiles = {
-  "package.json": 0o644,
-  "bin/mara.cjs": 0o755,
-  "README.md": 0o644,
-  "LICENSE-MIT": 0o644,
-  "LICENSE-APACHE": 0o644,
-};
-// The Node library in the dispatcher (DES-NODE-LIBRARY), with the members of the dispatcher's
-// manifest that let an application import it by the package's name. The library loads the
-// native package's addon, `bin/mara.node`. mara-865a2e packs them; until then the host tests install them
-// (`crates/mara/tests/hosts/node/support/library.mjs`).
+// The Node library in the dispatcher (DES-NODE-LIBRARY), which loads the native package's addon,
+// `bin/mara.node`. The host tests install these files (`crates/mara/tests/hosts/node/support/library.mjs`).
 export const libraryFiles = {
   "lib/index.js": 0o644,
   "lib/index.d.ts": 0o644,
   "lib/operations.d.ts": 0o644,
 };
+// The browser workspace and the daemon's client in the dispatcher (DES-BROWSER-WORKSPACE), by
+// packed path: the source files of `packages/mara-browser`, the engine's WebAssembly module of
+// `mara-wasm:build`, Soufflé's module of `cargo-workspace:souffle-wasm`, and the library's
+// `operations.d.ts`, which `index.d.ts` beside them imports. The host tests serve the same files from
+// `packages/mara-browser`, where `mara-browser:build` copies the built ones.
+export const browserFiles = {
+  "browser/index.js": 0o644,
+  "browser/index.d.ts": 0o644,
+  "browser/operations.d.ts": 0o644,
+  "browser/errors.js": 0o644,
+  "browser/daemon.js": 0o644,
+  "browser/worker.js": 0o644,
+  "browser/souffle-worker.js": 0o644,
+  "browser/output-limit.js": 0o644,
+  "browser/mara.wasm": 0o644,
+  "browser/souffle.js": 0o644,
+  "browser/souffle.wasm": 0o644,
+};
+// The members of the dispatcher's manifest that let an application import the library by the
+// package's name and the browser workspace as `@convesoft/mara/browser`.
 export const libraryManifest = {
   type: "module",
-  exports: { ".": { types: "./lib/index.d.ts", default: "./lib/index.js" } },
+  exports: {
+    ".": { types: "./lib/index.d.ts", default: "./lib/index.js" },
+    "./browser": { types: "./browser/index.d.ts", default: "./browser/index.js" },
+  },
+};
+// Each packed path with its mode; the dispatcher also holds `docs/`, from `dispatcherContents`.
+export const dispatcherFiles = {
+  "package.json": 0o644,
+  "bin/mara.cjs": 0o755,
+  ...libraryFiles,
+  ...browserFiles,
+  "README.md": 0o644,
+  "LICENSE-MIT": 0o644,
+  "LICENSE-APACHE": 0o644,
+  "LICENSE-SOUFFLE": 0o644,
+  "THIRD-PARTY-LICENSES": 0o644,
 };
 export const nativeFiles = {
   "package.json": 0o644,
   "bin/mara": 0o755,
   "bin/souffle": 0o755,
+  "bin/mara.node": 0o644,
   "LICENSE-MIT": 0o644,
   "LICENSE-APACHE": 0o644,
   "LICENSE-SOUFFLE": 0o644,

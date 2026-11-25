@@ -265,14 +265,13 @@ const TYPES = {
 };
 
 /**
- * The files of the browser package: those its manifest lists, and Soufflé's module, which
- * `mara-browser:build` copies there and mara-865a2e packs.
+ * The files of `@convesoft/mara/browser`, which `packages/mara-npm/scripts/packages.mjs` lists by
+ * their packed paths under `browser/`: the sources in the package's folder, and the modules and the
+ * operations' types that `mara-browser:build` copies there.
  */
 const SOUFFLE_MODULE = ["souffle.js", "souffle.wasm"];
-const packageFiles = [
-  ...JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")).files,
-  ...SOUFFLE_MODULE,
-];
+const { browserFiles } = await import(join(env("MARA_DISPATCHER"), "scripts", "packages.mjs"));
+const packageFiles = Object.keys(browserFiles).map((file) => file.slice("browser/".length));
 
 /**
  * Checks that the package holds Soufflé's module, which every case that runs a program needs

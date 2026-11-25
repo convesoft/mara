@@ -28,3 +28,8 @@ libc = "0.2.191"
 # generates a loader and declarations with `@napi-rs/cli`, is not used (ADR-NAPI-RS-ADDON).
 [package.metadata.nx]
 artifacts = []
+
+# The addon that the native npm package ships as `bin/mara.node`: `nx run mara-node:build:release`,
+# on which the target `pack-native` of `packages/mara-npm` depends (DES-RELEASE-WORKFLOW).
+[package.metadata.nx.targets.build.configurations.release]
+profile = "release"

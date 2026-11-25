@@ -1,24 +1,7 @@
 {
-  "name": "@convesoft/mara-browser",
+  "name": "mara-browser",
   "private": true,
-  "description": "Mara's document operations in a browser: on supplied files in a dedicated worker, or through the daemon's listener",
+  "description": "The sources of @convesoft/mara/browser, Mara's document operations in a browser: on supplied files in a dedicated worker, or through the daemon's listener",
   "license": "MIT OR Apache-2.0",
-  "files": [
-    "index.js",
-    "index.d.ts",
-    "operations.d.ts",
-    "errors.js",
-    "daemon.js",
-    "worker.js",
-    "souffle-worker.js",
-    "output-limit.js",
-    "mara.wasm"
-  ],
-  "type": "module",
-  "exports": {
-    ".": {
-      "types": "./index.d.ts",
-      "default": "./index.js"
-    }
-  }
+  "type": "module"
 }

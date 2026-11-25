@@ -3,14 +3,19 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "targets": {
     "pack-dispatcher": {
-      "command": "node packages/mara-npm/scripts/pack.mjs dispatcher dist/npm",
-      "cache": false
+      "command": "node packages/mara-npm/scripts/pack.mjs dispatcher target/souffle-2.5-wasm dist/npm",
+      "cache": false,
+      "dependsOn": [
+        { "projects": ["mara-wasm"], "target": "build" },
+        { "projects": ["cargo-workspace"], "target": "souffle-wasm" }
+      ]
     },
     "pack-native": {
       "executor": "nx:run-commands",
       "cache": false,
       "dependsOn": [
         { "projects": ["mara"], "target": "build" },
+        { "projects": ["mara-node"], "target": "build" },
         { "projects": ["cargo-workspace"], "target": "souffle" }
       ],
       "options": {

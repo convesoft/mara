@@ -1,16 +1,18 @@
-// `THIRD-PARTY-LICENSES` of a native package (DES-PACKAGES): the licence files of every crate
-// that Cargo builds for the workspace's `mara` on the host, from `cargo metadata`.
+// `THIRD-PARTY-LICENSES` of a package (DES-PACKAGES): the licence files of every crate that Cargo
+// builds for some workspace members on a target, from `cargo metadata`: `mara` and `mara-node` on
+// the host for a native package, `mara-wasm` on `wasm32-unknown-unknown` for the dispatcher.
 
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // A licence file at the top of a crate, such as `LICENSE`, `LICENSE-MIT`, `COPYING`, `NOTICE` or
 // `UNLICENSE`, or a file in a top-level `LICENSES` folder.
 const licenceFile = /^(licen[cs]e|copying|copyright|notice|unlicen[cs]e)($|[-._])/i;
 const licenceFolder = /^licen[cs]es$/i;
 
-function hostTriple(root) {
+export function hostTriple(root) {
   const output = execFileSync("rustc", ["-vV"], { cwd: root, encoding: "utf8" });
   const triple = output.match(/^host: (\S+)$/m)?.[1];
   if (triple === undefined) {
@@ -59,10 +61,43 @@ const licenceFilesOf = {
   "wasmtime-internal-versioned-export-macros": "wasmtime",
 };
 
-// The crates that Cargo builds for the workspace member `packageName` on the host: its normal and
-// build dependencies, transitively, without workspace members. `cargo metadata` resolves the
-// features of the whole workspace, so the set holds every crate of the build and may hold more.
-function buildCrates(root, packageName, triple) {
+// The licence files that a crate's upstream repository holds and none of its crates ships, kept in
+// `packages/mara-npm/licenses/` as that repository holds them: each with the repository, the
+// licence that its crates declare and those crates. napi-rs's `LICENSE` is the file of
+// https://github.com/napi-rs/napi-rs at commit daef59f39df631efb888d43205b6ed8fd7e00707.
+const keptLicences = {
+  "napi-rs-LICENSE": {
+    repository: "https://github.com/napi-rs/napi-rs",
+    license: "MIT",
+    crates: ["napi", "napi-build", "napi-derive", "napi-derive-backend", "napi-sys"],
+  },
+};
+const keptLicenceFolder = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "licenses",
+);
+
+// The kept licence file that applies to `crate`, which declares the licence and names the
+// repository of its entry, or undefined.
+function keptLicence(crate) {
+  const repository = (crate.repository ?? "").replace(/(\.git)?\/?$/, "");
+  for (const [file, entry] of Object.entries(keptLicences)) {
+    if (
+      entry.crates.includes(crate.name) &&
+      entry.repository === repository &&
+      entry.license === crate.license
+    ) {
+      return path.join(keptLicenceFolder, file);
+    }
+  }
+  return undefined;
+}
+
+// The crates that Cargo builds for the workspace members `packageNames` on `triple`: their normal
+// and build dependencies, transitively, without workspace members. `cargo metadata` resolves the
+// features of the whole workspace, so the set holds every crate of the builds and may hold more.
+function buildCrates(root, packageNames, triple) {
   const metadata = JSON.parse(
     execFileSync(
       "cargo",
@@ -73,14 +108,16 @@ function buildCrates(root, packageName, triple) {
   const members = new Set(metadata.workspace_members);
   const packages = new Map(metadata.packages.map((crate) => [crate.id, crate]));
   const nodes = new Map(metadata.resolve.nodes.map((node) => [node.id, node]));
-  const start = metadata.packages.find(
-    (crate) => crate.name === packageName && members.has(crate.id),
-  );
-  if (start === undefined) {
-    throw new Error(`the workspace has no member ${packageName}`);
-  }
+  const pending = packageNames.map((packageName) => {
+    const start = metadata.packages.find(
+      (crate) => crate.name === packageName && members.has(crate.id),
+    );
+    if (start === undefined) {
+      throw new Error(`the workspace has no member ${packageName}`);
+    }
+    return start.id;
+  });
   const seen = new Set();
-  const pending = [start.id];
   while (pending.length > 0) {
     const id = pending.pop();
     if (seen.has(id)) {
@@ -99,11 +136,11 @@ function buildCrates(root, packageName, triple) {
     .sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 }
 
-// The text of `THIRD-PARTY-LICENSES`. Fails, naming the crates, when a crate ships no licence file
-// and `licenceFilesOf` names no crate whose files apply to it.
-export function thirdPartyLicenses(root, packageName, version) {
-  const triple = hostTriple(root);
-  const crates = buildCrates(root, packageName, triple).map((crate) => ({
+// The text of `THIRD-PARTY-LICENSES` for the builds of `packageNames` on `triple`. Fails, naming
+// the crates, when a crate ships no licence file and `licenceFilesOf` names no crate whose files
+// apply to it.
+export function thirdPartyLicenses(root, packageNames, version, triple) {
+  const crates = buildCrates(root, packageNames, triple).map((crate) => ({
     crate,
     files: licenceFiles(crate),
   }));
@@ -113,8 +150,11 @@ export function thirdPartyLicenses(root, packageName, version) {
     if (entry.files.length > 0) {
       continue;
     }
+    const kept = keptLicence(entry.crate);
     const source = crates.find(({ crate }) => crate.name === licenceFilesOf[entry.crate.name]);
-    if (
+    if (kept !== undefined) {
+      entry.files = [kept];
+    } else if (
       source !== undefined &&
       source.files.length > 0 &&
       source.crate.license === entry.crate.license
@@ -130,7 +170,8 @@ export function thirdPartyLicenses(root, packageName, version) {
     throw new Error(
       `these crates ship no licence file: ${missing.join(", ")}. Give each the crate of its ` +
         "upstream repository whose licence files apply to it, in licenceFilesOf of " +
-        "packages/mara-npm/scripts/third-party-licenses.mjs, after reading its licence",
+        "packages/mara-npm/scripts/third-party-licenses.mjs, or that repository's licence file " +
+        "in keptLicences, after reading its licence",
     );
   }
 
@@ -147,7 +188,7 @@ export function thirdPartyLicenses(root, packageName, version) {
 
   const rule = "=".repeat(80);
   const lines = [
-    `Third-party licences of mara ${version} for ${triple}`,
+    `Third-party licences of ${packageNames.join(" and ")} ${version} for ${triple}`,
     "",
     `The licence inventory covers these ${crates.length} resolved normal and build dependencies.`,
     "",
