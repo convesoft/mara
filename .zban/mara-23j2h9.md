@@ -1,6 +1,6 @@
 ---
 title: The release workflow's publication, registry-check and tag steps are scripts with tests in the repository
-status: todo
+status: in-progress
 type: task
 parent: mara-xzfeyj
 discovered_from: mara-c8scn7
