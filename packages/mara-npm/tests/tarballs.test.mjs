@@ -18,11 +18,24 @@ import {
 
 const content = (tarball) => Buffer.from(`the tarball ${tarball}`);
 
-// A Build job's dist/npm: the packages for any platform and the given native packages.
-function distribution(directory, label, nativeEntries, extra = []) {
+// The table with a second package for any platform, before the dispatcher, as the browser
+// package of 0.4.0-rc.2 will be.
+const wider = [
+  ...natives,
+  {
+    name: "@convesoft/mara-any-platform",
+    native: false,
+    tarball: "convesoft-mara-any-platform-0.0.1.tgz",
+  },
+  ...others,
+];
+const anyOf = (table) => table.filter((entry) => !entry.native);
+
+// A Build job's dist/npm: the table's packages for any platform and the given native packages.
+function distribution(directory, label, nativeEntries, extra = [], table = packages) {
   const dist = path.join(directory, `dist-${label}`);
   fs.mkdirSync(dist, { recursive: true });
-  for (const entry of [...others, ...nativeEntries]) {
+  for (const entry of [...anyOf(table), ...nativeEntries]) {
     fs.writeFileSync(path.join(dist, entry.tarball), content(entry.tarball));
   }
   for (const name of extra) {
@@ -31,8 +44,8 @@ function distribution(directory, label, nativeEntries, extra = []) {
   return dist;
 }
 
-async function record(directory, dist, label) {
-  const env = environment(directory, { PACKAGES: JSON.stringify(packages) });
+async function record(directory, dist, label, table = packages) {
+  const env = environment(directory, { PACKAGES: JSON.stringify(table) });
   const out = path.join(directory, `out-${label}`);
   const result = await run("release-tarballs.sh", ["record", dist, out, label], {
     cwd: directory,
@@ -88,24 +101,25 @@ test("record fails without a package for any platform", async (t) => {
 });
 
 // Every Build job's artifact, downloaded into one directory as the action's merge does.
-async function artifacts(directory) {
+async function artifacts(directory, table = packages) {
   const merged = path.join(directory, "npm");
   fs.mkdirSync(merged);
   for (const [index, entry] of natives.entries()) {
     const label = `os-${index}`;
-    const { result, out } = await record(directory, distribution(directory, label, [entry]), label);
+    const dist = distribution(directory, label, [entry], [], table);
+    const { result, out } = await record(directory, dist, label, table);
     assert.equal(result.status, 0, result.output);
     fs.cpSync(out, merged, { recursive: true });
   }
   // Pack dispatcher's artifact.
-  for (const entry of others) {
+  for (const entry of anyOf(table)) {
     fs.writeFileSync(path.join(merged, entry.tarball), content(entry.tarball));
   }
   return merged;
 }
 
-async function collect(directory, merged) {
-  const env = environment(directory, { PACKAGES: JSON.stringify(packages) });
+async function collect(directory, merged, table = packages) {
+  const env = environment(directory, { PACKAGES: JSON.stringify(table) });
   const result = await run("release-tarballs.sh", ["collect", merged], { cwd: directory, env });
   return { result, env };
 }
@@ -194,4 +208,56 @@ test("collect fails on a record line that is not sha256sum's", async (t) => {
   const { result } = await collect(directory, merged);
   assert.equal(result.status, 1, result.output);
   assert.match(result.stdout, /::error::verified-os-0\.sha256 has a line that is not sha256sum's/);
+});
+
+test("record takes every package for any platform of the table and one native tarball", async (t) => {
+  const directory = temporaryDirectory(t);
+  const dist = distribution(directory, "a", [natives[0]], [], wider);
+  const { result, out } = await record(directory, dist, "a", wider);
+  assert.equal(result.status, 0, result.output);
+  const recorded = fs.readFileSync(path.join(out, "verified-a.sha256"), "utf8");
+  assert.equal(recorded.trim().split("\n").length, 3);
+  assert.deepEqual(fs.readdirSync(out).sort(), [natives[0].tarball, "verified-a.sha256"].sort());
+});
+
+test("with that table, record still refuses two native tarballs or a missing package", async (t) => {
+  const directory = temporaryDirectory(t);
+  const two = await record(
+    directory,
+    distribution(directory, "two", natives.slice(0, 2), [], wider),
+    "two",
+    wider,
+  );
+  assert.equal(two.result.status, 1, two.result.output);
+  const missing = distribution(directory, "missing", [natives[0]], [], wider);
+  fs.rmSync(path.join(missing, wider.at(-2).tarball));
+  const absent = await record(directory, missing, "missing", wider);
+  assert.equal(absent.result.status, 1, absent.result.output);
+  for (const { result } of [two, absent]) {
+    assert.match(result.stdout, /::error::expected the tarballs of the packages for any platform/);
+  }
+});
+
+test("collect takes every Build job's tarballs with that table", async (t) => {
+  const directory = temporaryDirectory(t);
+  const merged = await artifacts(directory, wider);
+  const { result } = await collect(directory, merged, wider);
+  assert.equal(result.status, 0, result.output);
+  assert.equal(
+    fs.readFileSync(path.join(merged, "SHA256SUMS"), "utf8"),
+    wider.map((entry) => `${sha256(content(entry.tarball))}  ${entry.tarball}\n`).join(""),
+  );
+});
+
+test("collect fails on a file that is neither a tarball nor a record, which Tag would attach", async (t) => {
+  const directory = temporaryDirectory(t);
+  const merged = await artifacts(directory);
+  fs.writeFileSync(path.join(merged, "notes.txt"), "stray");
+  const { result, env } = await collect(directory, merged);
+  assert.equal(result.status, 1, result.output);
+  assert.match(
+    result.stdout,
+    /holds notes\.txt, which is neither a tarball nor a Build job's record/,
+  );
+  assert.equal(outputs(env).directory, undefined);
 });

@@ -17,7 +17,8 @@ registry="$here/npm-registry.sh"
 
 cd "$1"
 npm --version
-mapfile -t entries < <(jq -r '.[] | "\(.name) \(.tarball)"' <<<"$PACKAGES")
+list=$(jq -r '.[] | "\(.name) \(.tarball)"' <<<"$PACKAGES")
+mapfile -t entries <<<"$list"
 for entry in "${entries[@]}"; do
   read -r name tarball <<<"$entry"
   published=$("$registry" shasum "$name" "$VERSION")

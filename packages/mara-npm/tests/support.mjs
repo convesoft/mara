@@ -63,14 +63,22 @@ export function environment(directory, extra = {}) {
   };
 }
 
-// Runs a script of .github/scripts to its end: its exit status and output.
+// Runs a script of .github/scripts, or the script at an absolute path, to its end: its exit status
+// and output. The script may exit before it reads its standard input: writing it then fails with
+// EPIPE, which is ignored, and the result is the exit status and output. A script that cannot be
+// started rejects.
 export function run(script, args, { cwd, env, input = "" }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(path.join(scripts, script), args, { cwd, env });
+    const child = spawn(path.resolve(scripts, script), args, { cwd, env });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => (stdout += chunk));
     child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.stdin.on("error", (error) => {
+      if (error.code !== "EPIPE") {
+        reject(error);
+      }
+    });
     child.on("error", reject);
     child.on("close", (status) => resolve({ status, stdout, stderr, output: stdout + stderr }));
     child.stdin.end(input);

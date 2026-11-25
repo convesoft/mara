@@ -75,7 +75,7 @@ test("a re-run skips a version that npm has with the tarball's SHA-1 and publish
   );
 });
 
-test("a version that npm has with another SHA-1 fails at once, and nothing is published", async (t) => {
+test("a version that npm has with another SHA-1 fails at once, before that package and those after it are published", async (t) => {
   const { registry, result } = await publish(t, (registry) =>
     registry.add(natives.at(-1).name, { version }, Buffer.from("another tarball")),
   );
@@ -95,6 +95,12 @@ test("a registry error fails and is never read as absence", async (t) => {
     ),
   );
   assert.equal(result.status, 1, result.output);
+  // Every try of the read reached the stub and got its error.
+  assert.deepEqual(
+    registry.log,
+    Array.from({ length: 5 }, () => `GET ${natives[0].name}`),
+  );
+  assert.match(result.stderr, /HTTP 500/);
   assert.deepEqual(registry.puts(), []);
 });
 

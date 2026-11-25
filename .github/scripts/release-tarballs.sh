@@ -8,17 +8,20 @@
 #   release-tarballs.sh collect <directory>
 #       .github/actions/release-tarballs, on every Build job's artifact downloaded into
 #       <directory>: fails unless it holds exactly one tarball per package, each with the SHA-256
-#       that a Build job recorded for it. Then writes SHA256SUMS in the order of the packages,
-#       removes the records and writes `directory=<directory>` to GITHUB_OUTPUT.
+#       that a Build job recorded for it, and the records, and no other visible file. Then writes
+#       SHA256SUMS in the order of the packages, removes the records and writes
+#       `directory=<directory>` to GITHUB_OUTPUT.
 #
 # PACKAGES is Prepare's JSON list of {name, native, tarball}.
 set -euo pipefail
 
 record() {
-  local directory=$1 out=$2 label=$3 tarball
+  local directory=$1 out=$2 label=$3 tarball list
   local -a any natives tarballs found=() unexpected=()
-  mapfile -t any < <(jq -r '.[] | select(.native | not) | .tarball' <<<"$PACKAGES")
-  mapfile -t natives < <(jq -r '.[] | select(.native) | .tarball' <<<"$PACKAGES")
+  list=$(jq -r '.[] | select(.native | not) | .tarball' <<<"$PACKAGES")
+  mapfile -t any <<<"$list"
+  list=$(jq -r '.[] | select(.native) | .tarball' <<<"$PACKAGES")
+  mapfile -t natives <<<"$list"
   case $out in
     /*) ;;
     *) out="$PWD/$out" ;;
@@ -76,8 +79,19 @@ collect() {
       verified[$name]=$sum
     done <"$record"
   done
-  mapfile -t expected < <(jq -r '.[].tarball' <<<"$PACKAGES")
-  local sorted recorded present
+  # Tag attaches every visible file of the directory, so it may hold nothing else.
+  for name in *; do
+    case $name in
+      *.tgz | verified-*.sha256) ;;
+      *)
+        echo "::error::$directory holds $name, which is neither a tarball nor a Build job's record"
+        exit 1
+        ;;
+    esac
+  done
+  local list sorted recorded present
+  list=$(jq -r '.[].tarball' <<<"$PACKAGES")
+  mapfile -t expected <<<"$list"
   sorted=$(printf '%s\n' "${expected[@]}" | sort)
   recorded=$(printf '%s\n' "${!verified[@]}" | sort)
   present=$(printf '%s\n' *.tgz | sort)

@@ -47,8 +47,10 @@ publish() {
   fi
 }
 
-mapfile -t natives < <(jq -r '.[] | select(.native) | "\(.name) \(.tarball)"' <<<"$PACKAGES")
-mapfile -t others < <(jq -r '.[] | select(.native | not) | "\(.name) \(.tarball)"' <<<"$PACKAGES")
+list=$(jq -r '.[] | select(.native) | "\(.name) \(.tarball)"' <<<"$PACKAGES")
+mapfile -t natives <<<"$list"
+list=$(jq -r '.[] | select(.native | not) | "\(.name) \(.tarball)"' <<<"$PACKAGES")
+mapfile -t others <<<"$list"
 for entry in "${natives[@]}"; do
   read -r name tarball <<<"$entry"
   publish "$name" "$tarball"

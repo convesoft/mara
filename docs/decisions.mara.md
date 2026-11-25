@@ -177,7 +177,7 @@
 - Chosen by the worker of mara-a3aq0n: the registry is read with `curl` from its abbreviated package document.
 - Rejected: `npm view`, which exits 1 both for a missing version and for a failed request (npm 12.2.1), to be told apart only by its message.
 - Chosen by the worker of mara-a3aq0n: a dry run leaves out `npm publish --dry-run` for a version that npm has by then, with a warning.
-- Rejected: running it anyway. npm 11.5.1 and later refuse a dry run of a published version (`lib/commands/publish.js`), so a dry run that meets a version published after Prepare's check would fail.
+- Rejected: running it anyway. npm 11.5.1 and later refuse a dry run of a published version (`lib/commands/publish.js`; npm 12.2.1 only of one without a prerelease part, as its version check leaves prereleases out), so a dry run that meets a version published after Prepare's check would fail.
 - Chosen by the worker of mara-a3aq0n: runs of a ref wait in order with `queue: max`.
 - Rejected: GitHub's default queue, which cancels a waiting run when a newer one of the ref arrives: a second dispatch would cancel a dispatched publication that waits.
 - Chosen by the worker of mara-a3aq0n on 2026-11-23, after review: the registry helper is a command, not a file the steps source, so that it changes no shell option of the step.

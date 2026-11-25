@@ -28,7 +28,8 @@ for file in *; do
   state=$(jq -r '.state // ""' <<<"${asset:-null}")
   if [ -n "$asset" ] && [ "$state" != uploaded ]; then
     echo "the release's $file is in the state $state; deleting it"
-    gh api -X DELETE "repos/$GH_REPO/releases/assets/$(jq -r .id <<<"$asset")"
+    id=$(jq -r .id <<<"$asset")
+    gh api -X DELETE "repos/$GH_REPO/releases/assets/$id"
     asset=
   fi
   if [ -z "$asset" ]; then

@@ -19,13 +19,14 @@ here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 registry="$here/npm-registry.sh"
 
 record() {
-  local file=$1 tags='{}' name value
+  local file=$1 tags='{}' list name value
   if [ -f "$file" ]; then
     echo "an earlier attempt of this run recorded:"
     jq . "$file"
     return
   fi
-  mapfile -t names < <(jq -r '.[].name' <<<"$PACKAGES")
+  list=$(jq -r '.[].name' <<<"$PACKAGES")
+  mapfile -t names <<<"$list"
   for name in "${names[@]}"; do
     value=$("$registry" dist-tags "$name")
     tags=$(jq -c --arg name "$name" --argjson value "$value" '.[$name] = $value' <<<"$tags")
@@ -36,14 +37,16 @@ record() {
 }
 
 check() {
-  local before_all name tags before after deadline
+  local before_all list name tags named before after deadline
   before_all=$(cat "$1")
   deadline=$((SECONDS + ${RELEASE_WAIT_SECONDS:-1800}))
-  mapfile -t names < <(jq -r '.[].name' <<<"$PACKAGES")
+  list=$(jq -r '.[].name' <<<"$PACKAGES")
+  mapfile -t names <<<"$list"
   for name in "${names[@]}"; do
     while :; do
       tags=$("$registry" dist-tags "$name")
-      if [ "$(jq -r --arg tag "$DIST_TAG" '.[$tag] // ""' <<<"$tags")" = "$VERSION" ]; then
+      named=$(jq -r --arg tag "$DIST_TAG" '.[$tag] // ""' <<<"$tags")
+      if [ "$named" = "$VERSION" ]; then
         break
       fi
       if [ "$SECONDS" -ge "$deadline" ]; then

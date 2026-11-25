@@ -45,12 +45,15 @@ packages=$(node --input-type=module -e '
 jq . <<<"$packages"
 
 tag="v$version"
-if [ -n "$(git ls-remote --tags origin "refs/tags/$tag")" ]; then
+# Standalone assignments, so that a failed lookup stops the script instead of reading as absence.
+tagged=$(git ls-remote --tags origin "refs/tags/$tag")
+if [ -n "$tagged" ]; then
   echo "::error::the tag $tag exists; set a new version in Cargo.toml first"
   exit 1
 fi
 published=()
-mapfile -t names < <(jq -r '.[].name' <<<"$packages")
+list=$(jq -r '.[].name' <<<"$packages")
+mapfile -t names <<<"$list"
 for name in "${names[@]}"; do
   shasum=$("$here/npm-registry.sh" shasum "$name" "$version")
   if [ -n "$shasum" ]; then
@@ -62,10 +65,11 @@ if [ "${#published[@]}" -gt 0 ]; then
   exit 1
 fi
 
+compact=$(jq -c . <<<"$packages")
 {
   echo "sha=$sha"
   echo "version=$version"
   echo "tag=$tag"
   echo "dist_tag=$dist_tag"
-  echo "packages=$(jq -c . <<<"$packages")"
+  echo "packages=$compact"
 } >>"$GITHUB_OUTPUT"

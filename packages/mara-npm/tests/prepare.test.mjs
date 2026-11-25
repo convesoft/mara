@@ -165,3 +165,18 @@ test("Prepare fails on a registry error and never reads it as absence", async (t
   assert.match(result.stderr, /HTTP 500/);
   assert.deepEqual(recorded, {});
 });
+
+test("Prepare fails when origin cannot be read, and never reads that as no tag", async (t) => {
+  const {
+    result,
+    outputs: recorded,
+    registry,
+  } = await prepare(t, {
+    setUp: ({ checkout, env }) =>
+      git(checkout, env, "remote", "set-url", "origin", `${checkout}-missing.git`),
+  });
+  assert.notEqual(result.status, 0, result.output);
+  assert.match(result.stderr, /does not appear to be a git repository/);
+  assert.deepEqual(recorded, {});
+  assert.deepEqual(registry.log, []);
+});
