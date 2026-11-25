@@ -409,8 +409,8 @@ impl Context<'_> {
     }
 
     /// The inputs of the project at `root`, the canonical root that [`Context::root`] returns:
-    /// a view of its session's when the daemon serves the request in that session, otherwise
-    /// new ones, which read everything once.
+    /// a view of its session's when the daemon serves the request in that session, or of the
+    /// inputs that a browser workspace keeps, otherwise new ones, which read everything once.
     pub fn inputs(&self, root: PathBuf) -> Inputs {
         #[cfg(target_arch = "wasm32")]
         if let Some(kept) = self.kept {
