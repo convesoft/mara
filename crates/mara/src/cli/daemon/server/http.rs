@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use mara::caller::Caller;
 use mara::daemon::{MAX_FRAME, PROTOCOL_VERSION};
+use mara::hooks::{self, Hook};
 use mara_engine::work::WorkCounts;
 use serde_json::{Map, Value, json};
 
@@ -211,14 +212,18 @@ fn exchange(daemon: &Daemon, mut stream: TcpStream) {
     let response = panic::catch_unwind(AssertUnwindSafe(|| {
         respond(daemon, access, &head, origin, read, &mut stream)
     }));
-    if let Ok(Some(response)) = response {
-        send(&mut stream, origin, &response);
-        linger(stream);
+    match response {
+        Ok(Some(response)) => {
+            send(&mut stream, origin, &response);
+            linger(stream);
+        }
+        Ok(None) => linger(stream),
+        Err(_) => {}
     }
 }
 
-/// The response to a request, or `None` when the connection closes without one: its body could
-/// not be read, or the daemon stopped while it ran a read.
+/// The response to a request, or `None` when nothing more is sent: an operation's answer, which
+/// [`run`] sends itself, or none when the daemon stopped while it ran a read.
 fn respond(
     daemon: &Daemon,
     access: &Access,
@@ -256,7 +261,14 @@ fn respond(
         Ok(length) => length,
         Err(message) => return Some(Response::malformed(message)),
     };
-    let body = read_body(stream, read, length).ok()?;
+    let body = match read_body(stream, read, length) {
+        Ok(body) => body,
+        Err(_) => {
+            return Some(Response::malformed(
+                "the body is not as long as its `Content-Length`",
+            ));
+        }
+    };
     let body = match parse(&body) {
         Ok(body) => body,
         Err(message) => return Some(Response::malformed(&message)),
@@ -274,7 +286,7 @@ fn respond(
         Ok(Err(unavailable)) => return Some(unavailable),
         Err(message) => return Some(Response::malformed(&message)),
     };
-    run(daemon, &request)
+    run(daemon, &request, stream, origin)
 }
 
 /// The answer to a preflight: the method and headers of a request, allowed to an allowed origin
@@ -488,31 +500,56 @@ fn unavailable(daemon: &Daemon, words: &[&str], json: bool) -> Response {
     )
 }
 
-/// Runs the native operation request `request` as the daemon runs a native client's, or `None`
-/// when the daemon stopped while it ran a read, which it then leaves unanswered.
-fn run(daemon: &Daemon, request: &Value) -> Option<Response> {
+/// A request that [`Daemon::admit`] took, released when dropped: a write is counted until its
+/// answer is sent, so that a daemon that stops sends it before it exits.
+struct Admitted<'a> {
+    daemon: &'a Daemon,
+    write: bool,
+}
+
+impl Drop for Admitted<'_> {
+    fn drop(&mut self) {
+        self.daemon.release(self.write);
+    }
+}
+
+/// Runs the native operation request `request` as the daemon runs a native client's and sends
+/// its answer, counted as running until it is sent. Returns only a refusal that is left to send:
+/// a daemon that stops refuses the request, and leaves a read it ran meanwhile unanswered.
+fn run(
+    daemon: &Daemon,
+    request: &Value,
+    stream: &mut TcpStream,
+    origin: Option<&str>,
+) -> Option<Response> {
     let write = client::writes(request);
     if !daemon.admit(write) {
         return Some(Response::refusal(503, "stopping", "the daemon is stopping"));
     }
-    let answer = panic::catch_unwind(AssertUnwindSafe(|| daemon.answer(&Ok(request.clone()))));
-    let ended = !write && daemon.state().stopping;
-    daemon.release(write);
-    let mut answer = answer.ok()?;
-    if ended {
+    let _admitted = Admitted { daemon, write };
+    let mut answer = daemon.answer(&Ok(request.clone()));
+    if !write && daemon.state().stopping {
         return None;
     }
-    if let Some(code) = answer["error"].as_str() {
-        let message = answer["message"].as_str().unwrap_or_default();
-        return Some(Response::refusal(400, code, message));
-    }
-    answer["version"] = json!(HTTP_VERSION);
-    Some(Response::json(200, answer))
+    let response = match answer["error"].as_str() {
+        Some(code) => {
+            let message = answer["message"].as_str().unwrap_or_default();
+            Response::refusal(400, code, message)
+        }
+        None => {
+            answer["version"] = json!(HTTP_VERSION);
+            Response::json(200, answer)
+        }
+    };
+    // A test holds the answer here, while the daemon is asked to stop.
+    let _ = hooks::pause(Hook::PauseAnswer, "");
+    send(stream, origin, &response);
+    None
 }
 
 /// Reads the head of a request, with what was read past it. `Err(None)` when the connection
 /// ended or failed first, `Err(Some(why))` when the head is no HTTP/1.x request head.
-fn read_head(stream: &mut TcpStream) -> Result<(Head, Vec<u8>), Option<String>> {
+fn read_head(stream: &mut impl Read) -> Result<(Head, Vec<u8>), Option<String>> {
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 4096];
     loop {
@@ -526,15 +563,15 @@ fn read_head(stream: &mut TcpStream) -> Result<(Head, Vec<u8>), Option<String>> 
         let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
         let mut request = httparse::Request::new(&mut headers);
         match request.parse(&buffer) {
-            Ok(httparse::Status::Complete(length)) => {
+            Ok(httparse::Status::Complete(length)) if length <= MAX_HEAD => {
                 let head = Head::of(&request);
                 return Ok((head, buffer[length..].to_vec()));
             }
             Ok(httparse::Status::Partial) if buffer.len() < MAX_HEAD => {}
-            Ok(httparse::Status::Partial) => {
+            Ok(_) => {
                 return Err(Some("the request's head passes 64 KiB".to_owned()));
             }
-            Err(error) => return Err(Some(format!("the request is no HTTP/1.1 request: {error}"))),
+            Err(error) => return Err(Some(format!("the request is no HTTP/1.x request: {error}"))),
         }
     }
 }
@@ -623,7 +660,48 @@ fn linger(mut stream: TcpStream) {
 
 #[cfg(test)]
 mod tests {
-    use super::same;
+    use std::io::Read;
+
+    use super::{MAX_HEAD, read_head, same};
+
+    /// Gives one byte, then 4096 bytes per read, so that a read can complete a head past the
+    /// limit.
+    struct Uneven {
+        bytes: Vec<u8>,
+        at: usize,
+    }
+
+    impl Read for Uneven {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            let count = if self.at == 0 { 1 } else { 4096 };
+            let count = count.min(out.len()).min(self.bytes.len() - self.at);
+            out[..count].copy_from_slice(&self.bytes[self.at..self.at + count]);
+            self.at += count;
+            Ok(count)
+        }
+    }
+
+    /// A head of `length` bytes: a request line, one long header and the blank line.
+    fn head(length: usize) -> Vec<u8> {
+        let start = "GET / HTTP/1.1\r\nX: ";
+        let filler = length - start.len() - 4;
+        format!("{start}{}\r\n\r\n", "a".repeat(filler)).into_bytes()
+    }
+
+    #[test]
+    fn refuses_a_head_past_64_kib_whichever_read_completes_it() {
+        for (length, accepted) in [(MAX_HEAD, true), (MAX_HEAD + 1, false)] {
+            let mut stream = Uneven {
+                bytes: head(length),
+                at: 0,
+            };
+            let read = read_head(&mut stream);
+            assert_eq!(read.is_ok(), accepted, "{length}");
+            if let Err(why) = read {
+                assert_eq!(why.as_deref(), Some("the request's head passes 64 KiB"));
+            }
+        }
+    }
 
     #[test]
     fn compares_tokens_whole() {

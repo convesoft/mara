@@ -14,6 +14,7 @@ mod server;
 use std::collections::BTreeSet;
 use std::fs;
 use std::io;
+use std::net::Ipv6Addr;
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
@@ -78,15 +79,18 @@ const ALLOW_PROJECT: Opt = Opt {
 };
 
 // @mara implements REQ-BROWSER-ACCESS-AUTHORIZED
-/// Checks that `value` is an origin as a browser sends it in `Origin`: `http` or `https`, `://`,
-/// a host in lowercase and an optional port other than the scheme's default, with no path, no
-/// trailing `/`, no user and no `*`. `null` is refused.
+/// Checks that `value` has a form a browser sends in `Origin` (DES-BROWSER-LISTENER): `http://` or
+/// `https://`, then a non-empty host and an optional `:port`, with no `/`, `?`, `#`, `@`, `*`,
+/// whitespace, control character or ASCII uppercase letter after the scheme; a port of 1 to 5
+/// digits naming 1 to 65535, without a leading zero and not the scheme's default; a host in
+/// brackets an IPv6 address. Nothing else of the host is checked: a request's `Origin` is
+/// compared byte for byte, so an origin no browser sends only never matches.
 fn origin(value: &str) -> Result<(), String> {
     let refuse = || {
         Err(format!(
             "`{value}` is no origin as a browser sends it: write `http://` or `https://`, a host \
-             and an optional port, such as `http://127.0.0.1:5173`, with no path, no `/` at the \
-             end and no `*`"
+             in lowercase and an optional port, such as `http://127.0.0.1:5173`, with no path, \
+             no `/` at the end and no `*`"
         ))
     };
     let (rest, default) = match (
@@ -97,23 +101,19 @@ fn origin(value: &str) -> Result<(), String> {
         (_, Some(rest)) => (rest, "443"),
         _ => return refuse(),
     };
+    let forbidden = |c: char| {
+        "/?#@*".contains(c) || c.is_whitespace() || c.is_control() || c.is_ascii_uppercase()
+    };
+    if rest.contains(forbidden) {
+        return refuse();
+    }
     let (host, port) = match rest.strip_prefix('[') {
-        // An IPv6 address.
-        Some(inner) => match inner.split_once(']') {
-            Some((address, after)) if !address.is_empty() => {
-                if !address
-                    .bytes()
-                    .all(|byte| byte.is_ascii_hexdigit() || b":.".contains(&byte))
-                    || address.bytes().any(|byte| byte.is_ascii_uppercase())
-                {
-                    return refuse();
-                }
-                match after {
-                    "" => ("[]", None),
-                    after => match after.strip_prefix(':') {
-                        Some(port) => ("[]", Some(port)),
-                        None => return refuse(),
-                    },
+        Some(bracketed) => match bracketed.split_once(']') {
+            Some((address, after)) if address.parse::<Ipv6Addr>().is_ok() => {
+                match after.strip_prefix(':') {
+                    Some(port) => (address, Some(port)),
+                    None if after.is_empty() => (address, None),
+                    None => return refuse(),
                 }
             }
             _ => return refuse(),
@@ -123,26 +123,17 @@ fn origin(value: &str) -> Result<(), String> {
             None => (rest, None),
         },
     };
-    let label = |label: &str| {
-        !label.is_empty()
-            && (label.bytes())
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    let port_ok = |port: &str| {
+        (1..=5).contains(&port.len())
+            && port.bytes().all(|byte| byte.is_ascii_digit())
+            && !port.starts_with('0')
+            && port.parse::<u16>().is_ok()
+            && port != default
     };
-    if host != "[]" && !host.split('.').all(label) {
-        return refuse();
-    }
-    match port {
-        None => Ok(()),
-        Some(port)
-            if !port.is_empty()
-                && !port.starts_with('0')
-                && port.bytes().all(|byte| byte.is_ascii_digit())
-                && port.parse::<u16>().is_ok()
-                && port != default =>
-        {
-            Ok(())
-        }
-        Some(_) => refuse(),
+    match (host.is_empty(), port) {
+        (false, None) => Ok(()),
+        (false, Some(port)) if port_ok(port) => Ok(()),
+        _ => refuse(),
     }
 }
 
@@ -591,41 +582,62 @@ mod tests {
     use super::origin;
 
     #[test]
-    fn accepts_origins_only_as_browsers_send_them() {
+    fn accepts_origins_only_in_a_form_browsers_send() {
         for good in [
             "http://127.0.0.1:5173",
             "https://example.com",
             "http://localhost",
+            "http://example.com.",
+            "http://example.com.:8080",
             "http://[::1]:8080",
+            "https://[2001:db8::1]",
             "https://a-b.example.com:8443",
+            "http://xn--bcher-kva.example",
+            "http://1:65535",
         ] {
             assert_eq!(origin(good), Ok(()), "{good}");
         }
         for bad in [
-            "*",
+            // Scheme.
             "null",
             "",
+            "*",
             "file:///",
+            "ws://example.com",
+            "HTTP://example.com",
             "127.0.0.1:5173",
-            "http://*.example.com",
+            // No host.
+            "http://",
+            "http://:8080",
+            // Forbidden characters after the scheme.
             "http://127.0.0.1:5173/",
             "http://127.0.0.1:5173/path",
-            "http://Example.com",
-            "HTTP://example.com",
+            "http://example.com?x",
+            "http://example.com#x",
             "http://user@example.com",
-            "http://example.com:80",
-            "https://example.com:443",
+            "http://*.example.com",
+            "http://exa mple.com",
+            "http://example.com\t",
+            "http://example.com\u{7f}",
+            "http://Example.com",
+            // Ports.
             "http://example.com:",
+            "http://example.com:0",
             "http://example.com:08080",
             "http://example.com:65536",
-            "http://example..com",
-            "http://",
+            "http://example.com:123456",
+            "http://example.com:+80",
+            "http://example.com:80",
+            "https://example.com:443",
+            "http://a:b:80",
+            // Brackets.
             "http://[::1",
             "http://[]:80",
+            "http://[abc]",
             "http://[::1]x",
-            "ws://example.com",
+            "http://[::1]:80",
         ] {
-            assert!(origin(bad).is_err(), "{bad}");
+            assert!(origin(bad).is_err(), "{bad:?}");
         }
     }
 }

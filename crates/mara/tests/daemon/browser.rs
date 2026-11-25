@@ -72,6 +72,7 @@ impl Http {
             "{self:?}"
         );
         assert_eq!(self.header("vary"), Some("Origin"), "{self:?}");
+        assert_eq!(self.access_control().len(), 1, "{self:?}");
     }
 }
 
@@ -176,7 +177,11 @@ impl Browser {
 
     /// Starts the listening daemon with `env`.
     fn with_env(env: &[(&str, &str)]) -> Browser {
-        let test = Test::new();
+        Browser::in_test(Test::new(), env)
+    }
+
+    /// Starts the listening daemon of `test` with `env`.
+    fn in_test(test: Test, env: &[(&str, &str)]) -> Browser {
         let projects = WORDS.map(|word| project(&test, &word.to_ascii_lowercase(), word));
         let mut browser = Browser {
             test,
@@ -293,7 +298,7 @@ impl Browser {
     /// is: with the CORS headers of an accepted response when `allowed` names its one allowed
     /// origin, and no `Access-Control-*` header otherwise. The daemon serves nothing, opens no
     /// session and changes no file of A, B or C.
-    fn refused(&self, case: &str, request: &Request, allowed: Option<&str>) {
+    fn refused(&self, case: &str, request: &Request, allowed: Option<&str>) -> Http {
         let nowhere = self.test.path().join("nowhere");
         let elsewhere = request.clone().field("project", json!(nowhere));
         let (files, sessions, served) = (self.files(), self.test.sessions(), self.served());
@@ -317,6 +322,7 @@ impl Browser {
             "{case}: a session was opened"
         );
         assert!(self.files() == files, "{case}: a file changed");
+        response
     }
 }
 
@@ -588,7 +594,10 @@ fn the_listener_serves_the_allowed_origins_on_the_allowed_projects() {
         "--body",
         "Text.",
     ];
-    assert_eq!(response.result(), browser.direct(&copy, &args));
+    let result = response.result();
+    assert_eq!(result["error"]["code"], "invalid-argument", "{result}");
+    assert_eq!(response.json()["status"], 2, "{response:?}");
+    assert_eq!(result, browser.direct(&copy, &args));
     let mut after = BTreeMap::new();
     collect(browser.b(), &mut after);
     assert!(after == b_files, "B changed");
@@ -626,7 +635,9 @@ fn every_unauthorized_request_is_refused_alike() {
             },
         ),
     ] {
-        browser.refused(case, &request, Some(ORIGIN));
+        let response = browser.refused(case, &request, Some(ORIGIN));
+        assert_eq!(response.status, 401, "{case}: {response:?}");
+        assert_eq!(response.json(), token_refusal(), "{case}");
     }
 
     browser.refused("origin left out", &read.clone().without("Origin"), None);
@@ -683,7 +694,8 @@ fn every_unauthorized_request_is_refused_alike() {
     };
     let allowed = browser.send(&preflight);
     assert_eq!(allowed.status, 204, "{allowed:?}");
-    allowed.allows(ORIGIN);
+    assert_eq!(allowed.header("access-control-allow-origin"), Some(ORIGIN));
+    assert_eq!(allowed.header("vary"), Some("Origin"));
     assert_eq!(allowed.header("access-control-allow-methods"), Some("POST"));
     let headers = allowed
         .header("access-control-allow-headers")
@@ -693,10 +705,13 @@ fn every_unauthorized_request_is_refused_alike() {
         headers.contains("authorization") && headers.contains("content-type"),
         "{headers}"
     );
+    assert_eq!(allowed.header("access-control-max-age"), Some("600"));
+    let served = browser.served();
     let other = browser.send(&preflight.clone().from(THIRD));
     assert!((400..500).contains(&other.status), "{other:?}");
     assert!(other.access_control().is_empty(), "{other:?}");
     assert_eq!(browser.test.sessions(), sessions);
+    assert_eq!(browser.served(), served);
 }
 
 #[test]
@@ -779,6 +794,7 @@ fn a_start_while_the_listener_runs_changes_nothing() {
             let request = browser.read().from(origin).field("project", json!(root));
             let response = browser.served_by_daemon(&request);
             assert_eq!(response.result(), browser.direct(root, &["item", "list"]));
+            response.allows(origin);
         }
     }
 }
@@ -793,21 +809,26 @@ fn the_listener_outlives_the_idle_period_and_ends_with_stop() {
     assert_eq!(browser.test.sessions(), Vec::<PathBuf>::new());
     assert_eq!(browser.served_by_daemon(&browser.read()).result(), expected);
 
+    // The token is in no file of the test, while the daemon runs and after it stopped: its
+    // runtime directory, `HOME` and `TMPDIR` are in it.
+    let no_file_holds = |token: &[u8]| {
+        let mut files = BTreeMap::new();
+        collect(browser.test.path(), &mut files);
+        for (path, bytes) in &files {
+            assert!(
+                !bytes.windows(token.len()).any(|window| window == token),
+                "{path:?}"
+            );
+        }
+    };
+    no_file_holds(browser.token.as_bytes());
     browser.test.run(&["daemon", "stop"]).succeeded();
+    assert_eq!(browser.test.daemons(), Vec::<u32>::new(), "the daemon runs");
     let error = TcpStream::connect(("127.0.0.1", browser.port))
         .map(drop)
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::ConnectionRefused);
-    // The token is in no file of the test: its runtime directory, `HOME` and `TMPDIR` are in it.
-    let mut files = BTreeMap::new();
-    collect(browser.test.path(), &mut files);
-    let token = browser.token.as_bytes();
-    for (path, bytes) in &files {
-        assert!(
-            !bytes.windows(token.len()).any(|window| window == token),
-            "{path:?}"
-        );
-    }
+    no_file_holds(browser.token.as_bytes());
 
     // The previous run's token, to a new listening daemon.
     let started = browser.start(&browser.options(), &[]).json();
@@ -817,10 +838,18 @@ fn the_listener_outlives_the_idle_period_and_ends_with_stop() {
     let stale = browser.read();
     let response = exchange(port, &stale.bytes(port));
     assert_eq!(response.status, 401, "{response:?}");
+    assert_eq!(response.json(), token_refusal());
     response.allows(ORIGIN);
     let elsewhere = stale.field("project", json!(browser.test.path().join("nowhere")));
     assert_eq!(response, exchange(port, &elsewhere.bytes(port)));
+    let status = browser.test.status();
+    assert_eq!(
+        (&status["served"], &status["sessions"]),
+        (&json!(0), &json!([]))
+    );
+    let pid = status["pid"].as_u64().unwrap();
     browser.test.run(&["daemon", "stop"]).succeeded();
+    assert_eq!(browser.test.daemons(), Vec::<u32>::new(), "{pid} runs");
 
     // The next daemon started on demand does not listen.
     browser
@@ -830,4 +859,95 @@ fn the_listener_outlives_the_idle_period_and_ends_with_stop() {
     let pid = browser.test.wait_for_daemon();
     assert_eq!(listening(pid), Vec::<String>::new());
     browser.test.run(&["daemon", "stop"]).succeeded();
+    assert_eq!(browser.test.daemons(), Vec::<u32>::new(), "{pid} runs");
+}
+
+/// The body of a refusal for the token.
+fn token_refusal() -> Value {
+    json!({
+        "version": 1,
+        "error": "refused",
+        "message": "the request carries no `Authorization: Bearer` header with this daemon's token",
+    })
+}
+
+#[test]
+fn a_body_shorter_than_its_length_is_malformed() {
+    let browser = Browser::new();
+    let request = browser.read();
+    let mut bytes = request.bytes(browser.port);
+    // Declares one byte more than it sends, then ends its side of the connection.
+    let declared = format!("Content-Length: {}", request.body.len());
+    let longer = format!("Content-Length: {}", request.body.len() + 1);
+    let text = String::from_utf8(bytes)
+        .unwrap()
+        .replace(&declared, &longer);
+    bytes = text.into_bytes();
+    let mut stream = TcpStream::connect(("127.0.0.1", browser.port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    stream.write_all(&bytes).unwrap();
+    stream.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).unwrap();
+    assert!(answer.starts_with("HTTP/1.1 400 "), "{answer}");
+    assert!(
+        answer.contains("\"error\":\"malformed-request\""),
+        "{answer}"
+    );
+    assert_eq!(browser.test.sessions(), Vec::<PathBuf>::new());
+}
+
+/// A write whose answer is not yet sent when `mara daemon stop` arrives: the daemon sends it
+/// whole before it exits (DES-DAEMON-LIFECYCLE). The listener holds the answer at the pause point
+/// `MARA_TEST_PAUSE_ANSWER` until the daemon has removed its socket, which it does only once it
+/// stops; then a daemon that no longer counted the write would exit at once.
+#[cfg(debug_assertions)]
+#[test]
+fn a_write_whose_answer_is_unsent_at_stop_gets_it_before_the_daemon_exits() {
+    let test = Test::new();
+    let pauses = test.path().join("pauses");
+    fs::create_dir(&pauses).unwrap();
+    let (socket, _) = test.paths_of(&mara());
+    let browser = Browser::in_test(
+        test,
+        &[("MARA_TEST_PAUSE_ANSWER", pauses.to_str().unwrap())],
+    );
+    let write = browser.request(
+        &["item", "update"],
+        &["REQ-ALPHA"],
+        &[["title", "Alpha changed"]],
+    );
+    let (port, bytes) = (browser.port, write.bytes(browser.port));
+    let writing = thread::spawn(move || exchange(port, &bytes));
+    let paused = pauses.join("paused");
+    wait_until("the answer is held", || paused.exists());
+    let stopping = browser.test.spawn(&mara(), &["daemon", "stop"], &[]);
+    wait_until("the daemon removes its socket", || !socket.exists());
+    fs::remove_file(&paused).unwrap();
+    let response = writing.join().unwrap();
+    response.allows(ORIGIN);
+    assert_eq!(
+        response.result()["item"]["title"],
+        "Alpha changed",
+        "{response:?}"
+    );
+    let document = fs::read_to_string(browser.a().join("docs/reqs.mara.md")).unwrap();
+    assert!(document.contains("Alpha changed"), "{document}");
+    super::finish(stopping).succeeded();
+    assert_eq!(browser.test.daemons(), Vec::<u32>::new());
+}
+
+/// Waits until `done` holds, at most 10 s.
+#[cfg(debug_assertions)]
+fn wait_until(what: &str, done: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + super::WAIT;
+    while !done() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what}: not within 10 s"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
 }
