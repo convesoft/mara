@@ -15,3 +15,6 @@
 /.nx/polygraph
 /.nx/self-healing
 /.nx/migrate-runs
+
+# The browser package's WebAssembly module, which `nx run mara-browser:build` copies there
+/packages/mara-browser/mara.wasm

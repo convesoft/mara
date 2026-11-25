@@ -7,18 +7,17 @@
 //! with the [`Basis`] of each file, and passes them to [`apply`].
 
 use std::fmt::Write as _;
-use std::fs::{self, File, Metadata, Permissions};
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use mara_engine::config::CONFIG_PATH;
 use mara_engine::diagnostic::Diagnostic;
 use mara_engine::work::WorkCounts;
 
-use crate::caller;
 use crate::hooks::{self, Hook};
 use crate::project::SYMBOLIC_LINK;
+use crate::system::{self, fs, fs::File, fs::Metadata, fs::Permissions};
 use crate::tracked::{self, Check, Reads, Tracked};
 
 /// How the name of a temporary file of a write starts. The inventory never takes such a file
@@ -130,7 +129,7 @@ impl Basis {
             &target.absolute,
             &metadata,
             None,
-            SystemTime::now(),
+            system::now(),
             work,
             &mut Reads::default(),
             false,
@@ -353,7 +352,7 @@ impl<'r> Target<'r> {
                     &self.absolute,
                     &metadata,
                     Some(version.clone()),
-                    SystemTime::now(),
+                    system::now(),
                     work,
                     &mut Reads::default(),
                     false,
@@ -440,7 +439,7 @@ impl<'r> Target<'r> {
         for (index, part) in parts[..parts.len() - 1].iter().enumerate() {
             let parent = path.clone();
             path.push(part);
-            match caller::create_dir(&path) {
+            match system::create_dir(&path) {
                 Ok(()) => sync_directory(&parent).map_err(Refusal::Io)?,
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     let shown = || parts[..=index].join("/");
@@ -463,11 +462,11 @@ impl<'r> Target<'r> {
 /// A new temporary file in `directory`. Its name is short whatever the target's, hidden, and
 /// does not end in `.mara.md`, so it is never read as an input.
 fn temporary_file(directory: &Path) -> Result<(PathBuf, File), Refusal> {
-    let process = std::process::id();
+    let process = system::process_id();
     let mut attempt = 0;
     loop {
         let path = directory.join(format!("{TEMPORARY_PREFIX}{process}-{attempt}"));
-        match caller::create_new(&path) {
+        match system::create_new(&path) {
             Ok(file) => return Ok((path, file)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists && attempt < 100 => {
                 attempt += 1;
@@ -482,13 +481,13 @@ fn sync_directory(directory: &Path) -> io::Result<()> {
     File::open(directory)?.sync_all()
 }
 
-/// A new MID from the current time and 80 bits of the operating system's random source
+/// A new MID from the current time and 80 bits of the system's random source
 /// (DES-ENGINE-BOUNDARY).
 pub fn new_mid() -> io::Result<String> {
-    let millis = SystemTime::now()
+    let millis = system::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_millis() as u64);
     let mut random = [0; 10];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    system::random(&mut random)?;
     Ok(mara_engine::write::mid(millis, random))
 }

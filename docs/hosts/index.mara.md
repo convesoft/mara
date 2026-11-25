@@ -171,6 +171,18 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 - It loads no grammar: every pinned grammar is `unavailable-grammar`, with a message that the browser cannot load grammars, and its language's files are scanned at the basic level ([DES-GRAMMAR-ASSETS](../code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
 - A Soufflé module that cannot be loaded or compiled is a fault without a line for each evaluation ([DES-RULE-EXECUTION](../rules/evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).
 - Export returns the change set and leaves the workspace as it is. The change set has one entry per path whose final contents differ from its supplied contents: the final bytes, or none for a removed file, and `base`, the BLAKE3 hash of the supplied bytes in the form of `revision` ([DES-READ-RESULTS](../retrieval/index.mara.md#01M7DMT8GAJCAFTW0Y2939JFF1)), or none for a file that was not supplied. A file written back to its supplied bytes, or added and removed again, has no entry.
+- A supplied path is relative to the project root, in the form a diagnostic gives it: `/` between parts, none of them empty, `.` or `..`, and no NUL. A path in another form, supplied twice or below another supplied file, a write to a directory or below a file, and a removal where no file is, are refused with `invalid-argument`; so are an unknown operation, arguments that are no object or that cannot be sent to the worker, and a `project` argument, since the workspace holds one project. `project init` and `project convert` fail before their arguments are read.
+- A request runs as its MCP tool's call does ([DES-MCP-SERVER](#01M7J0N6KRQ3NNE4Z6SPZ1VYRK)), against inputs that the workspace keeps between requests as a daemon's session keeps them ([DES-DAEMON-SESSIONS](../daemon/index.mara.md#01M7BF6GRG3NJZTA29TYVRVFT7)). The host library, the `mara` crate with the engine, is compiled to WebAssembly for it, not the engine alone. A read of contents from its memory counts no file read, as [VER-WORK-COUNTERS](../verification.mara.md#01M7BF6HGG6ET88HS641Y5676G) states for the contents that the caller supplies or writes.
+- The files lie in the module's memory ([ADR-MEMORY-FILESYSTEM](#01M896GJ66CDBJE28PYCWXYBC0)), which gives each change of a file's contents or of a directory's entries a new modification time from a logical clock starting at the Unix epoch: a stat shows every change, so a check settles what it read at once, whatever the worker's clock reads ([DES-INPUTS-AND-KEYS](../engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)). As a Git checkout, the memory holds no empty directory: a directory goes with its last file.
+- The browser package's JavaScript API, an ES module with its TypeScript declarations; every method but `close` returns a promise and throws nothing:
+
+| Call | Does |
+| --- | --- |
+| `createWorkspace(files)` | Starts a workspace in a dedicated worker of its own, which loads the package's WebAssembly module ([ADR-RAW-WASM-MODULE](#01M896GJAKXNE1E6VXT4JYD2WQ)). `files` is an iterable of `{path, contents}`, the contents a `Uint8Array` or an `ArrayBuffer`, which the call copies and leaves as they are |
+| `workspace.run(name, args, options)` | Runs the document operation whose MCP tool is `name` with the tool's arguments `args`, and resolves with the object that `--format json` prints. A failure rejects with a `MaraError` holding `code`, `message`, `diagnostics` and `reply`, the printed object. With `options.debugStats` true it resolves with `{result, stats}`, and a `MaraError` holds `stats` |
+| `workspace.write(path, contents)`, `workspace.remove(path)` | The caller's write and removal |
+| `workspace.export()` | Resolves with the change set in path order, each change `{path, contents, base}`: `contents` a `Uint8Array`, or `null` for a removed file, and `base` a string, or `null` for a file that was not supplied |
+| `workspace.close()` | Ends the worker; every later call rejects |
 
 ---
 
@@ -206,3 +218,38 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 - Chosen: `<group> <verb>` for every operation. Only `search` and `get` stay top-level, because they return items, narrative and code alike.
 - Rejected: a top-level `related`, as in 0.3.0. It lists relations from outside the `relation` group.
 - Rejected: `relation get`, as in 0.3.0. A relation is one row, which `relation list` already returns with its location.
+
+---
+
+<a id="01M896GJ66CDBJE28PYCWXYBC0"></a>
+
+### Run the host's own code on files in memory in the browser
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-MEMORY-FILESYSTEM |
+| Status | Accepted |
+| Justifies | [DES-BROWSER-WORKSPACE](#01M7JQJKGBJ7KQFM9PJV8RK8H7) |
+
+- Chosen during the rewrite on 2026-11-25 (mara-jptfbq): the browser workspace runs the `mara` library's operations, inventory and write procedure, built for `wasm32-unknown-unknown`. The part of `std::fs` that they use is replaced there by a filesystem in the module's memory (`mara::system`), which holds the workspace's files, and the worker supplies the time and the random bytes. A result is the CLI's by construction; that build leaves out only the daemon, MCP, grammars, downloads and Soufflé's process.
+- The module's instance holds one filesystem, so a worker holds one workspace for its life, as a process holds one filesystem: a second creation in one instance is refused with `invalid-argument`.
+- In memory, the worker serializes the requests, which stands for the write lock of DES-WRITE-PROCEDURE, and nothing is durable, so its syncs do nothing.
+- Rejected: a second host over the engine, with an inventory, operations and JSON of its own. It would repeat each operation and drift from the CLI's results.
+- Rejected: a filesystem handle passed through every host function. It changes every native call site for one host.
+- Rejected: `wasm32-wasip1` with a filesystem written in JavaScript. It adds a WASI runtime and a second implementation of files outside the module, and a target to the toolchain.
+
+---
+
+<a id="01M896GJAKXNE1E6VXT4JYD2WQ"></a>
+
+### Export plain functions from the browser's WebAssembly module
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-RAW-WASM-MODULE |
+| Status | Accepted |
+| Justifies | [DES-BROWSER-WORKSPACE](#01M7JQJKGBJ7KQFM9PJV8RK8H7) |
+
+- Chosen during the rewrite on 2026-11-25 (mara-jptfbq): the crate `mara-wasm`, a `cdylib` that Cargo builds for `wasm32-unknown-unknown`, exports `mara_alloc`, `mara_call`, `mara_answer` and `mara_answer_length` and imports `now` and `random` from the module `mara`. A call and its answer are frames in the module's memory: a JSON header's length as a 32-bit little-endian number, the header, then the bytes of the files that the header names by `at` and `length`. The package's worker writes and reads them itself. No tool but the `wasm32-unknown-unknown` target that `rust-toolchain.toml` pins builds the module.
+- Rejected: `wasm-bindgen` through nx-rust's `wasm-build` target. Its command-line tool must match the crate's version and be installed in every worktree and on CI, and it generates glue that the package would carry, for an interface of four functions.
+- Rejected: `wasm-pack`, whose organisation was sunset in 2025, and Emscripten, a second toolchain for the Rust code.

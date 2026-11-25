@@ -66,6 +66,12 @@ jobs:
       # The grammar that .mara/config.toml pins, which `mara:validate` needs (DES-GRAMMAR-ASSETS).
       - run: cargo run --locked --quiet --bin mara -- --no-daemon code add rust
 
+      # The browser of the host tests (VER-HOST-COMPARISON): the Chromium revision that the pinned
+      # Playwright names, which they launch by its path, from Playwright's download, with the
+      # system libraries it needs, into Playwright's per-user cache. Its headless shell is left out.
+      # Fetched on each run, never cached.
+      - run: pnpm exec playwright install --with-deps --no-shell chromium
+
       - run: pnpm run checks
         env:
           NX_DAEMON: "false"
