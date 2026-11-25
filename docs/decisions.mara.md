@@ -102,7 +102,7 @@
 - Rejected: one `files` entry per page. npm reads each as a pattern and left out `docs/[id].md`.
 - Known limit: a link that leaves `docs/` resolves against the package root. `../README.md` in the migration page reaches the package's `README.md`; `../scripts/build-souffle.sh` in the distribution page resolves to no file of the package.
 - Known limit: `.mara/` is not packed, so the packed `docs/` is read as files, not as a Mara project.
-- Known limit: on 2026-11-25 the dispatcher grows from 5 files, 8.1 kB packed and 22.3 kB unpacked, to 36 files, about 174 kB packed and 548 kB unpacked.
+- Known limit: on 2026-11-25 the dispatcher grows from 5 files, 8.1 kB packed and 22.3 kB unpacked, to 36 files, about 174 kB packed and 549 kB unpacked.
 
 ---
 
