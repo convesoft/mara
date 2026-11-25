@@ -131,7 +131,7 @@ Rust integration tests start each daemon from the test's temporary directory, ou
 | Case | Expectation |
 | --- | --- |
 | `mara daemon start --http` without `--allow-origin`, and without `--allow-project`; either option without `--http`; the origins `*`, `null`, `http://*.example.com`, `http://127.0.0.1:5173/`, `127.0.0.1:5173` and `file:///` | Rejected with `invalid-argument`, exit status 2; no daemon of the test runs |
-| A daemon started on demand by a CLI read; one started by `mara daemon start` | The daemon process has no listening TCP socket: none of its socket inodes in `/proc/<pid>/fd` is in the listening state in `/proc/net/tcp` or `/proc/net/tcp6` (on macOS, `lsof -a -p <pid> -iTCP -sTCP:LISTEN` lists none); `mara daemon status` prints no port or token |
+| A daemon started on demand by a CLI read; one started by `mara daemon start` | The daemon process has no listening TCP socket: none of its socket inodes in `/proc/<pid>/fd` is in the listening state in `/proc/net/tcp` or `/proc/net/tcp6` (on macOS, from mara-ag4ees, `lsof -a -p <pid> -iTCP -sTCP:LISTEN` lists none); `mara daemon status` prints no port or token |
 | The listening daemon | `start` prints a port and a token, which `status` prints again; each listening socket of the daemon is bound to `127.0.0.1` or `::1`; the accepted read and write return the result of CLI direct mode, with `Access-Control-Allow-Origin: http://127.0.0.1:5173` and `Vary: Origin` |
 | The accepted read from each allowed origin to each allowed project: four requests | Each returns the result of CLI direct mode for its project, with `Access-Control-Allow-Origin` naming its own origin |
 | An `OPTIONS` preflight without a token, asking for the method and headers of the accepted request, from the allowed origin and from `http://127.0.0.1:5174` | The first is allowed them for that origin; the second gets no `Access-Control-*` header; neither opens a session |
@@ -139,7 +139,7 @@ Rust integration tests start each daemon from the test's temporary directory, ou
 | `Origin` left out; given twice, once allowed; `null`, `https://127.0.0.1:5173`, `http://localhost:5173`, `http://127.0.0.1:5174`, `http://127.0.0.1:51730`, `http://127.0.0.1:5173.example.com` and `http://127.0.0.1:5173/` | Refused |
 | Project B; no project; `<A>/../<B>`; a symbolic link in A to B; a project nested in a directory of A; a regular file of A | Refused |
 | A symbolic link outside A to A | Served as A |
-| A write to A at the document path `../<B>/docs/x.mara.md` | Fails with `not-an-input`, as in CLI direct mode; B is byte-identical |
+| A write to A at the document path `../<B>/docs/x.mara.md` | Fails with `invalid-argument`, as in CLI direct mode; B is byte-identical |
 | `project init` and `project convert` of A; requests naming `daemon stop` and `code add` | Fail with `unavailable-operation`; nothing is written in A or in the grammar cache, and the daemon still runs |
 | While the listening daemon runs: `mara daemon start` with the same listener options | Exit status 0, printing the same port and token |
 | While the listening daemon runs: `mara daemon start` with a third `--allow-origin`; with `--allow-project <B>` added; with `--allow-project <C>` left out | Each fails with `daemon-running`, exit status 1; then `status` prints the same port and token, a request from the third origin and one for B are refused, and the four accepted reads above still return their results |

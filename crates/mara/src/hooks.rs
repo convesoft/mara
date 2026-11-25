@@ -3,7 +3,7 @@
 //! through [`value`], the one place that names the variables and the one `cfg(debug_assertions)`
 //! boundary: a release build reads none of them and holds none of their names. Each function
 //! takes the hook and acts only on what [`value`] gives, so in a release build none does anything.
-//! Public only for the binary crate, which reads [`path`] and [`number`].
+//! Public only for the binary crate, which reads [`path`] and [`number`] and pauses at [`pause`].
 
 use std::ffi::OsString;
 use std::fmt;
@@ -38,6 +38,9 @@ pub enum Hook {
     GrammarEvents,
     /// `MARA_TEST_GRAMMAR_CATALOG`: the catalog that `code add` reads instead of its own.
     GrammarCatalog,
+    /// `MARA_TEST_PAUSE_ANSWER`: the daemon's listener for browsers before it sends an
+    /// operation's answer.
+    PauseAnswer,
 }
 
 /// The value of `hook`'s variable when it is set and not empty; in a release build, never.
@@ -55,6 +58,7 @@ pub(crate) fn value(hook: Hook) -> Option<OsString> {
         Hook::GrammarLoadStall => "MARA_TEST_GRAMMAR_LOAD_STALL",
         Hook::GrammarEvents => "MARA_TEST_GRAMMAR_EVENTS",
         Hook::GrammarCatalog => "MARA_TEST_GRAMMAR_CATALOG",
+        Hook::PauseAnswer => "MARA_TEST_PAUSE_ANSWER",
     };
     std::env::var_os(name).filter(|value| !value.is_empty())
 }
@@ -77,7 +81,7 @@ pub fn number(hook: Hook) -> Option<u64> {
 
 /// A pause point: when `hook`'s variable names a directory, creates `paused` there, whole and
 /// holding `contents`, and waits until it is gone.
-pub(crate) fn pause(hook: Hook, contents: &str) -> io::Result<()> {
+pub fn pause(hook: Hook, contents: &str) -> io::Result<()> {
     static STAGED: AtomicU64 = AtomicU64::new(0);
     let Some(directory) = path(hook) else {
         return Ok(());

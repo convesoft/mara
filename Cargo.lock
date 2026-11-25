@@ -844,6 +844,7 @@ dependencies = [
  "blake3",
  "globset",
  "granit-parser",
+ "httparse",
  "ignore",
  "libc",
  "mara-engine",

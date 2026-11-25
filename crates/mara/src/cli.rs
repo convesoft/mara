@@ -186,6 +186,9 @@ pub enum Kind {
     /// `<name>=<value>` or `<name>=@<file>`, an input a request supplies: in MCP one object from
     /// each input's name to one value as a string or to a list of rows (DES-REQUEST-INPUTS).
     Inputs,
+    /// No value: `--<name>` alone, kept as an empty value. Only `daemon start` has one, and it
+    /// is no MCP tool.
+    Flag,
 }
 
 /// `--project <dir>`: the project root, relative to the working directory (DES-PROJECT-CONFIGURATION).
@@ -692,6 +695,10 @@ fn parse(arguments: &[OsString]) -> Result<(Option<&'static Operation>, Args), F
                 )));
             };
             let value = match inline {
+                Some(_) if option.kind == Kind::Flag => {
+                    return Err(Failure::rejected(format!("`--{name}` takes no value")));
+                }
+                None if option.kind == Kind::Flag => "",
                 Some(value) => value,
                 None => match iter.next() {
                     Some(value) => text(value)?,
@@ -772,7 +779,10 @@ fn describe_arguments(operation: &Operation) -> String {
 fn usage() -> String {
     let option = |option: &Opt| {
         let repeat = if option.repeatable { "..." } else { "" };
-        format!(" [--{} <{}>]{repeat}", option.name, option.value)
+        match option.kind {
+            Kind::Flag => format!(" [--{}]", option.name),
+            _ => format!(" [--{} <{}>]{repeat}", option.name, option.value),
+        }
     };
     let mut out = format!(
         "Usage: mara{}{} [--{DEBUG_STATS}] [--{NO_DAEMON}] <operation>\n       mara --{VERSION}\n\nOperations:\n",

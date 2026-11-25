@@ -186,6 +186,8 @@ fn tool(operation: &Operation, project: bool) -> Tool {
         let schema = match option.kind {
             Kind::Text => parameter("string", option.repeatable, option.help),
             Kind::Integer => parameter("integer", option.repeatable, option.help),
+            // No document operation has a flag.
+            Kind::Flag => parameter("boolean", option.repeatable, option.help),
             Kind::Inputs => json!({
                 "type": "object",
                 "additionalProperties": {

@@ -81,8 +81,8 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 - The daemon exits when its last session is dropped ([DES-IDLE-SESSIONS](#01M7CQ57TBWFN78CCMEAY6XFTF)), or after the idle period when it opened none, unless it listens for browsers ([DES-BROWSER-LISTENER](#01M7CQ57TJY788DMPBN4BX1SEM)). Without a session, the idle period is that of [DES-IDLE-SESSIONS](#01M7CQ57TBWFN78CCMEAY6XFTF), counted from its start or its last request; `status` and `stop` requests count as none, so a client watching the daemon does not keep it alive.
 - A client runs in direct mode, neither connecting to a daemon nor starting one, when `CI` is set to a non-empty value, `MARA_NO_DAEMON` is `1` or the direct-mode flag `--no-daemon` is given; `mara mcp --no-daemon` serves every call in-process.
 - `mara daemon status | start | stop` give explicit control. `status` prints whether the daemon of the client's build runs, its process ID, the root of each open session, and how many operation requests it has run and answered since it started, counted before each answer is sent. `start` and `stop` exit 0 also when there is nothing to do; `stop` returns once the daemon has exited. `CI` and `MARA_NO_DAEMON` do not affect them. Without a runtime directory, `start` fails with `io-error`, and `status` and `stop` report that no daemon runs.
-- `status --format json` prints `running`, `pid`, `sessions`, `served`, the count of operation requests, `socket`, `lock` and `unavailable`, the reason no daemon can run, or null for each that does not apply.
-- `daemon start` takes the lock and forks the daemon, which keeps it, starts a new session (`setsid`), points its standard streams at `/dev/null`, closes every other descriptor it inherited, and listens; `start` then returns. While another process holds the lock, `start` waits up to 10 s for a daemon of its build to answer, then fails with `io-error` naming the lock.
+- `status --format json` prints `running`, `pid`, `sessions`, `served`, the count of operation requests, `port` and `token` of its listener for browsers ([DES-BROWSER-LISTENER](#01M7CQ57TJY788DMPBN4BX1SEM)), `socket`, `lock` and `unavailable`, the reason no daemon can run, or null for each that does not apply.
+- `daemon start` takes the lock and forks the daemon, which keeps it, starts a new session (`setsid`), points its standard streams at `/dev/null`, closes every other descriptor it inherited but the socket of its listener for browsers ([DES-BROWSER-LISTENER](#01M7CQ57TJY788DMPBN4BX1SEM)), and listens; `start` then returns. While another process holds the lock, `start` waits up to 10 s for a daemon of its build to answer, then fails with `io-error` naming the lock.
 - `mara daemon stop` and SIGTERM, SIGINT or SIGHUP let the writes the daemon runs finish, end its other requests, and then end the daemon. It takes no new request meanwhile. It answers `stop` before it begins to stop, so the answer always comes before the process exits; a client whose connection closes after it asked for the stop reports the daemon stopped. Its rule evaluations end through their own cancellation, each killing its Soufflé child and removing its private directory before the daemon exits; a request ended so fails with `daemon-lost`. An evaluation is counted before it checks for the stop, and the daemon sets the stop before it reads the count: so either the daemon waits for the evaluation, or the evaluation sees the stop before it creates its private directory and creates none.
 
 ---
@@ -149,15 +149,59 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 | Satisfies | [REQ-BROWSER-ACCESS-AUTHORIZED](#01M7BF6GR0N9J4C8Z5QQ4CSCB7) |
 
 - The listener is off unless `mara daemon start --http --allow-origin <origin> --allow-project <path>` starts it. Both options repeat, and no wildcard origin is accepted.
-- The command prints the port and a token generated for that daemon run. `mara daemon status` prints them again.
+- The command prints the port and a token generated for that daemon run. `mara daemon status` prints them again; the JSON forms of both carry them as `port` and `token`.
 - Nothing is persisted, and a daemon started on demand never listens on HTTP.
 - A daemon that listens for browsers runs until `mara daemon stop`, because a browser cannot start one. Its idle sessions are still dropped.
-- `--http` needs both options, and neither is accepted without it. An allowed origin is written as a browser sends it: `http` or `https`, a host and an optional port, with no path, no trailing `/` and no `*`; `null` and anything else are rejected with `invalid-argument`.
+- `--http` needs both options, and neither is accepted without it. An `--allow-project` path is resolved from the working directory to its canonical root when the daemon starts; one that names no directory is rejected with `invalid-argument`. An allowed origin has a form a browser sends, or is rejected with `invalid-argument`: `http://` or `https://`, then a non-empty host and an optional `:port`; no `/`, `?`, `#`, `@`, `*`, whitespace, control character or ASCII uppercase letter after the scheme; a port of 1 to 5 decimal digits naming 1 to 65535, without a leading zero and not the scheme's default; a host that starts with `[` ends with `]` and is an IPv6 address. `null` is rejected. Nothing else of the host is checked, a final dot included: a request's `Origin` is compared byte for byte, so an origin no browser sends only never matches. Decided by the orchestrator on 2026-11-25 (mara-fkkcad).
 - The operating system assigns the port. The token holds at least 128 bits from the operating system's random generator.
 - A request carries the token as `Authorization: Bearer <token>` and names its project root. It is refused unless the token matches, compared in constant time, its one `Origin` header equals an allowed origin byte for byte, and the project's canonical root is that of an `--allow-project` path. Token and origin are checked before the path is used, and the project before anything in it is read. A refusal opens no session, and has the same status and body whatever the path names.
 - A response to an allowed origin carries `Access-Control-Allow-Origin` with that origin and `Vary: Origin`; a preflight from an allowed origin is answered without a token. A response to any other origin carries no `Access-Control-*` header.
 - The listener serves the document operations that native clients send to the daemon. `project init` and `project convert` fail with `unavailable-operation`; nothing else is served.
 - `mara daemon start --http …` while a daemon of the build runs prints that daemon's port and token and exits 0 when it listens with the same origins and projects, and otherwise fails with `daemon-running` and changes nothing.
+
+---
+
+<a id="01M893WC9SH24JB13G0RNC0XVR"></a>
+
+### Browser listener protocol
+
+| Type | Design |
+| --- | --- |
+| ID | DES-BROWSER-PROTOCOL |
+| Status | Accepted |
+| Decomposes | [DES-BROWSER-LISTENER](#01M7CQ57TJY788DMPBN4BX1SEM) |
+
+- Version 1 of the requests and answers between browsers and the listener. A request is HTTP/1.0 or HTTP/1.1, one per connection; every response is HTTP/1.1 and carries `Connection: close` and `Cache-Control: no-store`.
+- Each connection has a thread of its own, so the thread that accepts connections never waits for one. Each read and write of a connection has a limit of 10 s; the whole request has none.
+- A request is `POST /operation` with `Origin`, `Authorization: Bearer <token>` and a JSON body of at most 64 MiB framed by `Content-Length`; `Transfer-Encoding` is refused. A preflight, `OPTIONS` at any path, from an allowed origin is answered 204 with `Access-Control-Allow-Methods: POST`, `Access-Control-Allow-Headers: Authorization, Content-Type` and `Access-Control-Max-Age: 600`.
+- The body is the operation request of the native protocol ([DES-DAEMON-LIFECYCLE](#01M7BF6GR80WA207P4BBFWW671)) without the client's build and process values. Any other field, `build`, `cwd`, `umask` and `temp_dir` included, makes the request malformed.
+
+| Field | Value |
+| --- | --- |
+| `version` | 1 |
+| `request` | `operation` |
+| `project` | The project root, an absolute path |
+| `words` | The operation's words, such as `["item", "list"]` |
+| `arguments` | Its positional arguments as strings; `[]` when left out |
+| `options` | `[name, value]` pairs of strings, as the CLI reads them; `[]` when left out. `project` and `input` are malformed |
+| `supplied` | The inputs as `[name, {"inline": text}]` or `[name, {"rows": [...]}]`, as MCP passes them ([DES-REQUEST-INPUTS](../rules/index.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)); `[]` when left out |
+| `json` | Whether `text` is the JSON form; `true` when left out |
+
+- The daemon runs the request as a native operation request whose working directory and project are the project's canonical root, with the umask and temporary directory of the `daemon start --http` that started it. A browser therefore names no file of the daemon's: no `--input <name>=@<file>`, and every path an option names is resolved from the root.
+- The checks run in this order. The first that fails answers, and nothing after it is checked, nor any file of a project read; bytes that the client sent past the failed part may be read and dropped. Refusals of the origin, the token and the project have the code `refused` and a message that names the check, never a value of the request.
+
+| Step | Check | Refusal |
+| --- | --- | --- |
+| 1 | The head is HTTP/1.x, at most 64 KiB and 64 headers | 400 `malformed-request` |
+| 2 | One `Origin` header, an allowed origin | 403 `refused` |
+| 3 | One `Authorization` header with the token | 401 `refused` |
+| 4 | `POST /operation` | 404 `unknown-request` |
+| 5 | The body: exactly its `Content-Length` of bytes, JSON, fields, `version` and `request` | 400 `malformed-request` |
+| 6 | `project`: absolute, and its canonical root that of an `--allow-project` path | 403 `refused` |
+| 7 | `words`, `arguments`, `options` and `supplied`, checked as the daemon checks a native request | 400 `malformed-request` |
+
+- A refusal's body is `{"version": 1, "error": <code>, "message": <text>}`. A daemon that stops closes the listener within 100 ms and before it exits, so a connection after `mara daemon stop` returns is refused. A request it accepted meanwhile is refused with 503 `stopping` when it reaches the operation, or ends without an answer when the daemon exits first. A write's answer is sent before the daemon exits.
+- An answer is status 200 with the native operation answer: `version` 1, `pid`, `text` (a JSON string holding what the CLI prints, so the JSON object of [DES-OPERATIONS](../hosts/index.mara.md#01M7BF6H124JRJAQSYVQ21Q2JS) when `json`), `failed`, `status` (the CLI's exit status) and `work`, the session's work counts ([DES-PERFORMANCE-HARNESS](../performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)). An operation of Mara that a browser cannot run answers so with `unavailable-operation` and no work; words that name no operation are malformed.
 
 ---
 
@@ -242,3 +286,20 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 
 - Chosen: the user turns the listener on and names origins and projects when starting the daemon. Nothing is persisted.
 - Rejected: allowed origins in the project configuration. A cloned repository could grant a web origin access to itself.
+
+---
+
+<a id="01M893WJ3J77672SERBF6GFCSS"></a>
+
+### Parse requests of browsers with `httparse` on `std::net`
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-HTTPARSE-LISTENER |
+| Status | Accepted |
+| Justifies | [DES-BROWSER-PROTOCOL](#01M893WC9SH24JB13G0RNC0XVR) |
+
+- Chosen during the rewrite on 2026-11-25 (mara-fkkcad): HTTP/1.1 on `std::net`, one thread and one request per connection, each request's head parsed by `httparse`, which `ureq` already builds into `mara`. The listener serves a few local clients and needs no keep-alive, chunked bodies or asynchronous I/O.
+- Rejected: a parser of Mara's own. Request lines and headers are where hand-written parsers and browsers disagree.
+- Rejected: `tiny_http`. Three crates more (`ascii`, `chunked_transfer`, `httpdate`), and a keep-alive and thread pool of its own to work around.
+- Rejected: `hyper` or another asynchronous server. The daemon would start an async runtime, which only `mara mcp` starts ([ADR-RMCP-SERVER](../hosts/index.mara.md#01M7J0N6M9GKB113E35X5QPTZY)).
