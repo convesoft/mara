@@ -392,6 +392,9 @@ export async function startGitHub(t) {
       GH_REPO: "o/r",
       GH_NO_UPDATE_NOTIFIER: "1",
       GH_PROMPT_DISABLED: "1",
+      // gh sends telemetry from a detached process to https://cafe.github.com, which would reach
+      // the stub as a CONNECT, after or during the test's assertions.
+      GH_TELEMETRY: "false",
       GITHUB_API_URL: "http://api.github.localhost",
       http_proxy: proxy,
       HTTP_PROXY: proxy,
