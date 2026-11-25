@@ -1,6 +1,6 @@
 ---
 title: Set the workspace version to 0.4.0-rc.2
-status: todo
+status: in-progress
 type: task
 parent: mara-xzfeyj
 created_at: 2026-11-25T10:18:35Z
