@@ -97,11 +97,14 @@ function keptLicence(crate) {
 // The crates that Cargo builds for the workspace members `packageNames` on `triple`: their normal
 // and build dependencies, transitively, without workspace members. `cargo metadata` resolves the
 // features of the whole workspace, so the set holds every crate of the builds and may hold more.
+// It reads every crate that the workspace resolves for `triple`, so it fetches, at the versions and
+// checksums of `Cargo.lock`, those that no build of the job fetched, such as `mara-node`'s where only
+// `mara-wasm` was built.
 function buildCrates(root, packageNames, triple) {
   const metadata = JSON.parse(
     execFileSync(
       "cargo",
-      ["metadata", "--format-version", "1", "--locked", "--offline", "--filter-platform", triple],
+      ["metadata", "--format-version", "1", "--locked", "--filter-platform", triple],
       { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
     ),
   );
