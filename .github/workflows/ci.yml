@@ -74,24 +74,10 @@ jobs:
           key: souffle-wasm-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-souffle-wasm.sh', 'scripts/souffle-emscripten.patch', 'scripts/souffle-wasm-smoke.mjs', 'packages/mara-browser/output-limit.js') }}
 
       # The Emscripten SDK of the version that scripts/build-souffle-wasm.sh pins, only to build
-      # the module: emsdk's archive of that tag, checked against its SHA-256, which installs the
-      # SDK's own LLVM, Binaryen and Node. Only `emcc` and `emcmake` go on PATH, so the checks keep
-      # the job's Node. Moving the pin changes the version in the script and the SHA-256 here.
+      # the module.
       - name: Install the Emscripten SDK
         if: steps.souffle-wasm.outputs.cache-hit != 'true'
-        env:
-          EMSDK_SHA256: 4dd39842a0e2cbe3b829879575fbb3fa702b224a5fd4b898c4768c00354224f9
-        run: |
-          version=$(sed -n 's/^EMSDK_VERSION=//p' scripts/build-souffle-wasm.sh)
-          dir="$RUNNER_TEMP/emsdk"
-          mkdir -p "$dir"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/emsdk.tar.gz" \
-            "https://github.com/emscripten-core/emsdk/archive/refs/tags/$version.tar.gz"
-          echo "$EMSDK_SHA256  $RUNNER_TEMP/emsdk.tar.gz" | sha256sum -c --quiet -
-          tar -xzf "$RUNNER_TEMP/emsdk.tar.gz" -C "$dir" --strip-components=1
-          "$dir/emsdk" install "$version"
-          "$dir/emsdk" activate "$version"
-          echo "$dir/upstream/emscripten" >> "$GITHUB_PATH"
+        uses: ./.github/actions/emscripten
 
       # The grammar that .mara/config.toml pins, which `mara:validate` needs (DES-GRAMMAR-ASSETS).
       - run: cargo run --locked --quiet --bin mara -- --no-daemon code add rust

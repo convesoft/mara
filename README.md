@@ -13,7 +13,7 @@ npx -y @convesoft/mara@next --version                       # mara 0.4.0-rc.1
 npm install --save-dev --save-exact @convesoft/mara@next    # in a project; then npx mara …
 ```
 
-From `0.4.0-rc.2`, the package carries the documentation of its own version: `node_modules/@convesoft/mara/docs/`, starting at `docs/index.mara.md`.
+From `0.4.0-rc.2`, the package carries the documentation of its own version: `node_modules/@convesoft/mara/docs/`, starting at `docs/index.mara.md`. It is also the [Node library](docs/hosts/index.mara.md#01M89K1J6C11NRR3S3X1KXQ5AF), `import { createClient } from "@convesoft/mara"`, and the [browser workspace](docs/hosts/index.mara.md#01M7JQJKGBJ7KQFM9PJV8RK8H7), `import { createWorkspace } from "@convesoft/mara/browser"`.
 
 ## First steps
 
@@ -40,4 +40,4 @@ From `0.4.0-rc.2`, the package carries the documentation of its own version: `no
 
 ## Licence
 
-MIT or Apache-2.0, at your option.
+MIT or Apache-2.0, at your option. The packages also ship Soufflé, under UPL-1.0, and the licences of the crates compiled into them in `THIRD-PARTY-LICENSES`.

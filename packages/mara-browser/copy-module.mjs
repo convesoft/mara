@@ -1,7 +1,8 @@
 // `nx run mara-browser:build`: copies the WebAssembly module that `mara-wasm:build` wrote into
-// the package, with Soufflé's module that `cargo-workspace:souffle-wasm` built
-// (ADR-NX-RUST-TASKS), and the operations' types of the Node library, which the package shares
-// (DES-NODE-LIBRARY); mara-865a2e packs Soufflé's. Nx stores that build's module at `target/` of the workspace,
+// this folder for the host tests, with Soufflé's module that `cargo-workspace:souffle-wasm` built
+// (ADR-NX-RUST-TASKS), and the operations' types of the Node library, which the folder shares
+// (DES-NODE-LIBRARY). `mara-npm:pack-dispatcher` packs the same builds from where they were built
+// (DES-PACKAGES). Nx stores that build's module at `target/` of the workspace,
 // where nx-rust names its outputs. When Cargo writes elsewhere, through `CARGO_TARGET_DIR` or
 // `build.target-dir`, a build that Nx restored leaves the module only at `target/` and the one in
 // Cargo's directory may be older, so the copy refuses instead of taking a module that this build

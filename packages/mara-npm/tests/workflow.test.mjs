@@ -41,11 +41,36 @@ for (const job of ["build", "registry-check"]) {
   });
 }
 
+// The steps of a job, from the job's block of the workflow.
+function steps(job) {
+  return workflow.match(new RegExp(`^  ${job}:\\n((?:    .*\\n|\\n)*)`, "m"))?.[1] ?? "";
+}
+
+test("Pack dispatcher installs the Emscripten SDK before it packs", () => {
+  const block = steps("pack-dispatcher");
+  const sdk = block.indexOf("uses: ./.github/actions/emscripten");
+  assert.ok(sdk !== -1, "Pack dispatcher installs no Emscripten SDK");
+  assert.ok(
+    sdk < block.indexOf("mara-npm:pack-dispatcher"),
+    "the SDK is installed after the packing",
+  );
+});
+
+for (const job of ["build", "registry-check"]) {
+  test(`${job} installs Chromium before the install verification`, () => {
+    const block = steps(job);
+    const browser = block.indexOf("playwright install --with-deps --no-shell chromium");
+    assert.ok(browser !== -1, `${job} installs no Chromium`);
+    assert.ok(browser < block.indexOf("mara-npm:verify-install"), `${job} installs it too late`);
+  });
+}
+
 test("the workflow and its actions set none of the scripts' variables for tests", () => {
   const files = [
     path.join(root, ".github", "workflows", "release.yml"),
     path.join(root, ".github", "actions", "release-tarballs", "action.yml"),
     path.join(root, ".github", "actions", "setup", "action.yml"),
+    path.join(root, ".github", "actions", "emscripten", "action.yml"),
   ];
   for (const file of files) {
     const text = fs.readFileSync(file, "utf8");

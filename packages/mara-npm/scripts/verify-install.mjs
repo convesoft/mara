@@ -9,6 +9,9 @@
 // checkout's HEAD, so they run from a checkout of the packed commit whose `docs/` Git reports clean:
 // with --registry, the commit of that version.
 //
+// The browser case launches the Chromium of the checkout's Playwright, which
+// `pnpm exec playwright install chromium` installs.
+//
 // It prints one line per case and exits 1 if any fails, naming the command and its output.
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -25,6 +28,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -40,6 +44,7 @@ import {
   tarballProblems,
   workspace,
 } from "./packages.mjs";
+import { embeddedScript, projectFiles, startPackageServer, within } from "./verify-hosts.mjs";
 
 const { values: options } = parseArgs({
   options: { tarballs: { type: "string" }, registry: { type: "string" } },
@@ -478,6 +483,162 @@ async function main() {
     };
   });
 
+  // What `project validate` of the project prints with `--format json` in direct mode, which the
+  // Node library and the browser workspace must give.
+  const printed = run(["--no-daemon", "--format", "json", "project", "validate"], { cwd: project });
+  let expected;
+  try {
+    expected = JSON.parse(printed.result.stdout);
+  } catch {
+    // Reported by each case below.
+  }
+  const sameAsPrinted = (reply) =>
+    expected === undefined
+      ? "mara --format json project validate printed no JSON"
+      : JSON.stringify(reply) !== JSON.stringify(expected)
+        ? "the result differs from what mara --format json project validate prints"
+        : undefined;
+  const nativeDirectory = path.join(installed, "node_modules", ...platform.name.split("/"));
+
+  await verifyCase("the Node library runs an operation embedded through the addon", () => {
+    if (expected === undefined) {
+      return { problem: sameAsPrinted(), details: printed.details };
+    }
+    const script = path.join(installed, "embedded.mjs");
+    writeFileSync(script, embeddedScript);
+    const node = path.join(bin, "node");
+    const args = [script, project];
+    const result = spawnSync(node, args, {
+      cwd: installed,
+      env: environment,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    let answer;
+    try {
+      answer = JSON.parse(result.stdout);
+    } catch {
+      // Reported below.
+    }
+    const addon = path.join(nativeDirectory, "bin", "mara.node");
+    const reply = answer?.result ?? answer?.error?.reply;
+    return {
+      problem:
+        result.status !== 0 || answer === undefined
+          ? "expected exit 0 and the answer as JSON"
+          : !answer.mapped.includes(addon)
+            ? `the process mapped no ${addon}`
+            : !(answer.stats?.program_runs >= 1)
+              ? "the stats count no program run"
+              : sameAsPrinted(reply),
+      details: printed.details + describe(node, args, result),
+    };
+  });
+
+  await verifyCase(
+    `${dispatcherName}/browser runs an operation in a browser workspace in Chromium`,
+    async () => {
+      if (expected === undefined) {
+        return { problem: sameAsPrinted(), details: printed.details };
+      }
+      let chromium;
+      try {
+        ({ chromium } = createRequire(path.join(root, "package.json"))("playwright"));
+      } catch (error) {
+        throw new Error(
+          `Playwright's library is not installed in ${root}: run pnpm install --frozen-lockfile (${error.message})`,
+        );
+      }
+      const executablePath = chromium.executablePath();
+      if (!existsSync(executablePath)) {
+        throw new Error(
+          `no Chromium at ${executablePath}: run pnpm exec playwright install chromium`,
+        );
+      }
+      // The module that the package's manifest exports as `./browser`, as Node resolves it.
+      const packageRoot = path.join(installed, "node_modules", ...dispatcherName.split("/"));
+      const entry = createRequire(path.join(installed, "resolve.cjs")).resolve(
+        `${dispatcherName}/browser`,
+      );
+      const entryUrl = `/mara/${path.relative(packageRoot, entry).split(path.sep).join("/")}`;
+      const page = `<!doctype html>
+<html><head><meta charset="utf-8"><link rel="icon" href="data:,">
+<script type="importmap">${JSON.stringify({ imports: { [`${dispatcherName}/browser`]: entryUrl } })}</script>
+</head><body><script type="module">
+import(${JSON.stringify(`${dispatcherName}/browser`)}).then(
+  (module) => { window.mara = module; },
+  (error) => { window.loadError = String(error); },
+);
+</script></body></html>`;
+      const server = await startPackageServer(packageRoot, page);
+      let browser;
+      try {
+        browser = await within(chromium.launch({ executablePath }), 60_000, "Chromium's start");
+        const tab = await browser.newPage();
+        await tab.goto(server.url);
+        await tab.waitForFunction(
+          () => window.mara !== undefined || window.loadError !== undefined,
+        );
+        const answer = await within(
+          tab.evaluate(async (files) => {
+            if (window.loadError !== undefined) {
+              return { loadError: window.loadError };
+            }
+            const decode = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+            const exported = Object.keys(window.mara).filter(
+              (name) => typeof window.mara[name] === "function",
+            );
+            const workspace = await window.mara.createWorkspace(
+              files.map((file) => ({ path: file.path, contents: decode(file.contents) })),
+            );
+            try {
+              return {
+                exported,
+                ...(await workspace.run("project_validate", {}, { debugStats: true })),
+              };
+            } catch (error) {
+              return {
+                exported,
+                error: { code: error.code, message: error.message, reply: error.reply },
+                stats: error.stats,
+              };
+            } finally {
+              workspace.close();
+            }
+          }, projectFiles(project)),
+          120_000,
+          "the workspace's validation",
+        );
+        const missing = ["createWorkspace", "connectDaemon"].filter(
+          (name) => !answer.exported?.includes(name),
+        );
+        const served = ["browser/mara.wasm", "browser/souffle.wasm"].filter(
+          (file) => !server.requests.includes(`/mara/${file}`),
+        );
+        return {
+          problem:
+            answer.loadError !== undefined
+              ? `the page could not import ${dispatcherName}/browser: ${answer.loadError}`
+              : missing.length > 0
+                ? `${dispatcherName}/browser exports no ${missing.join(", ")}`
+                : served.length > 0
+                  ? `the page loaded no ${served.join(", ")} of the installed package`
+                  : !(answer.stats?.program_runs >= 1)
+                    ? "the stats count no program run of Soufflé's module"
+                    : sameAsPrinted(answer.result ?? answer.error?.reply),
+          details:
+            printed.details +
+            `  page: ${server.url}, ${dispatcherName}/browser at ${entryUrl}\n` +
+            `  requests: ${server.requests.join(" ")}\n` +
+            `  answer:\n${indent(`${JSON.stringify(answer, null, 2)}\n`)}`,
+        };
+      } finally {
+        await browser?.close();
+        await server.close();
+      }
+    },
+  );
+
   const refused = (env, description) => {
     const { result, details } = run(["--version"], { directory: withoutOptional, env });
     return {
@@ -584,7 +745,7 @@ async function main() {
 
   if (platform.libc === "glibc") {
     const directory = path.join(installed, "node_modules", ...platform.name.split("/"), "bin");
-    for (const binary of ["mara", "souffle"]) {
+    for (const binary of ["mara", "souffle", "mara.node"]) {
       await verifyCase(`bin/${binary} needs no GLIBC_ version above ${minimumGlibc}`, () => {
         const file = path.join(directory, binary);
         const symbols = execFileSync("objdump", ["-T", file], {

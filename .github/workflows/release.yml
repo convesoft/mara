@@ -67,18 +67,21 @@ jobs:
   pack-dispatcher:
     name: Pack dispatcher
     needs: prepare
-    runs-on: ubuntu-24.04
+    # The image on which CI builds Soufflé's WebAssembly module with the same script.
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
-      # nx-rust builds the project graph with cargo, and the packaging script reads the version
-      # with `cargo metadata`, so the pinned toolchain is installed although nothing is compiled.
       - uses: ./.github/actions/setup
+      - uses: ./.github/actions/emscripten
+      # Builds the engine's WebAssembly module (`mara-wasm:build`, release, for
+      # wasm32-unknown-unknown) and, through `cargo-workspace:souffle-wasm`, Soufflé's from source,
+      # since no cache is restored, then packs the dispatcher with both.
       - run: pnpm nx run mara-npm:pack-dispatcher --output-style=static
         env:
           NX_DAEMON: "false"
@@ -109,11 +112,13 @@ jobs:
         with:
           name: npm-dispatcher
           path: dist/npm
-      # Builds `mara` and, through `cargo-workspace:souffle`, Soufflé from source, since no cache is
-      # restored, then packs the native package.
+      # Builds `mara`, the Node addon `mara-node` and, through `cargo-workspace:souffle`, Soufflé
+      # from source, since no cache is restored, then packs the native package.
       - run: pnpm nx run mara-npm:pack-native:release --output-style=static
         env:
           NX_DAEMON: "false"
+      # The browser of the install verification's browser case, as CI installs it.
+      - run: pnpm exec playwright install --with-deps --no-shell chromium
       - run: pnpm nx run mara-npm:verify-install --output-style=static
         env:
           NX_DAEMON: "false"
@@ -257,6 +262,8 @@ jobs:
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: .github/scripts/release-npx-check.sh
+      # The browser of the install verification's browser case, as CI installs it.
+      - run: pnpm exec playwright install --with-deps --no-shell chromium
       - run: pnpm nx run mara-npm:verify-install "--registry=$VERSION" --output-style=static
         env:
           NX_DAEMON: "false"
