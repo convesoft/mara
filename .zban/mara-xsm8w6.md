@@ -1,6 +1,6 @@
 ---
 title: Soufflé in the browser worker
-status: todo
+status: in-progress
 type: feature
 parent: mara-xzfeyj
 blocked_by:
