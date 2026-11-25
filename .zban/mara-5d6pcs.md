@@ -23,3 +23,5 @@ The audit also reports mara-fwy8zs and mara-j6vpbt as worse after alpha.5: `test
 
 - [ ] `tests/performance` uses `support/requests.rs` for usage and for the MCP form of a call; the 25-operation list and `arguments` are gone
 - [ ] One helper in `tests/support/` installs a fixture grammar; the four copies use it, and no test names a fixture version beside `FIXTURE_VERSIONS`
+
+Audit note (2026-11-25, post-mara-xzfeyj at `4cbcf26`, Finding #11): `crates/mara/tests/hosts/fixtures.rs:85-186` added a fifth copy of fixture-grammar checksum/pinning logic; fold it in here too.
